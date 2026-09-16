@@ -3534,7 +3534,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   // UI
   setActiveMediaTab: (tab) => set({ activeMediaTab: tab }),
   setActivePropertiesTab: (tab) => set({ activePropertiesTab: tab }),
-  setShowExportModal: (show) => set({ showExportModal: show }),
+  setShowExportModal: (show) => {
+    if (show) {
+      if (get().isPlaying) get().pause();
+      setTrimPreviewTime(null);
+      get().selectSpeedFrame(null, null);
+    }
+    set({ showExportModal: show });
+  },
   setShowScopes: (show) => set((state) => ({ showScopes: show, scopeSettings: { ...state.scopeSettings, enabled: show } })),
   setIsExporting: (isExporting) => set({ isExporting }),
   setExportFps: (exportFps) => set({ exportFps }),
@@ -5270,7 +5277,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedSpeedFrame: { clipId: clip.id, frameId: newFrameId },
     });
 
-    setTrimPreviewTime(clip.startTime + offset);
+    setPlaybackTime(clip.startTime + offset);
+    setTrimPreviewTime(null);
     get().saveSnapshot('Add Speed Frame');
   },
 

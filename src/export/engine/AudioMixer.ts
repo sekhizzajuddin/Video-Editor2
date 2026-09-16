@@ -181,7 +181,10 @@ export class AudioMixer {
                   segSource.buffer = buffer as AudioBuffer;
                   segSource.playbackRate.value = seg.speed;
                   segSource.connect(vocalF1);
-                  segSource.start(segTimelineStart, segSourceOffset, clampedSourceDur);
+                  const bufDur = (buffer as AudioBuffer).duration;
+                  const maxSafeDur = Math.max(0.001, bufDur - segSourceOffset - 0.0001);
+                  const safeDur = Math.min(clampedSourceDur, maxSafeDur);
+                  segSource.start(segTimelineStart, segSourceOffset, safeDur);
                 }
               } catch (segErr) {
                 console.warn(`AudioMixer: Failed to schedule speed segment ${seg.index}`, segErr);

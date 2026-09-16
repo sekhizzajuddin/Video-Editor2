@@ -73,7 +73,8 @@ function getSpeedRampMediaTime(
   const speed = clip.speed ?? 1;
   const ramp = clip.speedRamp;
   if ((!ramp || ramp.length < 2) && (!clip.speedFrames || clip.speedFrames.length === 0)) {
-    return elapsed * speed + trim;
+    const direct = elapsed * speed + trim;
+    return Number.isFinite(direct) ? direct : trim;
   }
   // Use the SAME engine as the preview (`getMediaTimeForClip`): the previous
   // hand-rolled linear scan ignored the clip's trim offset and used an
@@ -82,7 +83,7 @@ function getSpeedRampMediaTime(
   // speedRamp.ts is pure math — no DOM/worker dependencies — so sharing the
   // exact mapping costs nothing and guarantees preview/export consistency.
   try {
-    return getMediaTimeForClip(
+    const res = getMediaTimeForClip(
       {
         id: clip.id ?? '',
         startTime: clip.startTime,
@@ -95,8 +96,10 @@ function getSpeedRampMediaTime(
       },
       currentTime
     );
+    return Number.isFinite(res) ? res : (elapsed * speed + trim);
   } catch {
-    return elapsed * speed + trim;
+    const fallback = elapsed * speed + trim;
+    return Number.isFinite(fallback) ? fallback : trim;
   }
 }
 
@@ -599,11 +602,12 @@ export class FrameScheduler {
               Math.max(timestampSeconds, clip.startTime),
               clip.startTime + clip.duration
             ));
+            const safeTimeSeconds = Number.isFinite(localTimeSeconds) ? Math.max(0, localTimeSeconds) : 0;
 
             pending.push(
               (async () => {
                 try {
-                  const frame = await decoder?.getFrameAt(localTimeSeconds * 1_000_000);
+                  const frame = await decoder?.getFrameAt(safeTimeSeconds * 1_000_000);
                   if (frame) {
                     layers.push({
                       type: 'video',

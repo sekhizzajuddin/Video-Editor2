@@ -13,6 +13,7 @@ import { defaultExportPipeline } from './ExportPipeline';
 import { promoteCanvasToExportSize } from './exportCanvasSize';
 import { useEditorStore } from '@/store/editorStore';
 import { clearNormalizedCache } from './engine/VideoNormalizer';
+import { setTrimPreviewTime } from '@/utils/playbackClock';
 
 export interface Resolution {
   width: number;
@@ -69,6 +70,11 @@ export function useExportEngine() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const startExport = useCallback(async (config: ExportWorkerConfig, fileHandle?: FileSystemFileHandle | null) => {
+    const store = useEditorStore.getState();
+    if (store.isPlaying) store.pause();
+    setTrimPreviewTime(null);
+    store.selectSpeedFrame(null, null);
+
     if (exporterRef.current) {
       exporterRef.current.dispose();
       exporterRef.current = null;

@@ -782,9 +782,32 @@ function DesktopApp() {
         <AspectRatioConflictModal />
       </Suspense>
       {showExportModal && (
-        <Suspense fallback={null}>
-          <ExportModal />
-        </Suspense>
+        <ErrorBoundary
+          fallback={
+            <div className="fixed inset-0 bg-black/75 z-[100] flex items-center justify-center p-4">
+              <div className="bg-[#2d2d2d] rounded-xl p-6 max-w-sm border border-red-500/40 text-center space-y-4 shadow-2xl">
+                <div className="w-10 h-10 mx-auto rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 font-bold">
+                  !
+                </div>
+                <h3 className="text-white font-semibold text-sm">Export Window Error</h3>
+                <p className="text-xs text-[#a0a0a0] leading-relaxed">
+                  The export dialog encountered an issue. Your project changes are safely saved.
+                </p>
+                <button
+                  onClick={() => useEditorStore.getState().setShowExportModal(false)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs rounded-lg font-medium transition-colors w-full"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          }
+          key="export-modal"
+        >
+          <Suspense fallback={null}>
+            <ExportModal />
+          </Suspense>
+        </ErrorBoundary>
       )}
       {showSettingsModal && (
         <Suspense fallback={null}>

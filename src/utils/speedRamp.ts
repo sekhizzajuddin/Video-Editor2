@@ -452,15 +452,18 @@ export function getMediaTimeForClip(
     const segments = getSpeedFrameSegments(clip);
     for (const seg of segments) {
       if (elapsedTimeline >= seg.startOffset && elapsedTimeline <= seg.endOffset) {
-        return seg.sourceStart + (elapsedTimeline - seg.startOffset) * seg.speed;
+        const val = seg.sourceStart + (elapsedTimeline - seg.startOffset) * seg.speed;
+        return Number.isFinite(val) ? val : clip.trimStart;
       }
     }
     if (segments.length > 0) {
       if (elapsedTimeline < segments[0].startOffset) {
-        return segments[0].sourceStart + (elapsedTimeline - segments[0].startOffset) * segments[0].speed;
+        const val = segments[0].sourceStart + (elapsedTimeline - segments[0].startOffset) * segments[0].speed;
+        return Number.isFinite(val) ? val : clip.trimStart;
       }
       const lastSeg = segments[segments.length - 1];
-      return lastSeg.sourceStart + (elapsedTimeline - lastSeg.startOffset) * lastSeg.speed;
+      const val = lastSeg.sourceStart + (elapsedTimeline - lastSeg.startOffset) * lastSeg.speed;
+      return Number.isFinite(val) ? val : clip.trimStart;
     }
   }
 
@@ -753,10 +756,13 @@ export function getSpeedFrameSegments(
 ): SpeedFrameSegment[] {
   if (!clip.speedFrames || clip.speedFrames.length === 0) return [];
 
-  const sortedFrames = [...clip.speedFrames].sort((a, b) => a.timelineOffset - b.timelineOffset);
-  const s0 = clip.trimStart;
-  const sEnd = getClipSourceEnd(clip, sourceDuration);
-  const d = Math.max(0.05, clip.duration);
+  const sortedFrames = [...clip.speedFrames]
+    .filter((f) => f && Number.isFinite(f.timelineOffset) && Number.isFinite(f.sourceTime))
+    .sort((a, b) => a.timelineOffset - b.timelineOffset);
+  const s0 = Number.isFinite(clip.trimStart) ? clip.trimStart : 0;
+  const rawSEnd = getClipSourceEnd(clip, sourceDuration);
+  const d = Math.max(0.05, Number.isFinite(clip.duration) ? clip.duration : 1);
+  const sEnd = Number.isFinite(rawSEnd) ? rawSEnd : s0 + d;
 
   // Boundaries:
   // Boundary 0: clip start edge (offset 0, source s0)
@@ -774,7 +780,8 @@ export function getSpeedFrameSegments(
     const p2 = points[i + 1];
     const deltaT = Math.max(0.01, p2.timelineOffset - p1.timelineOffset);
     const deltaS = Math.max(0.001, p2.sourceTime - p1.sourceTime);
-    const speed = Math.min(50, Math.max(0.05, deltaS / deltaT));
+    const rawSpeed = deltaS / deltaT;
+    const speed = Number.isFinite(rawSpeed) ? Math.min(50, Math.max(0.05, rawSpeed)) : 1.0;
 
     segments.push({
       index: i,

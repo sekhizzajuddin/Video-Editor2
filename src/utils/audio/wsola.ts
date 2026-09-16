@@ -200,8 +200,8 @@ export function timeStretchAudioBuffer(
     stretchedChannels.push(output);
   }
 
-  const newRegionLen = stretchedChannels[0].length;
-  const outBuffer = factory(numChannels, newRegionLen, sr);
+  const newRegionLen = Math.max(1, stretchedChannels[0]?.length || 1);
+  const outBuffer = factory(Math.max(1, numChannels), newRegionLen, sr);
 
   for (let ch = 0; ch < numChannels; ch++) {
     outBuffer.getChannelData(ch).set(stretchedChannels[ch]);
