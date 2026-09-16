@@ -1308,11 +1308,14 @@ export async function renderCanvasEngine({
       if (mediaItem.type === 'video') {
         videoEl = videoElements.get(clip.id) || null;
         if ((!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) && clip.splitGroupId) {
-          // Sibling fallback: look for any loaded video element with the same splitGroupId or mediaId on the track
+          // Sibling fallback: reuse a loaded element that belongs to the SAME
+          // split chain. The previous version also accepted "same mediaId on the
+          // same track", which could adopt an unrelated segment's element and
+          // make the wrong frames/seek positions appear after a split.
           for (const [otherId, otherEl] of videoElements.entries()) {
             if (otherEl && otherEl.readyState >= 1 && otherEl.videoWidth > 0) {
               const otherClip = tracks.flatMap((t: any) => t.clips || []).find((c: any) => c.id === otherId);
-              if (otherClip && (otherClip.splitGroupId === clip.splitGroupId || (otherClip.mediaId === clip.mediaId && otherClip.trackId === clip.trackId))) {
+              if (otherClip && otherClip.splitGroupId === clip.splitGroupId) {
                 videoEl = otherEl;
                 videoElements.set(clip.id, otherEl);
                 break;

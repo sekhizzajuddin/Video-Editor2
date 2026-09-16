@@ -26,6 +26,7 @@ const setAudioParam = (param: AudioParam, target: number, ctxTime: number, rampT
 
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedForClipAtTime } from '@/utils/speedRamp';
+import { buildSplitIdentities } from '@/utils/splitClipIdentity';
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
@@ -1105,6 +1106,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     const trimCt = getTrimPreviewTime();
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio'; shareKey: string; start: number; end: number }>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
+    // Canonical split-chain identities for this pass (see utils/splitClipIdentity).
+    const identityByClip = buildSplitIdentities({ tracks: sortedTracksRef.current as any });
 
     for (const track of sortedTracksRef.current) {
       if (track.hidden) continue;
@@ -1121,10 +1124,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               // Split segments of ONE original clip share a <video> element;
               // everything else (duplicates, same media on another track) must
               // NOT share — they can be active simultaneously and would fight
-              // over the single element's currentTime.
-              shareKey: (clip as any).splitGroupId
-                ? `${clip.mediaId}::${(clip as any).splitGroupId}`
-                : `${clip.mediaId}::clip:${clip.id}`,
+              // over the single element's currentTime. Whether a chain is
+              // genuinely contiguous lives in the Split Clip ID Provider so the
+              // preview can never disagree with the export renderer about it.
+              shareKey: identityByClip.get(clip.id)?.shareKey
+                ?? ((clip as any).splitGroupId
+                  ? `${clip.mediaId}::chain:${(clip as any).splitGroupId}::track:${clip.trackId ?? 'default'}`
+                  : `${clip.mediaId}::clip:${clip.id}`),
               start: clip.startTime,
               end: clip.startTime + clip.duration,
             });
@@ -1268,17 +1274,17 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               }
             }
             let el = mediaVideoEls.get(key) || null;
-            // Sibling lookup: if mediaVideoEls doesn't have an element under key yet,
-            // check if any existing video entry in pool matches info.mediaId with the
-            // same split group or share key, and reuse its ready element immediately.
+            // Sibling lookup: if mediaVideoEls lost the element for this key, adopt
+            // the element of an entry with the EXACT same share key — the same
+            // chain+track. Matching loosely by mediaId (`startsWith(mediaId::)`)
+            // could adopt an unrelated chain of the same file, which is how a
+            // preview ends up decoding the wrong segment after a split.
             if (!el && !key.includes('::clip:')) {
               for (const [, e] of pool) {
-                if (e.type === 'video' && e.mediaId === info.mediaId && e.el && (e.el as HTMLVideoElement).readyState >= 1) {
-                  if (e._shareKey === key || e._shareKey?.startsWith(`${info.mediaId}::`)) {
-                    el = e.el as HTMLVideoElement;
-                    mediaVideoEls.set(key, el);
-                    break;
-                  }
+                if (e.type === 'video' && e.el && (e.el as HTMLVideoElement).readyState >= 1 && e._shareKey === key) {
+                  el = e.el as HTMLVideoElement;
+                  mediaVideoEls.set(key, el);
+                  break;
                 }
               }
             }
@@ -1777,8 +1783,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         for (const clip of clips) {
           let entry = pool.get(clip.clipId);
           if (!entry && clip.clip?.splitGroupId) {
+            const expectedKey = `${clip.mediaId}::chain:${clip.clip.splitGroupId}::track:${clip.clip.trackId ?? 'default'}`;
             for (const [, e] of pool) {
-              if (e.mediaId === clip.mediaId && e.type === 'video' && e._shareKey?.includes(clip.clip.splitGroupId)) {
+              if (e.type === 'video' && e._shareKey === expectedKey) {
                 entry = e;
                 break;
               }
@@ -1817,8 +1824,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       for (const clip of clips) {
         let entry = pool.get(clip.clipId);
         if (!entry && clip.clip?.splitGroupId) {
+          // A split segment whose own pool entry is missing may reuse a
+          // SIBLING's element — but only the element of a contiguous segment of
+          // the same chain (same share key). The old fallback matched "any video
+          // element of this media", which could adopt an unrelated segment and
+          // seek-storm the preview.
+          const expectedKey = `${clip.mediaId}::chain:${clip.clip.splitGroupId}::track:${clip.clip.trackId ?? 'default'}`;
           for (const [, e] of pool) {
-            if (e.mediaId === clip.mediaId && (e._shareKey?.includes(clip.clip.splitGroupId) || e.type === 'video')) {
+            if (e.type === 'video' && e._shareKey === expectedKey) {
               entry = e;
               break;
             }

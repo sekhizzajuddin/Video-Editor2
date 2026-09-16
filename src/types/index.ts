@@ -579,6 +579,12 @@ export interface TimelineClip {
   disabled?: boolean;
   // Kinship tracking for split clips
   splitGroupId?: string;
+  /**
+   * 0-based position of this segment inside its `splitGroupId` chain, stamped by
+   * the Split Clip ID Provider (`utils/splitClipIdentity`) so every renderer can
+   * derive the same deterministic identity for a segment.
+   */
+  splitSegmentIndex?: number;
   // Audio/Video unlink: when a video clip’s audio is extracted to a separate
   // audio clip, both clips get linkedClipId pointing at each other.
   linkedClipId?: string;
