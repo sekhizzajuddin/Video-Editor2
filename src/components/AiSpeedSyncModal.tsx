@@ -14,12 +14,10 @@ interface ClipOption {
 }
 
 export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const { tracks, selectedClipId, selectedClipIds, mediaLibrary } = useEditorStore(state => ({
-    tracks: state.tracks,
-    selectedClipId: state.selectedClipId,
-    selectedClipIds: state.selectedClipIds,
-    mediaLibrary: state.mediaLibrary,
-  }));
+  const tracks = useEditorStore(state => state.tracks);
+  const selectedClipId = useEditorStore(state => state.selectedClipId);
+  const selectedClipIds = useEditorStore(state => state.selectedClipIds);
+  const mediaLibrary = useEditorStore(state => state.mediaLibrary);
 
   // Find all available video and audio clips across tracks
   const { videoClips, audioClips } = useMemo(() => {
@@ -53,20 +51,31 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
     return { videoClips: vClips, audioClips: aClips };
   }, [tracks, mediaLibrary]);
 
-  // Initial selection detection
-  const [selectedVideoId, setSelectedVideoId] = useState<string>('');
-  const [selectedTtsId, setSelectedTtsId] = useState<string>('');
-
-  useEffect(() => {
+  // Pre-selected clips derived from timeline selection
+  const preSelectedVideoId = useMemo(() => {
     const candidateIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
-    
-    // Check if user pre-selected clips
     const preVideo = videoClips.find(c => candidateIds.includes(c.id));
-    const preAudio = audioClips.find(c => candidateIds.includes(c.id));
+    return preVideo?.id || videoClips[0]?.id || '';
+  }, [selectedClipIds, selectedClipId, videoClips]);
 
-    setSelectedVideoId(preVideo?.id || videoClips[0]?.id || '');
-    setSelectedTtsId(preAudio?.id || audioClips[0]?.id || '');
-  }, [selectedClipIds, selectedClipId, videoClips, audioClips]);
+  const preSelectedTtsId = useMemo(() => {
+    const candidateIds = selectedClipIds.length > 0 ? selectedClipIds : (selectedClipId ? [selectedClipId] : []);
+    const preAudio = audioClips.find(c => candidateIds.includes(c.id));
+    return preAudio?.id || audioClips[0]?.id || '';
+  }, [selectedClipIds, selectedClipId, audioClips]);
+
+  // User manual overrides from dropdown
+  const [userVideoId, setUserVideoId] = useState<string | null>(null);
+  const [userTtsId, setUserTtsId] = useState<string | null>(null);
+
+  // Active selections (user chosen if still present, otherwise pre-selected)
+  const selectedVideoId = (userVideoId && videoClips.some(c => c.id === userVideoId))
+    ? userVideoId
+    : preSelectedVideoId;
+
+  const selectedTtsId = (userTtsId && audioClips.some(c => c.id === userTtsId))
+    ? userTtsId
+    : preSelectedTtsId;
 
   const [alignStartTime, setAlignStartTime] = useState(true);
   const [muteOriginalAudio, setMuteOriginalAudio] = useState(true);
@@ -186,7 +195,7 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
             ) : (
               <select
                 value={selectedVideoId}
-                onChange={(e) => setSelectedVideoId(e.target.value)}
+                onChange={(e) => setUserVideoId(e.target.value)}
                 disabled={isSyncing}
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-amber-500/50 outline-none"
               >
@@ -219,7 +228,7 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
             ) : (
               <select
                 value={selectedTtsId}
-                onChange={(e) => setSelectedTtsId(e.target.value)}
+                onChange={(e) => setUserTtsId(e.target.value)}
                 disabled={isSyncing}
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-emerald-500/50 outline-none"
               >

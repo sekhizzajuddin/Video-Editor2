@@ -43,7 +43,7 @@ export function TopToolbar() {
     setShowSettingsModal,
     setShowTeleprompter,
     setShowHelpMenu,
-    syncSelectedClips,
+    setShowAiSpeedSyncModal,
     resetProject,
     copyClip,
     pasteClip,
@@ -67,7 +67,7 @@ export function TopToolbar() {
     setShowSettingsModal: s.setShowSettingsModal,
     setShowTeleprompter: s.setShowTeleprompter,
     setShowHelpMenu: s.setShowHelpMenu,
-    syncSelectedClips: s.syncSelectedClips,
+    setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
     resetProject: s.resetProject,
     copyClip: s.copyClip,
     pasteClip: s.pasteClip,
@@ -581,7 +581,7 @@ export function TopToolbar() {
 
         {/* AI Sync Button */}
         <button
-          onClick={() => useEditorStore.getState().setShowAiSpeedSyncModal(true)}
+          onClick={() => setShowAiSpeedSyncModal(true)}
           title="AI Sync (Sync Video Speed Frames with TTS Voiceover)"
           className="px-2.5 py-1.5 text-xs rounded-md border flex items-center gap-1.5 font-medium transition-all hover:bg-black/5 dark:hover:bg-white/5"
           style={{

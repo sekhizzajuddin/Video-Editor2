@@ -13,6 +13,8 @@ interface TimelineToolbarProps {
   activeTool: string;
 }
 
+const EMPTY_EXPORT_REGIONS: any[] = [];
+
 export function TimelineToolbar({
   zoomLevel,
   zoomIn,
@@ -24,7 +26,7 @@ export function TimelineToolbar({
 }: TimelineToolbarProps) {
   const settings = useEditorStore((s) => s.settings);
   const updateSettings = useEditorStore((s) => s.updateSettings);
-  const exportRegions = useEditorStore((s) => s.exportRegions || []);
+  const exportRegions = useEditorStore((s) => s.exportRegions || EMPTY_EXPORT_REGIONS);
   const addExportRegion = useEditorStore((s) => s.addExportRegion);
   const clearExportRegions = useEditorStore((s) => s.clearExportRegions);
   const dynamicStretch = useEditorStore((s) => s.dynamicStretch);
@@ -40,7 +42,6 @@ export function TimelineToolbar({
   const selectedClipId = useEditorStore((s) => s.selectedClipId);
   const tracks = useEditorStore((s) => s.tracks);
   const totalDuration = useEditorStore((s) => s.totalDuration);
-  const setShowAiSpeedSyncModal = useEditorStore((s) => s.setShowAiSpeedSyncModal);
 
   const selectedClip = useMemo(() => {
     if (!selectedClipId) return null;
@@ -265,22 +266,6 @@ export function TimelineToolbar({
             <span>Reset Speed</span>
           </button>
         )}
-
-        {/* AI Speed Sync with TTS button */}
-        <button
-          type="button"
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowAiSpeedSyncModal(true);
-          }}
-          title="AI Speed Sync: Automatically scan & sync video speed frames with TTS voiceover"
-          className="px-2.5 py-1 text-[11px] rounded-lg flex items-center gap-1.5 transition-all font-medium text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 font-semibold shadow-xs cursor-pointer"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-          <span>AI Speed Sync (TTS)</span>
-        </button>
       </div>
 
       <div className="flex-1" />
