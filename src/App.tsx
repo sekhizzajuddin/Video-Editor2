@@ -25,7 +25,7 @@ const ScopesPanel = React.lazy(() => import('@/components/ScopesPanel').then(m =
 const PropertiesPanel = React.lazy(() => import('@/components/PropertiesPanel').then(m => ({ default: m.PropertiesPanel })));
 const Timeline = React.lazy(() => import('@/components/Timeline').then(m => ({ default: m.Timeline })));
 const AudioMixer = React.lazy(() => import('@/components/AudioMixer').then(m => ({ default: m.AudioMixer })));
-const ExportModal = React.lazy(() => import('@/components/ExportModal').then(m => ({ default: m.ExportModal })));
+import { ExportModal } from '@/components/ExportModal';
 const SettingsModal = React.lazy(() => import('@/components/SettingsModal').then(m => ({ default: m.SettingsModal })));
 const TeleprompterModal = React.lazy(() => import('@/components/TeleprompterModal').then(m => ({ default: m.TeleprompterModal })));
 const WelcomeScreen = React.lazy(() => import('@/components/WelcomeScreen').then(m => ({ default: m.WelcomeScreen })));
@@ -804,9 +804,7 @@ function DesktopApp() {
           }
           key="export-modal"
         >
-          <Suspense fallback={null}>
-            <ExportModal />
-          </Suspense>
+          <ExportModal />
         </ErrorBoundary>
       )}
       {showSettingsModal && (

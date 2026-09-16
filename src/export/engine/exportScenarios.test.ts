@@ -892,4 +892,51 @@ describe('export worker — container format matches the file extension', () => 
       FakeVideoFrame.emitBlackPixels = false;
     }
   }, 60000);
+
+  it('renders clips with dynamic speedFrames without crashing or dropping frames', async () => {
+    const mediaId = 'm-speedframes';
+    const { handle } = makeFileHandle('speedframes.mp4');
+
+    const timeline = {
+      tracks: [
+        {
+          id: 't1',
+          name: 'V1',
+          type: 'video',
+          locked: false,
+          muted: false,
+          hidden: false,
+          clips: [
+            videoClip('c1', mediaId, 0, 2, {
+              speedFrames: [
+                { id: 'sf-1', timelineOffset: 0.8, sourceTime: 0.5 },
+                { id: 'sf-2', timelineOffset: 1.4, sourceTime: 1.2 },
+              ],
+              speedFrameSourceEnd: 2.0,
+            }),
+          ],
+        },
+      ],
+      media: [{ id: mediaId, name: 'clip.mp4', type: 'video', duration: 2, url: 'blob:x', createdAt: 0 }],
+      duration: 2,
+      totalDuration: 2,
+      aspectRatio: 16 / 9,
+    };
+
+    const res = await runWorkerExport({
+      timeline,
+      config: { ...baseConfig, format: 'mp4', filename: 'speedframes' },
+      audioData: null,
+      fileHandle: handle,
+      mediaBuffers: { [mediaId]: buildInputMp4(2) },
+    });
+
+    expect(res.warnings).toEqual([]);
+    const enc = FakeVideoEncoder.last!;
+    expect(enc.captured.length).toBe(60); // 2s * 30fps
+    enc.captured.forEach((f, i) => {
+      const draws = f.pass.filter((o) => o.op === 'draw' && o.pixels);
+      expect(draws.length, `frame ${i} had no visual content`).toBe(1);
+    });
+  }, 60000);
 });

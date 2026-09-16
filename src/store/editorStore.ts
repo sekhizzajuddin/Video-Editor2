@@ -5309,7 +5309,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedClipIds: [clipId],
       selectedSpeedFrame: { clipId, frameId },
     });
-    setTrimPreviewTime(found.clip.startTime + sf.timelineOffset);
+    setPlaybackTime(found.clip.startTime + sf.timelineOffset);
+    setTrimPreviewTime(null);
   },
 
   updateSpeedFrameLine: (clipId: string, frameId: string, newTimelineOffset: number) => {

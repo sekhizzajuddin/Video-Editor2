@@ -185,31 +185,6 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     window.addEventListener('pointerup', onPointerUp);
   };
   
-  // Deselect speed frame when clicking anywhere outside of a speed frame element
-  useEffect(() => {
-    if (!selectedSpeedFrame || selectedSpeedFrame.clipId !== clip.id) return;
-
-    const handleGlobalPointerDown = (e: MouseEvent | PointerEvent) => {
-      const target = e.target as HTMLElement | null;
-      // Don't deselect if clicking on a speed-frame element in the timeline
-      if (target?.closest?.('.speed-frame-element')) {
-        return;
-      }
-      // Don't deselect if clicking on the toolbar Delete Speed Frame button 
-      // (otherwise the pointerdown capture deselects before onClick fires)
-      if (target?.closest?.('[data-speed-frame-action]')) {
-        return;
-      }
-      selectSpeedFrame(null, null);
-    };
-
-    window.addEventListener('pointerdown', handleGlobalPointerDown, true);
-    window.addEventListener('mousedown', handleGlobalPointerDown, true);
-    return () => {
-      window.removeEventListener('pointerdown', handleGlobalPointerDown, true);
-      window.removeEventListener('mousedown', handleGlobalPointerDown, true);
-    };
-  }, [selectedSpeedFrame, clip.id, selectSpeedFrame]);
 
   useEffect(() => {
     return () => {
@@ -497,11 +472,9 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
           </div>
         )}
         <div className="absolute bottom-0.5 right-1 flex items-center gap-1 text-[8px] text-white/50 tabular-nums select-none">
-          {clip.speedRamp && clip.speedRamp.length >= 2 ? (
-            <span className="bg-amber-500/20 text-amber-300 px-1 py-px rounded-sm font-semibold">Ramped</span>
-          ) : clip.speed !== 1.0 ? (
+          {clip.speed !== 1.0 && (
             <span className="bg-blue-500/20 text-blue-300 px-1 py-px rounded-sm font-semibold">{(clip?.speed ?? 1).toFixed(1)}x</span>
-          ) : null}
+          )}
           <span>{(Math.max(0.1, clip?.duration ?? 0.1)).toFixed(1)}s</span>
         </div>
       </div>
@@ -550,22 +523,6 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       {/* ── Embedded Speed Frames (Dynamic Rate-Stretching) ────────── */}
       {clip.speedFrames && clip.speedFrames.length > 0 && (
         <>
-          {/* Segment speed multiplier badges (clean, sleek dark frosted tags) */}
-          {speedSegments.map((seg) => {
-            const centerT = (seg.startOffset + seg.endOffset) / 2;
-            const centerPx = centerT * zoomLevel;
-            return (
-              <div
-                key={`seg-${seg.index}`}
-                className="absolute bottom-1 -translate-x-1/2 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium tracking-tight bg-black/75 backdrop-blur-xs text-white/90 border border-white/20 shadow-xs pointer-events-none z-30 flex items-center gap-0.5 transition-all"
-                style={{ left: `${centerPx}px` }}
-                title={`Segment ${seg.index + 1}: ${seg.speed.toFixed(2)}x speed`}
-              >
-                <span>{seg.speed.toFixed(1)}x</span>
-              </div>
-            );
-          })}
-
           {/* Speed Frame lines and diamond heads */}
           {clip.speedFrames.map((sf) => {
             const isFrameSelected =
@@ -587,22 +544,18 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   }`}
                 />
 
-                {/* Interactive line drag zone (Rate Stretch / Squeeze) */}
+                {/* Interactive line drag zone (Rate Stretch / Squeeze - starts below diamond head) */}
                 <div
-                  className="speed-frame-element absolute top-0 bottom-0 -left-[7px] w-[16px] cursor-ew-resize pointer-events-auto group/line"
+                  className="speed-frame-element absolute top-4 bottom-0 -left-[6px] w-[14px] cursor-ew-resize pointer-events-auto group/line"
                   onPointerDown={(e) => handleLineMouseDown(e, sf.id, sf.timelineOffset)}
                   title="Drag Line to Rate-Stretch / Squeeze adjacent segments"
                 >
-                  <div className="w-full h-full opacity-0 group-hover/line:opacity-20 bg-white transition-opacity" />
+                  <div className="w-full h-full opacity-0 group-hover/line:opacity-25 bg-white transition-opacity" />
                 </div>
 
-                {/* Top Diamond Button (Click to select, drag to reposition speed frame) */}
+                {/* Top Diamond Button Container (Drag to reposition speed frame line position) */}
                 <div
-                  className={`speed-frame-element absolute cursor-ew-resize pointer-events-auto transition-all ${
-                    isFrameSelected
-                      ? '-top-2 -left-2 w-4 h-4 rotate-45 bg-rose-500 border-2 border-white shadow-[0_0_10px_rgba(244,63,94,0.9)] scale-110'
-                      : '-top-1.5 -left-1.5 w-3 h-3 rotate-45 bg-cyan-400 hover:bg-cyan-300 border border-white shadow-sm hover:scale-125'
-                  }`}
+                  className="speed-frame-element absolute -top-3 -left-3 w-6 h-6 z-50 flex items-center justify-center cursor-ew-resize pointer-events-auto group/diamond"
                   onPointerDown={(e) => handleScrewMouseDown(e, sf.id, sf.timelineOffset)}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -610,10 +563,18 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   }}
                   title={
                     isFrameSelected
-                      ? 'Selected Speed Frame (Drag to reposition / shift line)'
-                      : 'Speed Frame: Click to select, Drag to shift line'
+                      ? 'Selected Diamond: Drag to reposition Speed Frame line (without changing clip duration)'
+                      : 'Diamond Head: Click to select, Drag to reposition Speed Frame line'
                   }
-                />
+                >
+                  <div
+                    className={`transition-all duration-100 ${
+                      isFrameSelected
+                        ? 'w-3.5 h-3.5 rotate-45 bg-rose-500 border-2 border-white shadow-[0_0_10px_rgba(244,63,94,0.9)] scale-110'
+                        : 'w-2.5 h-2.5 rotate-45 bg-cyan-400 group-hover/diamond:bg-cyan-300 border border-white shadow-sm group-hover/diamond:scale-125'
+                    }`}
+                  />
+                </div>
               </div>
             );
           })}

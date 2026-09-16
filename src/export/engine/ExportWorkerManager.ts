@@ -70,6 +70,11 @@ export class ExportWorkerManager {
           break;
       }
     };
+
+    this.worker.onerror = (err: ErrorEvent) => {
+      console.error('[ExportWorkerManager] Worker script error:', err);
+      this.options.callbacks.onError(new Error(err.message || 'Export worker error occurred'));
+    };
   }
 
   async export(signal: AbortSignal): Promise<{filename: string, savedViaRuntime: boolean}> {

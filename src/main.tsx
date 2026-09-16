@@ -16,6 +16,8 @@ const handleChunkError = (e: any) => {
     msg.includes('Expected a JavaScript-or-Wasm module script') ||
     (e.type === 'vite:preloadError')
   ) {
+    console.warn('[PWA/Vite] Dynamic chunk error detected, reloading page:', msg, e);
+    sessionStorage.setItem('last-chunk-error', `${Date.now()}: ${msg}`);
     if (sessionStorage.getItem('vite-chunk-reloaded') === 'true') {
       sessionStorage.removeItem('vite-chunk-reloaded'); // Prevents infinite loops
       return;

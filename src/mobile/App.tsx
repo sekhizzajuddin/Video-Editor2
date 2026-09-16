@@ -23,7 +23,7 @@ import { addTextClipToTimeline } from './lib/timeline';
 import './mobile.css';
 
 const PreviewCanvas = React.lazy(() => import('@/components/PreviewCanvas').then((m) => ({ default: m.PreviewCanvas })));
-const ExportModal = React.lazy(() => import('@/components/ExportModal').then((m) => ({ default: m.ExportModal })));
+import { ExportModal } from '@/components/ExportModal';
 const SettingsModal = React.lazy(() => import('@/components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
 const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRatioConflictModal').then((m) => ({ default: m.AspectRatioConflictModal })));
 const HelpModal = React.lazy(() => import('@/components/HelpModal').then((m) => ({ default: m.HelpModal })));
@@ -144,9 +144,7 @@ export function MobileApp() {
           }
           key="export-modal"
         >
-          <Suspense fallback={null}>
-            <ExportModal />
-          </Suspense>
+          <ExportModal />
         </ErrorBoundary>
       )}
       {showSettingsModal && (
