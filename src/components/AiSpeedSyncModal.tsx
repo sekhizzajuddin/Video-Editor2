@@ -30,12 +30,12 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
       if (track.muted || track.hidden) continue;
       for (const clip of track.clips || []) {
         const media = mediaLibrary.find(m => m.id === clip.mediaId);
-        const isVideo = clip.type === 'video' || track.type === 'video' || media?.type === 'video';
-        const isAudio = clip.type === 'audio' || track.type === 'audio' || media?.type === 'audio';
+        const isVideo = track.type === 'video' || media?.type === 'video';
+        const isAudio = track.type === 'audio' || media?.type === 'audio';
 
         const item: ClipOption = {
           id: clip.id,
-          name: clip.name || media?.name || (isVideo ? 'Video Clip' : 'Audio Clip'),
+          name: media?.name || (isVideo ? 'Video Clip' : 'Audio Clip'),
           trackName: track.name || (isVideo ? 'Video Track' : 'Audio Track'),
           duration: clip.duration,
           startTime: clip.startTime,

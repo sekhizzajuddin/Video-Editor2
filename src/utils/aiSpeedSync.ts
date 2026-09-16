@@ -1,9 +1,9 @@
-import { TimelineClip, SpeedFrame, SpeedFrameSegment } from '@/types';
+import { TimelineClip, SpeedFrame } from '@/types';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { getGeminiKey } from './aiClient';
 import { audioBufferToWav } from './autoCaptions';
 import { extractJsonFromLlmResponse } from './jsonHelper';
-import { calculateSpeedFramesRamp, getSpeedFrameSegments } from './speedRamp';
+import { calculateSpeedFramesRamp, getSpeedFrameSegments, SpeedFrameSegment } from './speedRamp';
 import { getFileFromDB } from '@/utils/projectPersistence';
 
 export async function blobToBase64(blob: Blob): Promise<string> {
@@ -16,7 +16,13 @@ export async function blobToBase64(blob: Blob): Promise<string> {
     });
   }
   const buf = await blob.arrayBuffer();
-  return `data:${blob.type || 'application/octet-stream'};base64,${Buffer.from(buf).toString('base64')}`;
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = typeof btoa !== 'undefined' ? btoa(binary) : '';
+  return `data:${blob.type || 'application/octet-stream'};base64,${base64}`;
 }
 
 export const GEMINI_SPEED_SYNC_MODELS = [
@@ -411,7 +417,7 @@ export async function syncVideoClipWithTts(
   const videoMedia = store.mediaLibrary.find(m => m.id === videoClip.mediaId);
   const ttsMedia = store.mediaLibrary.find(m => m.id === ttsClip.mediaId);
 
-  if (!ttsMedia?.url && !ttsClip.url) {
+  if (!ttsMedia?.url) {
     throw new Error('TTS Audio Clip does not have valid audio media.');
   }
 
@@ -419,7 +425,7 @@ export async function syncVideoClipWithTts(
   onProgress?.(10, 'Scanning Video Clip audio...');
   const videoAudio = await extractClipAudioToWav(
     videoClip,
-    videoMedia?.url || videoClip.url || '',
+    videoMedia?.url || '',
     videoMedia?.id
   );
 
@@ -427,8 +433,8 @@ export async function syncVideoClipWithTts(
   onProgress?.(30, 'Scanning TTS Voiceover audio...');
   const ttsAudio = await extractClipAudioToWav(
     ttsClip,
-    ttsMedia?.url || ttsClip.url || '',
-    ttsMedia?.id
+    ttsMedia.url,
+    ttsMedia.id
   );
 
   if (!ttsAudio.wavBlob) {
@@ -465,7 +471,20 @@ export async function syncVideoClipWithTts(
     speedFrames,
     speedFrameSourceEnd: fixedSourceEnd,
     audioSettings: muteOriginal
-      ? { ...videoClip.audioSettings, muted: true }
+      ? {
+          volume: 0,
+          pan: 0,
+          fadeIn: 0,
+          fadeOut: 0,
+          bass: 0,
+          treble: 0,
+          pitch: 0,
+          voiceFormant: 0,
+          preservePitch: true,
+          humanize: false,
+          ...(videoClip.audioSettings || {}),
+          muted: true,
+        }
       : videoClip.audioSettings,
   };
   updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, videoMedia?.duration);

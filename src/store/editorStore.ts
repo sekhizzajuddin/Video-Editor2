@@ -284,7 +284,6 @@ interface EditorActions {
   setShowSettingsModal: (show: boolean) => void;
   setShowTeleprompter: (show: boolean) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
-  showAiSpeedSyncModal: boolean;
   setShowAiSpeedSyncModal: (show: boolean) => void;
   setUseProxies: (use: boolean) => void;
   syncSelectedClips: () => void;

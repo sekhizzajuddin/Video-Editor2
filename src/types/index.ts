@@ -1000,6 +1000,7 @@ export interface EditorState {
   showSettingsModal: boolean;
   showTeleprompter: boolean;
   showHelpMenu: boolean;
+  showAiSpeedSyncModal: boolean;
   activeHelpSection: string | null;
   useProxies: boolean;
   showProgressBar: boolean;
