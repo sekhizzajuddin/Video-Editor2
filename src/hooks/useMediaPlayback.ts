@@ -26,6 +26,14 @@ const setAudioParam = (param: AudioParam, target: number, ctxTime: number, rampT
 
 import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedForClipAtTime } from '@/utils/speedRamp';
+import { buildSplitIdentities } from '@/utils/splitClipIdentity';
+import {
+  decidePreviewGate,
+  describeDegradedClip,
+  isElementStarved,
+  type RecoveryRecord,
+  type StarvedElementReport,
+} from '@/utils/previewStarvation';
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
@@ -945,6 +953,17 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const prevSyncCtRef = useRef<number>(-1);
   // PERF: Persistent Set reused every frame to avoid 2 heap allocations/frame (Array + Set).
   const playingIdsSetRef = useRef<Set<string>>(new Set());
+  // ── Preview starvation bookkeeping (see utils/previewStarvation) ──────────
+  // `starvationSinceRef` records when each clip's element started failing to
+  // produce frames; `recoveryRef` counts the attempts we made to un-stick it.
+  // Together they bound the buffering gate so a single dead element can never
+  // freeze the preview forever.
+  const starvationSinceRef = useRef<Map<string, number>>(new Map());
+  const recoveryRef = useRef<Map<string, RecoveryRecord>>(new Map());
+  const degradedWarnedRef = useRef<Set<string>>(new Set());
+  // Target source time per clip for the current tick (used to re-issue a seek
+  // when an element's pending seek has gone stale).
+  const videoTargetsRef = useRef<Map<string, { el: HTMLVideoElement; mediaTime: number }>>(new Map());
 
   // Worker export uses independent decoders. A paused <video> still owns a
   // decoder and decoded surfaces, so pause() alone is not sufficient after a
@@ -1105,6 +1124,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     const trimCt = getTrimPreviewTime();
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio'; shareKey: string; start: number; end: number }>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
+    // Canonical split-chain identities for this pass (see utils/splitClipIdentity).
+    const identityByClip = buildSplitIdentities({ tracks: sortedTracksRef.current as any });
 
     for (const track of sortedTracksRef.current) {
       if (track.hidden) continue;
@@ -1121,10 +1142,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               // Split segments of ONE original clip share a <video> element;
               // everything else (duplicates, same media on another track) must
               // NOT share — they can be active simultaneously and would fight
-              // over the single element's currentTime.
-              shareKey: (clip as any).splitGroupId
-                ? `${clip.mediaId}::${(clip as any).splitGroupId}`
-                : `${clip.mediaId}::clip:${clip.id}`,
+              // over the single element's currentTime. Whether a chain is
+              // genuinely contiguous lives in the Split Clip ID Provider so the
+              // preview can never disagree with the export renderer about it.
+              shareKey: identityByClip.get(clip.id)?.shareKey
+                ?? ((clip as any).splitGroupId
+                  ? `${clip.mediaId}::chain:${(clip as any).splitGroupId}::track:${clip.trackId ?? 'default'}`
+                  : `${clip.mediaId}::clip:${clip.id}`),
               start: clip.startTime,
               end: clip.startTime + clip.duration,
             });
@@ -1268,17 +1292,17 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               }
             }
             let el = mediaVideoEls.get(key) || null;
-            // Sibling lookup: if mediaVideoEls doesn't have an element under key yet,
-            // check if any existing video entry in pool matches info.mediaId with the
-            // same split group or share key, and reuse its ready element immediately.
+            // Sibling lookup: if mediaVideoEls lost the element for this key, adopt
+            // the element of an entry with the EXACT same share key — the same
+            // chain+track. Matching loosely by mediaId (`startsWith(mediaId::)`)
+            // could adopt an unrelated chain of the same file, which is how a
+            // preview ends up decoding the wrong segment after a split.
             if (!el && !key.includes('::clip:')) {
               for (const [, e] of pool) {
-                if (e.type === 'video' && e.mediaId === info.mediaId && e.el && (e.el as HTMLVideoElement).readyState >= 1) {
-                  if (e._shareKey === key || e._shareKey?.startsWith(`${info.mediaId}::`)) {
-                    el = e.el as HTMLVideoElement;
-                    mediaVideoEls.set(key, el);
-                    break;
-                  }
+                if (e.type === 'video' && e.el && (e.el as HTMLVideoElement).readyState >= 1 && e._shareKey === key) {
+                  el = e.el as HTMLVideoElement;
+                  mediaVideoEls.set(key, el);
+                  break;
                 }
               }
             }
@@ -1477,6 +1501,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         pool.delete(clipId);
         videoMap.delete(clipId);
         pendingSeeksRef.current.delete(clipId);
+        starvationSinceRef.current.delete(clipId);
+        recoveryRef.current.delete(clipId);
+        degradedWarnedRef.current.delete(clipId);
+        videoTargetsRef.current.delete(clipId);
       }
     }
   }, [tracks, mediaLibrary, ctBucket, seekRevision, triggerRedraw, isPrimary, previewSuspended]);
@@ -1777,8 +1805,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         for (const clip of clips) {
           let entry = pool.get(clip.clipId);
           if (!entry && clip.clip?.splitGroupId) {
+            const expectedKey = `${clip.mediaId}::chain:${clip.clip.splitGroupId}::track:${clip.clip.trackId ?? 'default'}`;
             for (const [, e] of pool) {
-              if (e.mediaId === clip.mediaId && e.type === 'video' && e._shareKey?.includes(clip.clip.splitGroupId)) {
+              if (e.type === 'video' && e._shareKey === expectedKey) {
                 entry = e;
                 break;
               }
@@ -1817,8 +1846,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       for (const clip of clips) {
         let entry = pool.get(clip.clipId);
         if (!entry && clip.clip?.splitGroupId) {
+          // A split segment whose own pool entry is missing may reuse a
+          // SIBLING's element — but only the element of a contiguous segment of
+          // the same chain (same share key). The old fallback matched "any video
+          // element of this media", which could adopt an unrelated segment and
+          // seek-storm the preview.
+          const expectedKey = `${clip.mediaId}::chain:${clip.clip.splitGroupId}::track:${clip.clip.trackId ?? 'default'}`;
           for (const [, e] of pool) {
-            if (e.mediaId === clip.mediaId && (e._shareKey?.includes(clip.clip.splitGroupId) || e.type === 'video')) {
+            if (e.type === 'video' && e._shareKey === expectedKey) {
               entry = e;
               break;
             }
@@ -1846,6 +1881,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const currentMediaTime = el.currentTime;
         const rawDrift = currentMediaTime - mediaTime; // positive = ahead
         const justActivated = !lastActiveClipIdsRef.current.has(clip.clipId);
+
+        // Remember what this element is supposed to be showing this tick: the
+        // starvation recovery path re-issues the seek with this exact target.
+        if (entry.type === 'video' && !clip.isReversed && clip.freezeFrame === undefined) {
+          videoTargetsRef.current.set(clip.clipId, { el: el as HTMLVideoElement, mediaTime });
+        }
 
         // Speed-ramp-aware: use current segment speed for playbackRate
         const hasSpeedFrames = clip.speedFrames && clip.speedFrames.length > 0;
@@ -2020,30 +2061,107 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // Check if any active VIDEO element is still seeking or has insufficient decoded
       // data. When buffering is detected, the tick loop in PreviewCanvasContainer freezes
       // the clock advance so the playhead doesn't race ahead of the decoders.
+      //
+      // BOUNDED WAIT (see utils/previewStarvation): the freeze is only honoured for a
+      // FRESH stall. An element that never becomes ready — a stalled decode session, a
+      // source that went stale, a device out of hardware decoders — used to hold the
+      // gate closed forever: the preview froze on one frame with the spinner up and
+      // could only be recovered by reloading the page (typically noticed right after
+      // an edit, because a split/second track adds elements). Past the grace window we
+      // resume playback (dropping that layer's frames, as any NLE does) and actively
+      // try to un-stick the element instead of stalling the whole preview.
       if (playing && !scrubbing) {
-        let anyBuffering = false;
+        const nowMs = performance.now();
+        const reports: StarvedElementReport[] = [];
         for (const clip of clips) {
           const entry = pool.get(clip.clipId);
           if (!entry || entry.type !== 'video') continue;
           // Reversed/freeze-frame clips are manually seeked each tick — they don't
           // buffer in the traditional sense, so skip them.
           if (clip.isReversed || clip.freezeFrame !== undefined) continue;
-          const el = entry.el;
+          const el = entry.el as HTMLVideoElement;
           // readyState < HAVE_CURRENT_DATA (2) means the decoder hasn't produced the
           // frame at `currentTime` yet. `seeking` means a seek is in flight.
-          if (el.seeking || (el.readyState < 2 && el.src !== '')) {
-            anyBuffering = true;
-            break;
+          const starved = isElementStarved({
+            readyState: el.readyState,
+            seeking: el.seeking,
+            hasSource: el.src !== '' || !!el.currentSrc,
+          });
+          if (starved) {
+            const since = starvationSinceRef.current.get(clip.clipId);
+            if (since === undefined) starvationSinceRef.current.set(clip.clipId, nowMs);
+            reports.push({
+              clipId: clip.clipId,
+              starvedForMs: nowMs - (since ?? nowMs),
+              readyState: el.readyState,
+            });
+          } else {
+            starvationSinceRef.current.delete(clip.clipId);
+            degradedWarnedRef.current.delete(clip.clipId);
           }
         }
+
+        const decision = decidePreviewGate({
+          reports,
+          nowMs,
+          recoveryOf: (clipId) => recoveryRef.current.get(clipId),
+        });
+
+        // ---- Recovery: try to un-stick the element instead of waiting forever ----
+        const mediaMapRecovery = mediaMapRef.current;
+        for (const instruction of decision.recover) {
+          const target = videoTargetsRef.current.get(instruction.clipId);
+          const clip = clips.find((c) => c.clipId === instruction.clipId);
+          const previous = recoveryRef.current.get(instruction.clipId);
+          recoveryRef.current.set(instruction.clipId, {
+            attempts: (previous?.attempts ?? 0) + 1,
+            lastAtMs: nowMs,
+          });
+          if (!target || !clip) continue;
+          const el = target.el;
+          const entry = pool.get(instruction.clipId);
+          if (instruction.tier === 'reload') {
+            // No data, or stalled for far too long: throw the decoder session away
+            // and rebuild it from the media url. This is the only action that can
+            // rescue an element that is wedged at readyState 0.
+            const media = mediaMapRecovery.get(clip.mediaId);
+            if (media?.url && media.url !== 'PENDING_RESTORE') {
+              const srcKey = `media:${entry?._shareKey ?? clip.mediaId}`;
+              assignClipMediaSrc(el as TaggedMediaElement, srcKey, media.url);
+              try { el.load(); } catch { /* element gone */ }
+              if (Number.isFinite(target.mediaTime)) el.currentTime = target.mediaTime;
+            }
+          } else if (!el.seeking || nowMs - (previous?.lastAtMs ?? 0) > 1500) {
+            // A seek that never completes leaves `seeking` stuck true, and the sync
+            // loop skips re-seek attempts while an element reports `seeking`. Re-issue
+            // the seek at the exact target to break that deadlock.
+            if (Number.isFinite(target.mediaTime)) {
+              try { el.currentTime = target.mediaTime; } catch { /* element gone */ }
+            }
+          }
+        }
+
+        // One warning per clip: playback is unaffected, the element keeps retrying.
+        for (const clipId of decision.degraded) {
+          if (degradedWarnedRef.current.has(clipId)) continue;
+          degradedWarnedRef.current.add(clipId);
+          const el = videoTargetsRef.current.get(clipId)?.el;
+          console.warn(describeDegradedClip(clipId, nowMs - (starvationSinceRef.current.get(clipId) ?? nowMs), el?.readyState ?? -1));
+        }
+
         const wasBuffering = store.isBuffering;
-        if (anyBuffering !== wasBuffering) {
-          store.setIsBuffering(anyBuffering);
+        if (decision.gate !== wasBuffering) {
+          store.setIsBuffering(decision.gate);
         }
       } else if (store.isBuffering) {
         // Clear buffering when paused or scrubbing
         store.setIsBuffering(false);
+        starvationSinceRef.current.clear();
+        recoveryRef.current.clear();
+        degradedWarnedRef.current.clear();
       }
+      // Targets are rebuilt from scratch every tick (they follow the playhead).
+      videoTargetsRef.current.clear();
 
       // ---- 3. Pause inactive elements ----
       // SHARED ELEMENTS: several clip entries can reference the same <video>

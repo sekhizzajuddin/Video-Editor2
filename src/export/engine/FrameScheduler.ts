@@ -4,6 +4,7 @@ import { findActiveTransition, buildTransitionPlan } from '../../utils/transitio
 import { resolveBlendPlan } from '../../utils/blendCompositor';
 import { FramePool } from './memory/FramePool';
 import { getMediaTimeForClip } from '../../utils/speedRamp';
+import { planDecodeStreams, type DecodeStreamPlan } from '../../utils/splitClipIdentity';
 
 /**
  * Anything that can hand the compositor a frame for a clip: a real MediaBunny
@@ -215,6 +216,16 @@ export interface FrameOverlay {
   alpha: number;
 }
 
+/**
+ * One frame request for a decode stream, queued so it can be executed in
+ * ascending source order per stream (never interleaved out of order).
+ */
+interface DecodeRequest {
+  streamKey: string;
+  sourceSeconds: number;
+  run: () => Promise<void>;
+}
+
 export interface FramePlan {
   layers: RenderLayer[];
   overlays: FrameOverlay[];
@@ -225,6 +236,22 @@ export class FrameScheduler {
   private framePool: FramePool;
   private mediaBuffers: Record<string, any>;
   private mediaDecoders: Map<string, ClipFrameSource> = new Map();
+  /**
+   * Clips are grouped into DECODE STREAMS (see `utils/splitClipIdentity`): a
+   * stream is a set of clips one sequential decoder can serve without ever
+   * having to rewind. Split segments of one chain share a stream; clips that
+   * would interleave two distant source windows (e.g. the same media reused on
+   * another track) get their own decoder.
+   */
+  private streamPlan: DecodeStreamPlan | null = null;
+  /** streamId → decoder-map key, for media types that share one source (stills). */
+  private streamAliases: Map<string, string> = new Map();
+  /** Max decoders per media file before the planner starts time-sharing one. */
+  private maxStreamsPerMedia = 4;
+  /** One-frame-deep decode prefetch slot (see `prefetchAtTime`). */
+  private prefetchSlot: { timestamp: number; promise: Promise<FramePlan> } | null = null;
+  /** Decode telemetry of streams that were already evicted, kept for the report. */
+  private retiredDecodeStats: Array<{ streamId: string; stats: any }> = [];
   // Test compatibility: older tests inject via `decoders`
   private get decoders(): Map<string, ClipFrameSource> {
     return (this as any)._decodersCompat ?? this.mediaDecoders;
@@ -276,45 +303,83 @@ export class FrameScheduler {
       }
     }
 
+    // ── DECODE STREAM PLANNING (multi-track, split-safe) ───────────────
+    // The old code created exactly one decoder per media file. A timeline with
+    // a split chain on one track and the same media reused on another track then
+    // asked that single sequential decoder for two distant source windows on
+    // every output frame — each request rewinding the pipeline (see AssetDecoder
+    // docs). Planning streams up-front gives simultaneous source windows their
+    // own decoder, while contiguous split segments still share one.
+    const plan = planDecodeStreams(this.timeline, {
+      maxStreamsPerMedia: this.maxStreamsPerMedia,
+    });
+    this.streamPlan = plan;
+    this.streamAliases.clear();
+
     const loadPromises: Promise<void>[] = [];
 
-    for (const [mediaId, media] of visualMediaMap.entries()) {
-      if (!this.mediaDecoders.has(mediaId)) {
-        const url = media?.url || '';
-        const preBuffer = this.mediaBuffers[mediaId];
-        const mediaName: string = media?.name || '';
-        const isImage =
-          media?.type === 'image' ||
-          /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
+    for (const stream of plan.streams) {
+      if (this.mediaDecoders.has(stream.id)) continue;
 
-        if (isImage) {
-          const source = new StillImageSource(url);
-          this.mediaDecoders.set(mediaId, source);
-          loadPromises.push(source.load(preBuffer));
-          continue;
+      const media = visualMediaMap.get(stream.mediaId) || this.getMediaMap().get(stream.mediaId);
+      const url = media?.url || '';
+      const preBuffer = this.mediaBuffers[stream.mediaId];
+      const mediaName: string = media?.name || '';
+      const isImage =
+        media?.type === 'image' ||
+        /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(mediaName);
+
+      if (isImage) {
+        // Stills decode to one shared ImageBitmap: alias every stream of this
+        // media to a single source instead of allocating one per stream.
+        const key = `image:${stream.mediaId}`;
+        let source = this.mediaDecoders.get(key) as StillImageSource | undefined;
+        if (!source) {
+          source = new StillImageSource(url);
+          this.mediaDecoders.set(key, source);
+          const created = source;
+          loadPromises.push(
+            created.load(preBuffer).then(() => {
+              if (!created.ready) {
+                this.warnings.push(
+                  `"${mediaName || stream.mediaId}" could not be loaded for export. Its frames will be missing from the output.`
+                );
+              }
+            })
+          );
         }
-
-        const decoder = new AssetDecoder(url);
-        this.mediaDecoders.set(mediaId, decoder);
-        loadPromises.push(
-          decoder.load(preBuffer).then(async () => {
-            if (decoder.ready) return;
-            const fallback = new StillImageSource(url);
-            await fallback.load(preBuffer);
-            if (fallback.ready) {
-              decoder.dispose();
-              this.mediaDecoders.set(mediaId, fallback);
-            } else {
-              fallback.dispose();
-              this.warnings.push(
-                `"${mediaName || mediaId}" could not be decoded for export` +
-                (decoder.loadError ? ` (${decoder.loadError})` : '') +
-                '. Its frames will be missing from the output.'
-              );
-            }
-          })
-        );
+        this.streamAliases.set(stream.id, key);
+        continue;
       }
+
+      const decoder = new AssetDecoder(url);
+      this.mediaDecoders.set(stream.id, decoder);
+      loadPromises.push(
+        decoder.load(preBuffer).then(async () => {
+          if (decoder.ready) return;
+          // Fall back to a still (e.g. an animated image mis-detected as video)
+          // and share that still across every stream of the media.
+          const fallbackKey = `image:${stream.mediaId}`;
+          let fallback = this.mediaDecoders.get(fallbackKey) as StillImageSource | undefined;
+          if (!fallback) {
+            fallback = new StillImageSource(url);
+            await fallback.load(preBuffer);
+            if (fallback.ready) this.mediaDecoders.set(fallbackKey, fallback);
+          }
+          if (fallback.ready) {
+            decoder.dispose();
+            this.streamAliases.set(stream.id, fallbackKey);
+            this.mediaDecoders.set(stream.id, fallback);
+          } else {
+            fallback.dispose();
+            this.warnings.push(
+              `"${mediaName || stream.mediaId}" could not be decoded for export` +
+              (decoder.loadError ? ` (${decoder.loadError})` : '') +
+              '. Its frames will be missing from the output.'
+            );
+          }
+        })
+      );
     }
 
     await Promise.allSettled(loadPromises);
@@ -343,9 +408,55 @@ export class FrameScheduler {
     }
   }
 
+  /**
+   * The decode stream a clip belongs to. Falls back to the media/clip id so
+   * test-injected decoder maps (keyed by clip id) keep working.
+   */
+  private resolveStreamKey(clip: any): string {
+    const stream = this.streamPlan?.byClip.get(clip.id);
+    if (stream) return stream.id;
+    return clip.mediaId || clip.id;
+  }
+
+  /**
+   * The frame source that serves a clip: explicit injection → planned stream →
+   * stream alias (shared still) → media id → clip id.
+   */
+  private resolveDecoderForClip(clip: any): ClipFrameSource | null {
+    const compat = (this as any)._decodersCompat as Map<string, ClipFrameSource> | undefined;
+    if (compat) {
+      const injected = compat.get(clip.id) ?? (clip.mediaId ? compat.get(clip.mediaId) : undefined);
+      if (injected) return injected;
+    }
+    const streamKey = this.resolveStreamKey(clip);
+    const alias = this.streamAliases.get(streamKey);
+    return (
+      this.mediaDecoders.get(streamKey) ||
+      (alias ? this.mediaDecoders.get(alias) : undefined) ||
+      (clip.mediaId ? this.mediaDecoders.get(clip.mediaId) : undefined) ||
+      this.mediaDecoders.get(clip.id) ||
+      null
+    );
+  }
+
+  /**
+   * Decode statistics for every stream this export used (live + already
+   * evicted) — surfaced in the worker's COMPLETE message. A split-heavy timeline
+   * should report `backwardSeeks: 0` per stream; anything else means the decode
+   * planner needs another look.
+   */
+  getDecodeStats(): Array<{ streamId: string; stats: any }> {
+    const out: Array<{ streamId: string; stats: any }> = [...this.retiredDecodeStats];
+    for (const [streamId, decoder] of this.mediaDecoders) {
+      const stats = (decoder as any)?.stats;
+      if (stats) out.push({ streamId, stats: { ...stats } });
+    }
+    return out;
+  }
+
   async getLayersAtTime(timestampSeconds: number): Promise<RenderLayer[]> {
     const layers: RenderLayer[] = [];
-    const pending: Array<Promise<void>> = [];
+    const decodeRequests: DecodeRequest[] = [];
     let order = 0;
 
     const tracks = this.timeline.tracks || [];
@@ -550,64 +661,28 @@ export class FrameScheduler {
           };
 
           if (track.type === 'video' && (clip.mediaId || clip.id)) {
-            const lookupId = clip.mediaId || clip.id;
-            const decoder =
-              this.mediaDecoders.get(lookupId) ||
-              this.mediaDecoders.get(clip.mediaId) ||
-              (this as any)._decodersCompat?.get(lookupId);
+            const decoder = this.resolveDecoderForClip(clip);
             if (!decoder) {
-              // No decoder for this clip — skip (test may have no mediaId)
-              // In production, initializeDecoders would have created one
-              if (!clip.mediaId) {
-                // For test compatibility where decoder key == clip.id
-                const testDecoder = (this as any)._decodersCompat?.get(clip.id) || this.mediaDecoders.get(clip.id);
-                if (testDecoder) {
-                  const localTimeSeconds = getSpeedRampMediaTime(clip, Math.min(
-                    Math.max(timestampSeconds, clip.startTime),
-                    clip.startTime + clip.duration
-                  ));
-                  pending.push(
-                    (async () => {
-                      try {
-                        const frame = await testDecoder?.getFrameAt(localTimeSeconds * 1_000_000);
-                        if (frame) {
-                          layers.push({
-                            type: 'video',
-                            frame,
-                            timestampSeconds: t,
-                            startTime: st,
-                            clipId: clip.id,
-                            opacity,
-                            transform,
-                            ...visualSettings,
-                            zIndex,
-                            order: layerOrder,
-                            transitionGeometry,
-                            blendMode,
-                            sourceRotation: testDecoder?.rotation || 0,
-                          });
-                        }
-                      } catch {
-                        // failing decoder should not drop frame (test expects good to survive)
-                      }
-                    })()
-                  );
-                  continue;
-                }
-              }
+              // No decoder for this clip — skip (a test may have no mediaId, and
+              // in production initializeDecoders would have created one).
               continue;
             }
-            // Use speedRamp-aware media time mapping (matches preview's getMediaTimeForClip)
+            // SpeedRamp-aware media time mapping (matches preview's getMediaTimeForClip)
             const localTimeSeconds = getSpeedRampMediaTime(clip, Math.min(
               Math.max(timestampSeconds, clip.startTime),
               clip.startTime + clip.duration
             ));
             const safeTimeSeconds = Number.isFinite(localTimeSeconds) ? Math.max(0, localTimeSeconds) : 0;
 
-            pending.push(
-              (async () => {
+            // Queue rather than fire immediately: requests are flushed per decode
+            // stream in ascending source order, so a multi-layer frame can never
+            // ask one decoder for two distant positions in a random order.
+            decodeRequests.push({
+              streamKey: this.resolveStreamKey(clip),
+              sourceSeconds: safeTimeSeconds,
+              run: async () => {
                 try {
-                  const frame = await decoder?.getFrameAt(safeTimeSeconds * 1_000_000);
+                  const frame = await decoder.getFrameAt(safeTimeSeconds * 1_000_000);
                   if (frame) {
                     layers.push({
                       type: 'video',
@@ -622,14 +697,14 @@ export class FrameScheduler {
                       order: layerOrder,
                       transitionGeometry,
                       blendMode,
-                      sourceRotation: decoder?.rotation || 0,
+                      sourceRotation: decoder.rotation || 0,
                     });
                   }
                 } catch {
                   // One failing decoder should not drop rest of frame
                 }
-              })()
-            );
+              },
+            });
           } else if (track.type === 'text') {
             layers.push({
               type: 'text',
@@ -743,8 +818,14 @@ export class FrameScheduler {
       }
     }
 
-    if (pending.length > 0) {
-      await Promise.allSettled(pending);
+    if (decodeRequests.length > 0) {
+      // Per stream: ascending source time (monotonic decode, zero rewinds).
+      // Across streams: fully concurrent, so multi-track frames stay parallel.
+      decodeRequests.sort((a, b) => {
+        if (a.streamKey === b.streamKey) return a.sourceSeconds - b.sourceSeconds;
+        return a.streamKey < b.streamKey ? -1 : 1;
+      });
+      await Promise.allSettled(decodeRequests.map((request) => request.run()));
     }
 
     layers.sort((a, b) => (a.zIndex - b.zIndex) || ((a.order ?? 0) - (b.order ?? 0)));
@@ -755,7 +836,51 @@ export class FrameScheduler {
     return layers;
   }
 
+  /**
+   * Decode the NEXT frame while the current one is composited and encoded.
+   *
+   * Professional exporters pipeline decode → composite → encode instead of
+   * running the three stages serially; one frame of look-ahead is enough to hide
+   * the decode latency (and any residual seek) without holding extra frames.
+   * The prefetched plan is consumed by the matching `getFramePlanAtTime`, and
+   * discarded (frames closed) when the export moves somewhere else.
+   */
+  prefetchAtTime(timestampSeconds: number): void {
+    if (this.prefetchSlot && Math.abs(this.prefetchSlot.timestamp - timestampSeconds) < 1e-6) return;
+    this.discardPrefetch();
+    const promise = this.buildFramePlan(timestampSeconds);
+    promise.catch(() => {});
+    this.prefetchSlot = { timestamp: timestampSeconds, promise };
+  }
+
+  /** Drops and closes a prefetched plan that will never be composited. */
+  discardPrefetch(): void {
+    const slot = this.prefetchSlot;
+    this.prefetchSlot = null;
+    if (!slot) return;
+    slot.promise
+      .then((plan) => {
+        for (const layer of plan.layers) {
+          const frame: any = layer.frame;
+          try {
+            if (frame && typeof frame.close === 'function') frame.close();
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }
+
   async getFramePlanAtTime(timestampSeconds: number): Promise<FramePlan> {
+    const slot = this.prefetchSlot;
+    if (slot && Math.abs(slot.timestamp - timestampSeconds) < 1e-6) {
+      this.prefetchSlot = null;
+      return slot.promise;
+    }
+    if (slot) this.discardPrefetch();
+    return this.buildFramePlan(timestampSeconds);
+  }
+
+  private async buildFramePlan(timestampSeconds: number): Promise<FramePlan> {
     const overlays: FrameOverlay[] = [];
     for (const track of this.timeline.tracks || []) {
       if (track.hidden) continue;
@@ -776,20 +901,38 @@ export class FrameScheduler {
    * for clips that will never be needed again during a forward export.
    */
   private evictExpiredDecoders(currentTimeSec: number): void {
-    const neededMediaIds = new Set<string>();
+    // Injected (test) decoder maps are owned by the caller — never evict them.
+    if ((this as any)._decodersCompat) return;
+
+    const neededKeys = new Set<string>();
+    const aliveClips = new Set<string>();
     for (const track of this.timeline.tracks || []) {
       for (const clip of track.clips || []) {
         const clipEnd = (clip.startTime || 0) + (clip.duration || 0);
-        // Keep decoders for clips that haven't ended yet (+ 1s safety margin for transitions)
+        // Keep decoders for clips that haven't ended yet (+1s safety margin)
         if (clipEnd > currentTimeSec - 1) {
-          const lookupId = clip.mediaId || clip.id;
-          neededMediaIds.add(lookupId);
-          if (clip.mediaId) neededMediaIds.add(clip.mediaId);
+          aliveClips.add(clip.id);
+          const streamKey = this.resolveStreamKey(clip);
+          neededKeys.add(streamKey);
+          const alias = this.streamAliases.get(streamKey);
+          if (alias) neededKeys.add(alias);
+          if (clip.mediaId) neededKeys.add(clip.mediaId);
         }
       }
     }
+
+    // Streams whose clips have all expired are dropped; a stream that is still
+    // scheduled later is kept so we don't pay an init + seek when it comes back.
+    if (this.streamPlan) {
+      for (const stream of this.streamPlan.streams) {
+        if (stream.clipIds.some((clipId) => aliveClips.has(clipId))) neededKeys.add(stream.id);
+      }
+    }
+
     for (const [id, decoder] of this.mediaDecoders) {
-      if (!neededMediaIds.has(id)) {
+      if (!neededKeys.has(id)) {
+        const stats = (decoder as any)?.stats;
+        if (stats) this.retiredDecodeStats.push({ streamId: id, stats: { ...stats } });
         if (typeof (decoder as any)?.dispose === 'function') {
           (decoder as any).dispose();
         }
@@ -799,6 +942,11 @@ export class FrameScheduler {
   }
 
   dispose() {
+    this.discardPrefetch();
+    for (const [streamId, decoder] of this.mediaDecoders) {
+      const stats = (decoder as any)?.stats;
+      if (stats) this.retiredDecodeStats.push({ streamId, stats: { ...stats } });
+    }
     this.mediaDecoders.forEach(d => {
       if (typeof (d as any)?.dispose === 'function') {
         (d as any).dispose();

@@ -671,6 +671,15 @@ async function handleExport(
       );
       renderedLayerCount += layers.length;
 
+      // PIPELINING: kick off the NEXT frame's decode now, while this frame is
+      // composited and encoded. Professional exporters overlap decode with
+      // composite/encode; doing it serially leaves the decoder idle for most of
+      // the frame budget. One frame of look-ahead only, so no extra frame
+      // retention (and split-heavy timelines keep decoding monotonically).
+      if (i + 1 < totalFrames && !isCancelled) {
+        scheduler.prefetchAtTime(startAt + ((i + 1) / config.fps));
+      }
+
       // Render frame with WebGL (or 2D fallback if context lost)
       await compositor.render(layers, overlays);
 
@@ -869,12 +878,20 @@ async function handleExport(
       }
     } catch {}
 
+    const decodeStats = typeof (scheduler as any).getDecodeStats === 'function'
+      ? (scheduler as any).getDecodeStats()
+      : [];
+
     postMessage({ 
       type: 'COMPLETE', 
       payload: { 
         fileSize: finalFileSize, 
         filename: finalFileName, 
-        savedDirectly: !!fileHandle 
+        savedDirectly: !!fileHandle,
+        // Per-stream decode telemetry (rewinds / cache hits / seeks). A
+        // split-heavy timeline should show `backwardSeeks: 0` on every stream —
+        // otherwise the decode-stream planner needs another look.
+        decodeStats,
       }, 
     });
 

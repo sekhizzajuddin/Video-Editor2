@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { MediaItem } from '@/types';
 import { seededRandom } from '../timelineUtils';
 import { generateFrameStripOnDemand } from '@/utils/mediaProbe';
+import { useEditorStore } from '@/store/editorStore';
 import type { SpeedFrameSegment } from '@/utils/speedRamp';
 
 interface FrameStripOverlayProps {
@@ -25,12 +26,20 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
 }: FrameStripOverlayProps) {
   const cachedStrip = media ? stripCache.get(media.url) : undefined;
   const [lazyStrip, setLazyStrip] = useState<string[] | null>(null);
+  // DECODER CONTENTION FIX: generating a strip opens its own <video> on the same
+  // media url and seeks it 8 times through the file. Doing that while the preview
+  // is playing steals decode bandwidth from the element the playhead is following
+  // — and it fires exactly when a NEW clip appears (a split, a paste, a second
+  // track), which is why an edit mid-playback used to stall the preview. Wait for
+  // playback to stop; the effect re-runs on the isPlaying transition.
+  const isPlaying = useEditorStore((s) => s.isPlaying);
 
   useEffect(() => {
     if (!media) return;
     if (media.frameStrip && media.frameStrip.length > 0) return;
     if (stripCache.has(media.url)) return;
     if (!media.url || media.url === 'PENDING_RESTORE') return;
+    if (isPlaying) return; // defer decoding until the preview is idle
     let cancelled = false;
     generateFrameStripOnDemand(media.url, media.duration || 0, 8, 120)
       .then((strip) => {
@@ -44,7 +53,7 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
     return () => {
       cancelled = true;
     };
-  }, [media]);
+  }, [media, isPlaying]);
 
   const frameStrip = media?.frameStrip && media.frameStrip.length > 0
     ? media.frameStrip

@@ -31,6 +31,12 @@ class FakeVideoFrame {
   duration: number;
   displayWidth = FRAME_W;
   displayHeight = FRAME_H;
+  // mediabunny derives the alpha/color merge path from coded dimensions; a fake
+  // frame without them hits an internal assertion and every frame silently
+  // becomes null → "black export" in the harness (mirrors exportScenarios).
+  codedWidth = FRAME_W;
+  codedHeight = FRAME_H;
+  format = 'I420';
   source: any;
   closed = false;
   constructor(source: any, init: any = {}) {
@@ -46,6 +52,8 @@ class FakeVideoFrame {
     const f = new FakeVideoFrame(this.source, { timestamp: this.timestamp, duration: this.duration });
     f.displayWidth = this.displayWidth;
     f.displayHeight = this.displayHeight;
+    f.codedWidth = this.codedWidth;
+    f.codedHeight = this.codedHeight;
     return f;
   }
   close() {
@@ -81,6 +89,14 @@ class Fake2DContext {
     this.canvas.__ops.push({ op: 'fill' });
     this.canvas.__hasContent = false;
     this.canvas.__maxPixel = 0;
+  }
+  // mediabunny clears a REUSED pooled canvas before drawing into it; without
+  // this the harness threw "context.clearRect is not a function" whenever the
+  // canvas pool recycled a surface, which intermittently dropped frames.
+  clearRect() {
+    this.canvas.__hasContent = false;
+    this.canvas.__maxPixel = 0;
+    this.canvas.__pixels = null;
   }
   drawImage(src: any) {
     let pixels: Uint8ClampedArray | null = src?.__pixels ?? null;
@@ -370,6 +386,10 @@ beforeAll(() => {
     FakeWorker.current?.deliver(msg);
   };
   g.OffscreenCanvas = FakeOffscreenCanvas;
+  // mediabunny's CanvasSink validates `context instanceof OffscreenCanvasRenderingContext2D`
+  // before drawing a decoded frame; without this global registration the harness
+  // silently produced zero layers ("black export") for every clip.
+  g.OffscreenCanvasRenderingContext2D = Fake2DContext;
   g.ImageData = class {
     data: Uint8ClampedArray;
     width: number;

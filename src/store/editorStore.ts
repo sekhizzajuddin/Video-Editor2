@@ -31,6 +31,7 @@ import {
   removeSpeedFrameFromClip,
   calculateSpeedFramesRamp,
 } from '@/utils/speedRamp';
+import { restampSplitChains } from '@/utils/splitClipIdentity';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
@@ -2982,9 +2983,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       const newSelectedKeyframeLines = state.selectedKeyframeLines.filter(l => !idsToSplit.has(l.clipId));
 
+      // ── Split Clip ID Provider ────────────────────────────────────────
+      // Re-stamp segment indexes across the whole timeline so every half of the
+      // chain has a deterministic identity (`splitGroupId` + `splitSegmentIndex`).
+      // The preview's <video> pool, the export worker's decode-stream planner and
+      // the caches all derive their keys from this, which is what keeps a split
+      // from looking like "a brand new clip" to the renderer.
+      const stampedTracks = restampSplitChains({ tracks }).tracks ?? tracks;
+
       if (isSelected && primarySelectedId) {
         return {
-          tracks,
+          tracks: stampedTracks,
           pipWindows,
           selectedClipId: primarySelectedId,
           selectedClipIds: [primarySelectedId],
@@ -2992,7 +3001,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         };
       }
 
-      return { tracks, pipWindows, selectedKeyframeLines: newSelectedKeyframeLines };
+      return { tracks: stampedTracks, pipWindows, selectedKeyframeLines: newSelectedKeyframeLines };
     });
     get().recalcTotalDuration();
     get().saveSnapshot('Split Clip');
