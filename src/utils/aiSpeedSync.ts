@@ -40,6 +40,33 @@ export interface SyncAnchor {
   ttsTime: number;    // offset in seconds from TTS clip trimmed start
   phrase?: string;
   targetSpeed?: number;
+  /** True when this anchor came from a matched word pair (word-level mode). */
+  matched?: boolean;
+  /** True when this anchor is a trailing-hold frame (TTS wording fuller than video). */
+  stretch?: boolean;
+}
+
+export interface SyncWordTiming {
+  word: string;
+  time: number; // seconds from the respective audio slice start
+}
+
+/**
+ * AI-reported verdict about the two provided audios. Drives the
+ * wrong-audio-clip validation before any speed frames are applied:
+ * - ttsHasSpeech === false  → the user selected a music/silent clip instead of TTS.
+ * - sameContent === true    → the user selected the original clip's own audio
+ *                             instead of a separate TTS voiceover.
+ * - videoHasSpeech === false is NOT an error — the video may be a silent
+ *   AI-generated clip; the sync falls back to TTS-cadence pacing.
+ */
+export interface SpeedSyncVerdict {
+  ttsHasSpeech: boolean;
+  videoHasSpeech: boolean;
+  sameContent: boolean;
+  ttsTranscript?: string;
+  videoTranscript?: string;
+  reason?: string;
 }
 
 export interface AiSpeedSyncOptions {
@@ -57,6 +84,11 @@ export interface AiSpeedSyncResult {
   newDuration: number;
   successfulModel: string;
   summary?: string;
+  /** How the anchors were derived: 'word-level' (matched word pairs) or 'ai-anchors' (cadence fallback). */
+  alignmentMode?: 'word-level' | 'ai-anchors';
+  verdict?: SpeedSyncVerdict;
+  /** Number of anchors that stretch/hold the video across extra TTS words. */
+  stretchFrameCount?: number;
 }
 
 /**
@@ -68,7 +100,7 @@ export async function extractClipAudioToWav(
   mediaUrl: string,
   mediaId?: string,
   sampleRate: number = 16000
-): Promise<{ wavBlob: Blob | null; duration: number; hasAudio: boolean }> {
+): Promise<{ wavBlob: Blob | null; duration: number; hasAudio: boolean; rmsEnergy: number }> {
   let arrayBuffer: ArrayBuffer | null = null;
 
   // 1. Try fetching live URL
@@ -94,20 +126,20 @@ export async function extractClipAudioToWav(
   }
 
   const effectiveSpeed = clip.speed || 1.0;
-  const rawSpan = clip.speedFrameSourceEnd
+  const rawSpan = clip.speedFrameSourceEnd !== undefined
     ? (clip.speedFrameSourceEnd - (clip.trimStart || 0))
     : (clip.duration * effectiveSpeed);
   const fallbackSpan = Math.max(0.1, rawSpan);
 
   if (!arrayBuffer) {
-    return { wavBlob: null, duration: fallbackSpan, hasAudio: false };
+    return { wavBlob: null, duration: fallbackSpan, hasAudio: false, rmsEnergy: 0 };
   }
 
   const audioCtx = new AudioContext();
   try {
     const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
     if (!decodedBuffer || decodedBuffer.numberOfChannels === 0 || decodedBuffer.length === 0) {
-      return { wavBlob: null, duration: fallbackSpan, hasAudio: false };
+      return { wavBlob: null, duration: fallbackSpan, hasAudio: false, rmsEnergy: 0 };
     }
 
     const trimStart = Math.max(0, clip.trimStart || 0);
@@ -124,10 +156,17 @@ export async function extractClipAudioToWav(
     const rendered = await offlineCtx.startRendering();
     const wavBlob = audioBufferToWav(rendered);
 
-    return { wavBlob, duration: actualSpan, hasAudio: true };
+    // RMS energy of the rendered slice — drives the local "silent clip"
+    // validation before the AI call (music/silence selected by mistake).
+    const data = rendered.getChannelData(0);
+    let sumSquares = 0;
+    for (let i = 0; i < data.length; i++) sumSquares += data[i] * data[i];
+    const rmsEnergy = Math.sqrt(sumSquares / Math.max(1, data.length));
+
+    return { wavBlob, duration: actualSpan, hasAudio: true, rmsEnergy };
   } catch (decodeErr) {
     console.warn('[AiSpeedSync] Audio decode failed or media has no audio track:', decodeErr);
-    return { wavBlob: null, duration: fallbackSpan, hasAudio: false };
+    return { wavBlob: null, duration: fallbackSpan, hasAudio: false, rmsEnergy: 0 };
   } finally {
     await audioCtx.close().catch(() => {});
   }
@@ -146,7 +185,14 @@ export async function runGeminiSpeedSync(
   videoDuration: number,
   ttsDuration: number,
   preferredModel?: GeminiSpeedSyncModel
-): Promise<{ anchors: SyncAnchor[]; successfulModel: string; summary: string }> {
+): Promise<{
+  anchors: SyncAnchor[];
+  successfulModel: string;
+  summary: string;
+  verdict?: SpeedSyncVerdict;
+  videoWords?: SyncWordTiming[];
+  ttsWords?: SyncWordTiming[];
+}> {
   const apiKey = getGeminiKey();
   if (!apiKey) {
     throw new Error('Gemini API Key is missing. Please configure it in Settings or set VITE_GEMINI_API_KEY.');
@@ -167,27 +213,33 @@ export async function runGeminiSpeedSync(
   const parts: any[] = [];
 
   if (hasBothAudio) {
-    prompt = `You are a world-class audio-visual synchronization and video speed-ramping editor.
+    prompt = `You are a world-class audio synchronization and video speed-ramping editor.
 I have provided two audio recordings:
 - AUDIO 1 (First audio file): Original Video Clip Audio (Duration: ${videoDuration.toFixed(2)}s).
 - AUDIO 2 (Second audio file): TTS Voiceover Audio to synchronize with (Duration: ${ttsDuration.toFixed(2)}s).
 
-TASK:
-1. Listen and compare both audio tracks.
-2. Align matching speech sentences, key phrases, dialogue pauses, or rhythmic cadence between Audio 1 and Audio 2.
-3. Generate 3 to 10 synchronized anchor points where sentence or phrase beginnings align.
-4. For each anchor point:
-   - "videoTime": timestamp in seconds from Audio 1 start (0.00 to ${videoDuration.toFixed(2)}).
-   - "ttsTime": timestamp in seconds from Audio 2 start (0.00 to ${ttsDuration.toFixed(2)}).
-   - "phrase": short description or transcribed words for this anchor point.
+TASK — mark the timing of every word in BOTH audios:
+1. Listen to AUDIO 1 and transcribe the spoken words with precise timestamps as "videoWords": [{ "word": "...", "time": seconds }].
+2. Listen to AUDIO 2 and transcribe the spoken words with precise timestamps as "ttsWords": [{ "word": "...", "time": seconds }].
+3. Report a verdict about the two audios:
+   - "ttsHasSpeech": true only if AUDIO 2 contains spoken speech (false if it is music, noise, or silence).
+   - "videoHasSpeech": true only if AUDIO 1 contains spoken speech (false is fine — the video may be a silent AI-generated clip).
+   - "sameContent": true if AUDIO 2 is the SAME spoken content as AUDIO 1 (this means the user selected the original clip's own audio by mistake instead of a separate TTS voiceover).
+   - "reason": short explanation of the verdict.
+4. Also return 3 to 10 anchor points where sentence or phrase beginnings align, as a fallback:
+   - "videoTime": seconds from AUDIO 1 start (0.00 to ${videoDuration.toFixed(2)}).
+   - "ttsTime": seconds from AUDIO 2 start (0.00 to ${ttsDuration.toFixed(2)}).
+   - "phrase": short description or transcribed words for this anchor.
    - "targetSpeed": recommended video speed multiplier between this and the previous anchor (e.g. 0.7x to 1.8x).
+5. IMPORTANT: the word timestamps will be matched programmatically — report ACCURATE word-level timestamps, not invented ones.
 
 RULES:
-- Both "videoTime" and "ttsTime" MUST strictly increase chronologically.
-- 0.05 <= videoTime <= ${(videoDuration - 0.05).toFixed(2)}
-- 0.05 <= ttsTime <= ${(ttsDuration - 0.05).toFixed(2)}
+- Word "time" values and anchor timestamps MUST be in seconds and within each audio's duration.
 - Return ONLY strict JSON in this format without markdown wrappers:
 {
+  "verdict": { "ttsHasSpeech": true, "videoHasSpeech": true, "sameContent": false, "reason": "TTS is a separate voiceover" },
+  "videoWords": [ { "word": "hello", "time": 0.8 } ],
+  "ttsWords": [ { "word": "hello", "time": 1.1 } ],
   "summary": "<1-2 sentence overview of pacing adjustment>",
   "anchors": [
     { "videoTime": 0.8, "ttsTime": 1.1, "phrase": "Intro sentence", "targetSpeed": 1.2 }
@@ -206,11 +258,14 @@ The video clip has no audio track, so we must pace the video to match the spoken
 
 TASK:
 1. Listen to the TTS voiceover audio (${ttsDuration.toFixed(2)}s).
-2. Detect major sentence starts, punchlines, and breathing/pauses.
-3. Distribute 3 to 8 speed frame anchor points to create dynamic, cinematic speed ramping:
+2. Mark the timing of every spoken word as "ttsWords": [{ "word": "...", "time": seconds }].
+3. Report a verdict: "verdict": { "ttsHasSpeech": true/false, "videoHasSpeech": false, "sameContent": false, "reason": "..." }.
+   - "ttsHasSpeech" is false if the TTS audio is music, noise, or silence (the user may have selected the wrong clip).
+4. Detect major sentence starts, punchlines, and breathing/pauses.
+5. Distribute 3 to 8 speed frame anchor points to create dynamic, cinematic speed ramping:
    - Slightly accelerate video through spoken pauses.
    - Settle at natural speed (0.9x - 1.2x) on key phrases and emphasis words.
-4. For each anchor:
+6. For each anchor:
    - "videoTime": mapped source moment in seconds (0.00 to ${videoDuration.toFixed(2)}).
    - "ttsTime": spoken timestamp in TTS audio (0.00 to ${ttsDuration.toFixed(2)}).
    - "phrase": words spoken or event at this moment.
@@ -220,6 +275,8 @@ RULES:
 - Timestamps must be strictly ascending.
 - Return ONLY strict JSON in this format without markdown wrappers:
 {
+  "verdict": { "ttsHasSpeech": true, "videoHasSpeech": false, "sameContent": false, "reason": "..." },
+  "ttsWords": [ { "word": "hello", "time": 0.5 } ],
   "summary": "<overview of pacing curve>",
   "anchors": [
     { "videoTime": 1.0, "ttsTime": 1.2, "phrase": "First phrase", "targetSpeed": 1.1 }
@@ -291,6 +348,37 @@ RULES:
     const rawAnchors = Array.isArray(parsed) ? parsed : (parsed.anchors || []);
     const summary = parsed.summary || 'Synchronized video playback speed with TTS voiceover.';
 
+    // Parse the AI verdict (wrong-audio-clip detection) — tolerate responses
+    // without one (older format / plain anchor arrays).
+    let verdict: SpeedSyncVerdict | undefined;
+    const rawVerdict = !Array.isArray(parsed) ? parsed.verdict : undefined;
+    if (rawVerdict && typeof rawVerdict === 'object') {
+      verdict = {
+        ttsHasSpeech: rawVerdict.ttsHasSpeech !== false,
+        videoHasSpeech: rawVerdict.videoHasSpeech !== false,
+        sameContent: rawVerdict.sameContent === true,
+        ttsTranscript: typeof rawVerdict.ttsTranscript === 'string' ? rawVerdict.ttsTranscript : undefined,
+        videoTranscript: typeof rawVerdict.videoTranscript === 'string' ? rawVerdict.videoTranscript : undefined,
+        reason: typeof rawVerdict.reason === 'string' ? rawVerdict.reason : undefined,
+      };
+    }
+
+    // Sanitize word timings (cap length to bound payload, finite + in-bounds).
+    const sanitizeWords = (raw: unknown, duration: number): SyncWordTiming[] | undefined => {
+      if (!Array.isArray(raw) || raw.length === 0) return undefined;
+      const words: SyncWordTiming[] = [];
+      for (const w of raw.slice(0, 600)) {
+        const time = typeof w?.time === 'number' ? w.time : Number(w?.time);
+        const word = typeof w?.word === 'string' ? w.word : '';
+        if (!Number.isFinite(time) || !word) continue;
+        if (time < -0.05 || time > duration + 0.5) continue;
+        words.push({ word, time: Number(time.toFixed(3)) });
+      }
+      return words.length > 0 ? words : undefined;
+    };
+    const videoWords = sanitizeWords(parsed.videoWords, videoDuration);
+    const ttsWords = sanitizeWords(parsed.ttsWords, ttsDuration);
+
     // Sanitize and validate anchors
     const sanitizedAnchors: SyncAnchor[] = [];
     let prevVideo = 0;
@@ -308,7 +396,9 @@ RULES:
           videoTime: Number(vTime.toFixed(3)),
           ttsTime: Number(tTime.toFixed(3)),
           phrase: a.phrase || '',
-          targetSpeed: typeof a.targetSpeed === 'number' ? a.targetSpeed : 1.0,
+          // Clamp the AI's targetSpeed to a sane preview range (the raw value
+          // is only a hint; real speeds emerge from frame geometry).
+          targetSpeed: typeof a.targetSpeed === 'number' ? Math.min(4, Math.max(0.25, a.targetSpeed)) : 1.0,
         });
         prevVideo = vTime;
         prevTts = tTime;
@@ -323,15 +413,108 @@ RULES:
           videoTime: Number(((videoDuration * i) / (stepCount + 1)).toFixed(3)),
           ttsTime: Number(((ttsDuration * i) / (stepCount + 1)).toFixed(3)),
           phrase: `Anchor ${i}`,
-          targetSpeed: videoDuration / ttsDuration,
+          targetSpeed: Math.min(4, Math.max(0.25, videoDuration / ttsDuration)),
         });
       }
     }
 
-    return { anchors: sanitizedAnchors, successfulModel, summary };
+    return { anchors: sanitizedAnchors, successfulModel, summary, verdict, videoWords, ttsWords };
   } catch (parseErr: any) {
     throw new Error(`Failed to parse AI speed sync response as JSON: ${parseErr.message}`);
   }
+}
+
+/**
+ * Deterministic word-level alignment: matches TTS word timings against video
+ * word timings and builds anchors — the alignment MATH is done here, not left
+ * to the model (the AI only marks word timings in both audios).
+ *
+ * Handles every wording mismatch case:
+ * - Equal wording: 1:1 word pairs → anchors at each matched word.
+ * - TTS has EXTRA words (TTS wording fuller than the video, e.g. the AI video
+ *   skips filler the TTS speaks): unmatched TTS words are covered by linear
+ *   interpolation through the surrounding matched anchors — the video content
+ *   between them is stretched/compressed to fit, and a trailing-hold anchor
+ *   keeps the video near its last matched position instead of compressing its
+ *   remaining content fast.
+ * - Video has EXTRA words (video speaks more than the TTS): unmatched video
+ *   words are simply consumed faster — the interpolation through matched
+ *   anchors compresses them.
+ * - No word matches at all: returns [] → caller falls back to the AI's
+ *   cadence anchors.
+ */
+export function buildAnchorsFromWordTimings(
+  videoWords: SyncWordTiming[],
+  ttsWords: SyncWordTiming[],
+  videoDuration: number,
+  ttsDuration: number
+): SyncAnchor[] {
+  const normalize = (w: string) =>
+    (w || '').toLowerCase().replace(/[.,!?،۔؟;:"'`\-–—()[\]{}]/g, '').trim();
+
+  const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+  const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+  if (vWords.length === 0 || tWords.length === 0) return [];
+
+  const anchors: SyncAnchor[] = [];
+  let vi = 0;          // video word cursor — strictly monotone forward
+  let lastTts = -1;
+  let matchedAny = false;
+
+  for (let ti = 0; ti < tWords.length; ti++) {
+    const tWord = tWords[ti];
+    const tNorm = normalize(tWord.word);
+
+    // ±3-word lookahead match (handles small transcription shifts without
+    // breaking monotonicity — same strategy as the improved pair algorithm).
+    let matchIdx = -1;
+    for (let look = 0; look <= 3; look++) {
+      const cand = vWords[vi + look];
+      if (!cand) break;
+      if (normalize(cand.word) === tNorm) { matchIdx = vi + look; break; }
+    }
+
+    if (matchIdx >= 0) {
+      const vWord = vWords[matchIdx];
+      if (tWord.time > lastTts + 0.05 && vWord.time < videoDuration - 0.05) {
+        anchors.push({
+          videoTime: Number(vWord.time.toFixed(3)),
+          ttsTime: Number(tWord.time.toFixed(3)),
+          phrase: tWord.word,
+          matched: true,
+        });
+        lastTts = tWord.time;
+        matchedAny = true;
+      }
+      vi = matchIdx + 1;
+    }
+    // Unmatched TTS word (extra / filler): intentionally skipped — the linear
+    // interpolation through the surrounding matched anchors stretches the
+    // video's content across it, so its delivery timing still matches.
+  }
+
+  if (!matchedAny) return [];
+
+  // Trailing hold — "TTS wording is better than video clip": when the TTS
+  // keeps speaking after the video's last matched word, HOLD the video near
+  // that position (slow creep through a little of its remaining content)
+  // instead of compressing all remaining content fast at the end. The clip-end
+  // boundary alone would map the whole remaining source span across the
+  // trailing TTS duration and rush it.
+  const lastAnchor = anchors[anchors.length - 1];
+  const trailing = ttsDuration - 0.05 - lastAnchor.ttsTime;
+  if (trailing > 0.15) {
+    const remainingSpan = Math.max(0, videoDuration - 0.05 - lastAnchor.videoTime);
+    const holdAdvance = Math.min(remainingSpan, trailing * 0.15);
+    anchors.push({
+      videoTime: Number((lastAnchor.videoTime + holdAdvance).toFixed(3)),
+      ttsTime: Number((ttsDuration - 0.05).toFixed(3)),
+      phrase: 'Hold for trailing TTS',
+      stretch: true,
+    });
+  }
+
+  return anchors;
 }
 
 /**
@@ -421,6 +604,13 @@ export async function syncVideoClipWithTts(
     throw new Error('TTS Audio Clip does not have valid audio media.');
   }
 
+  // ── Wrong-audio-clip validation (pre-flight, before any AI work) ──────────
+  // The user may select the video's own media as the "TTS voiceover" — syncing
+  // a clip against itself produces garbage. Reject immediately.
+  if (ttsClip.mediaId === videoClip.mediaId) {
+    throw new Error('The TTS clip is the same media as the video clip. Select a separate TTS voiceover audio clip.');
+  }
+
   // 1. Extract Video Audio
   onProgress?.(10, 'Scanning Video Clip audio...');
   const videoAudio = await extractClipAudioToWav(
@@ -438,18 +628,55 @@ export async function syncVideoClipWithTts(
   );
 
   if (!ttsAudio.wavBlob) {
-    throw new Error('Could not decode audio from the selected TTS clip.');
+    throw new Error('Could not decode audio from the selected TTS clip. It may be a music file without a decodable audio track — select a valid TTS voiceover clip.');
   }
 
-  // 3. Gemini Multimodal Analysis
-  onProgress?.(55, 'AI comparing audio timing & cadence (Gemini 3.5 Flash Preview)...');
-  const { anchors, successfulModel, summary } = await runGeminiSpeedSync(
+  // Local silence check — a silent TTS clip (wrong selection) cannot anchor
+  // anything. RMS threshold is conservative: real speech at 16kHz mono is
+  // typically > 0.02; near-silence is < 0.005.
+  if (ttsAudio.hasAudio && ttsAudio.rmsEnergy < 0.005) {
+    throw new Error('The selected TTS clip audio is silent. Please select a valid TTS voiceover clip with speech.');
+  }
+
+  // 3. Gemini Multimodal Analysis — marks word timings in BOTH audios
+  onProgress?.(55, 'AI marking word timings in video & TTS audio...');
+  const analysis = await runGeminiSpeedSync(
     videoAudio.wavBlob,
     ttsAudio.wavBlob,
     videoAudio.duration,
     ttsAudio.duration,
     options.targetModel
   );
+  const { anchors: aiAnchors, successfulModel, summary, verdict } = analysis;
+
+  // ── Wrong-audio-clip validation (AI verdict) ──────────────────────────────
+  if (verdict) {
+    if (verdict.ttsHasSpeech === false) {
+      throw new Error('AI detected that the selected TTS clip does not contain speech (music/noise/silence). Please select a valid TTS voiceover clip.');
+    }
+    if (verdict.sameContent === true) {
+      throw new Error('AI detected that the selected audio is the original clip\'s own audio, not a separate TTS voiceover. Please select the TTS clip.');
+    }
+    // videoHasSpeech === false is NOT an error — silent AI-generated video is
+    // expected; the cadence/word mapping still works via TTS timings.
+  }
+
+  // ── Anchor derivation: prefer word-level matching, fall back to cadence ───
+  let anchors = aiAnchors;
+  let alignmentMode: 'word-level' | 'ai-anchors' = 'ai-anchors';
+  if (analysis.videoWords && analysis.ttsWords &&
+      analysis.videoWords.length > 0 && analysis.ttsWords.length > 0) {
+    const wordAnchors = buildAnchorsFromWordTimings(
+      analysis.videoWords,
+      analysis.ttsWords,
+      videoAudio.duration,
+      ttsAudio.duration
+    );
+    if (wordAnchors.length >= 2) {
+      anchors = wordAnchors;
+      alignmentMode = 'word-level';
+    }
+  }
 
   // 4. Calculate Speed Frames
   onProgress?.(85, 'Calculating Speed Frames & rate-stretching video...');
@@ -459,6 +686,7 @@ export async function syncVideoClipWithTts(
     anchors,
     videoMedia?.duration
   );
+  const stretchFrameCount = anchors.filter((a) => a.stretch).length;
 
   // 5. Apply to Clip in Store
   const alignStart = options.alignStartTime !== false;
@@ -472,7 +700,11 @@ export async function syncVideoClipWithTts(
     speedFrameSourceEnd: fixedSourceEnd,
     audioSettings: muteOriginal
       ? {
-          volume: 0,
+          // BUG FIX: the user's existing settings are spread FIRST and the
+          // explicit mute/zeros AFTER — the old order (volume: 0 before the
+          // spread) let a pre-existing custom volume survive "mute original
+          // audio", so the TTS was not isolated.
+          ...(videoClip.audioSettings || {}),
           pan: 0,
           fadeIn: 0,
           fadeOut: 0,
@@ -482,7 +714,7 @@ export async function syncVideoClipWithTts(
           voiceFormant: 0,
           preservePitch: true,
           humanize: false,
-          ...(videoClip.audioSettings || {}),
+          volume: 0,
           muted: true,
         }
       : videoClip.audioSettings,
@@ -506,5 +738,8 @@ export async function syncVideoClipWithTts(
     newDuration,
     successfulModel,
     summary,
+    alignmentMode,
+    verdict,
+    stretchFrameCount,
   };
 }

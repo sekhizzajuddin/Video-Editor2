@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   buildSpeedFramesFromAnchors,
+  buildAnchorsFromWordTimings,
   GEMINI_SPEED_SYNC_MODELS,
   runGeminiSpeedSync,
   SyncAnchor,
@@ -163,6 +164,179 @@ describe('aiSpeedSync', () => {
       const result = await runGeminiSpeedSync(dummyBlob, dummyBlob, 5, 6);
       expect(result.successfulModel).toBe('gemini-3.1-flash-lite');
       expect(result.anchors.length).toBeGreaterThan(0);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('parses word timings and verdict from a word-level response', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        verdict: { ttsHasSpeech: true, videoHasSpeech: true, sameContent: false, reason: 'separate voiceover' },
+                        videoWords: [{ word: 'Hello', time: 0.5 }, { word: 'world', time: 1.2 }],
+                        ttsWords: [{ word: 'Hello', time: 0.8 }, { word: 'world', time: 2.0 }],
+                        summary: 'Matched',
+                        anchors: [],
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+      })
+    );
+
+    vi.mock('./aiClient', () => ({
+      getGeminiKey: () => 'test-key-mock',
+    }));
+
+    const dummyBlob = new Blob(['fake audio content'], { type: 'audio/wav' });
+
+    try {
+      const result = await runGeminiSpeedSync(dummyBlob, dummyBlob, 5, 6);
+      expect(result.verdict?.ttsHasSpeech).toBe(true);
+      expect(result.verdict?.sameContent).toBe(false);
+      expect(result.videoWords?.length).toBe(2);
+      expect(result.ttsWords?.length).toBe(2);
+      // anchors-only fallback kicks in when no matched word pairs exist
+      expect(result.anchors.length).toBeGreaterThan(0);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  describe('buildAnchorsFromWordTimings', () => {
+    const videoWords = [
+      { word: 'Hello', time: 0.5 },
+      { word: 'welcome', time: 2.0 },
+      { word: 'to', time: 2.4 },
+      { word: 'the', time: 2.7 },
+      { word: 'video', time: 3.0 },
+    ];
+    const ttsWords = [
+      { word: 'Hello', time: 0.8 },
+      { word: 'welcome', time: 2.5 },
+      { word: 'to', time: 3.2 },
+      { word: 'the', time: 3.8 },
+      { word: 'video', time: 4.4 },
+    ];
+
+    it('matches equal wording 1:1 into chronological anchors', () => {
+      // TTS ends right after the last matched word (no trailing speech → no
+      // hold anchor; the clip-end boundary covers the tail).
+      const anchors = buildAnchorsFromWordTimings(videoWords, ttsWords, 6, 4.5);
+      expect(anchors.length).toBe(5);
+      expect(anchors.every((a) => a.matched)).toBe(true);
+      for (let i = 0; i < anchors.length - 1; i++) {
+        expect(anchors[i].videoTime).toBeLessThan(anchors[i + 1].videoTime);
+        expect(anchors[i].ttsTime).toBeLessThan(anchors[i + 1].ttsTime);
+      }
+      expect(anchors[0].videoTime).toBe(0.5);
+      expect(anchors[0].ttsTime).toBe(0.8);
+    });
+
+    it('handles TTS extra words with a trailing hold anchor (TTS wording fuller than video)', () => {
+      // TTS keeps speaking after the video's last matched word
+      const fullerTts = [
+        ...ttsWords,
+        { word: 'subscribe', time: 6.0 },
+        { word: 'now', time: 6.8 },
+      ];
+      const anchors = buildAnchorsFromWordTimings(videoWords, fullerTts, 4.5, 8);
+      // 5 matched + 1 trailing hold
+      expect(anchors.length).toBe(6);
+      const last = anchors[anchors.length - 1];
+      expect(last.stretch).toBe(true);
+      // Hold keeps the video near its last matched position (slow creep only)
+      expect(last.videoTime).toBeLessThan(4.5);
+      expect(last.videoTime).toBeGreaterThanOrEqual(3.0);
+      // Hold anchor covers the trailing TTS duration
+      expect(last.ttsTime).toBeCloseTo(7.95, 1);
+    });
+
+    it('skips unmatched TTS words between matches (extra filler covered by stretch)', () => {
+      const ttsWithFiller = [
+        { word: 'Hello', time: 0.8 },
+        { word: 'ummm', time: 1.5 },   // filler — no video counterpart
+        { word: 'welcome', time: 2.5 },
+        { word: 'to', time: 3.2 },
+        { word: 'the', time: 3.8 },
+        { word: 'video', time: 4.4 },
+      ];
+      const anchors = buildAnchorsFromWordTimings(videoWords, ttsWithFiller, 6, 8);
+      const matched = anchors.filter((a) => a.matched);
+      expect(matched.length).toBe(5);
+      // No anchor exists for the filler word
+      expect(anchors.some((a) => a.phrase === 'ummm')).toBe(false);
+    });
+
+    it('handles video extra words (video speaks more, consumed faster)', () => {
+      const longerVideo = [
+        ...videoWords,
+        { word: 'extra', time: 4.5 },
+        { word: 'content', time: 5.0 },
+      ];
+      const anchors = buildAnchorsFromWordTimings(longerVideo, ttsWords, 7, 8);
+      const matched = anchors.filter((a) => a.matched);
+      // Only the 5 TTS words match; extra video words are consumed faster
+      expect(matched.length).toBe(5);
+    });
+
+    it('returns empty array when no words match at all', () => {
+      const unrelatedVideo = [{ word: 'completely', time: 0.5 }, { word: 'different', time: 1.5 }];
+      const anchors = buildAnchorsFromWordTimings(unrelatedVideo, ttsWords, 6, 8);
+      expect(anchors.length).toBe(0);
+    });
+  });
+
+  it('clamps extreme fallback targetSpeed to a sane range', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        summary: 'Extreme ratio',
+                        anchors: [{ videoTime: 1.0, ttsTime: 4.0, phrase: 'x', targetSpeed: 99 }],
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+      })
+    );
+
+    vi.mock('./aiClient', () => ({
+      getGeminiKey: () => 'test-key-mock',
+    }));
+
+    const dummyBlob = new Blob(['fake audio content'], { type: 'audio/wav' });
+
+    try {
+      const result = await runGeminiSpeedSync(dummyBlob, dummyBlob, 5, 6);
+      expect(result.anchors[0].targetSpeed).toBeLessThanOrEqual(4);
+      expect(result.anchors[0].targetSpeed).toBeGreaterThanOrEqual(0.25);
     } finally {
       global.fetch = originalFetch;
     }

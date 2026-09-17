@@ -301,6 +301,22 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
                 {syncResult.successfulModel}
               </span>
             </div>
+            {syncResult.alignmentMode && (
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className={`px-1.5 py-0.5 rounded border font-semibold ${
+                  syncResult.alignmentMode === 'word-level'
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                }`}>
+                  {syncResult.alignmentMode === 'word-level' ? 'Word-level alignment' : 'Cadence alignment'}
+                </span>
+                {syncResult.alignmentMode === 'word-level' && syncResult.stretchFrameCount ? (
+                  <span className="text-white/60">
+                    {syncResult.stretchFrameCount} hold frame{syncResult.stretchFrameCount > 1 ? 's' : ''} for extra TTS words
+                  </span>
+                ) : null}
+              </div>
+            )}
             {syncResult.summary && (
               <p className="text-[11px] text-white/70 italic">
                 "{syncResult.summary}"
