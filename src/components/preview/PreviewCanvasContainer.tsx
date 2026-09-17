@@ -557,7 +557,12 @@ export function PreviewCanvasContainer() {
           framePendingRef.current = true;
         }
 
-        framePendingRef.current = true;
+        // SPEED FRAME FIX: framePending is NOT set unconditionally here.
+        // The change-check below (currentTimeRef vs lastRenderedTimeRef) already
+        // marks every frame where the clock advances. Setting it unconditionally
+        // re-rendered the SAME composite every tick during buffering freezes
+        // (isBuffering holds the clock) — competing with the already-struggling
+        // decoders on ramped/split timelines.
 
         const dir = state.playbackDirection ?? 1;
         const speed = state.playbackSpeed;

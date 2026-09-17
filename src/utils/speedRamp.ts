@@ -745,6 +745,18 @@ export function getClipSourceEnd(
   return clip.trimStart + clip.duration * baseSpeed;
 }
 
+// SPEED FRAME FIX: per-clip segment cache. getSpeedFrameSegments used to
+// rebuild its filter+sort+arrays on EVERY call — and it is called twice per
+// active clip per sync tick (getMediaTimeForClip + getSpeedForClipAtTime at
+// ~60Hz), plus scrub/pre-roll/renders. Keyed on the immutable clip object
+// (WeakMap → deleted clips' entries are collected automatically); the optional
+// sourceDuration argument is part of the cached key since it changes the result.
+interface CachedSegments {
+  sourceDuration: number | undefined;
+  segments: SpeedFrameSegment[];
+}
+const segmentsCache = new WeakMap<object, CachedSegments>();
+
 /**
  * Computes all segments between boundaries (clip start edge 0, speed frames 1..n, clip end edge duration).
  * If no speed frames exist, returns empty array.
@@ -756,7 +768,21 @@ export function getSpeedFrameSegments(
 ): SpeedFrameSegment[] {
   if (!clip.speedFrames || clip.speedFrames.length === 0) return [];
 
-  const sortedFrames = [...clip.speedFrames]
+  const cached = segmentsCache.get(clip);
+  if (cached && cached.sourceDuration === sourceDuration) {
+    return cached.segments;
+  }
+
+  const segments = computeSpeedFrameSegments(clip, sourceDuration);
+  segmentsCache.set(clip, { sourceDuration, segments });
+  return segments;
+}
+
+function computeSpeedFrameSegments(
+  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
+  sourceDuration?: number
+): SpeedFrameSegment[] {
+  const sortedFrames = [...clip.speedFrames!]
     .filter((f) => f && Number.isFinite(f.timelineOffset) && Number.isFinite(f.sourceTime))
     .sort((a, b) => a.timelineOffset - b.timelineOffset);
   const s0 = Number.isFinite(clip.trimStart) ? clip.trimStart : 0;

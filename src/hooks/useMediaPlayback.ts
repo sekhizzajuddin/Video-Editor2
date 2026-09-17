@@ -1030,6 +1030,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     const added = new Set<string>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
 
+    // SPEED FRAME FIX: precompute parentClipId → pips once per call. The old
+    // `Object.values(pipWindows).filter(...)` ran PER CLIP — O(clips × pips) —
+    // and getActiveClips re-runs on EVERY boundary crossing, which happens at
+    // every speed-frame boundary: on a long split clip with speed frames each
+    // crossing paid thousands of object visits, compounding the preview stall.
+    const pipsByParent = new Map<string, any[]>();
+    for (const p of Object.values(pipWindows)) {
+      const parent = (p as any).parentClipId;
+      if (!parent) continue;
+      const arr = pipsByParent.get(parent);
+      if (arr) arr.push(p);
+      else pipsByParent.set(parent, [p]);
+    }
+
     const addIfNew = (clip: any, track: any, absStartTime: number) => {
       if (added.has(clip.id)) return;
       added.add(clip.id);
@@ -1064,16 +1078,18 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (isActive) addIfNew(clip, track, clip.startTime);
 
         // PIP
-        const clipPips = Object.values(pipWindows).filter((p: any) => p.parentClipId === clip.id);
-        for (const pip of clipPips) {
-          const pipAbsStart = clip.startTime + pip.relativeStartTime;
-          if (ct >= pipAbsStart && ct < pipAbsStart + pip.duration) {
-            for (const pipTrack of pip.tracks) {
-              for (const pipClip of pipTrack.clips) {
-                const ptAbsStart = pipAbsStart + pipClip.startTime;
-                if (ct >= ptAbsStart && ct < ptAbsStart + pipClip.duration) {
-                  const mergedTrack = { ...pipTrack, muted: track.muted || pipTrack.muted || pipTrack.hidden };
-                  addIfNew(pipClip, mergedTrack, ptAbsStart);
+        const clipPips = pipsByParent.get(clip.id);
+        if (clipPips) {
+          for (const pip of clipPips) {
+            const pipAbsStart = clip.startTime + pip.relativeStartTime;
+            if (ct >= pipAbsStart && ct < pipAbsStart + pip.duration) {
+              for (const pipTrack of pip.tracks) {
+                for (const pipClip of pipTrack.clips) {
+                  const ptAbsStart = pipAbsStart + pipClip.startTime;
+                  if (ct >= ptAbsStart && ct < ptAbsStart + pipClip.duration) {
+                    const mergedTrack = { ...pipTrack, muted: track.muted || pipTrack.muted || pipTrack.hidden };
+                    addIfNew(pipClip, mergedTrack, ptAbsStart);
+                  }
                 }
               }
             }
@@ -1710,6 +1726,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
         return splitGroupIdx.get(splitGroupId) ?? null;
       };
+      // SPEED FRAME FIX: consecutive-buffering-tick counter (hysteresis for the
+      // isBuffering flag — see the buffering detection section below).
+      let bufferingTickCount = 0;
 
       // PERF + BUG FIX: Cache active clips list with loop/seek-backward detection.
       // Bug: when playback loops (t=30 → t=0), nextClipBoundaryRef was still > 0, so
@@ -1991,8 +2010,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
         // ---- AUDIO SYNC STRATEGY (Gentle) ----
         if (entry.type === 'audio') {
-          const AUDIO_HARD_SEEK_THRESHOLD = 0.5;   // 500ms
-          const AUDIO_PLL_THRESHOLD = 0.10;        // 100ms
+          // SPEED FRAME FIX: scale thresholds by the current segment speed —
+          // rawDrift is in MEDIA seconds but the perceptual error is in
+          // TIMELINE seconds (at 10x speed, 500ms of media drift is only 50ms
+          // of timeline error). The old fixed thresholds made the audio sync
+          // hard-seek repeatedly on ramped timelines.
+          const audioSpeedScale = Math.max(1, currentSegmentSpeed);
+          const AUDIO_HARD_SEEK_THRESHOLD = Math.max(0.5, 0.75 * audioSpeedScale);   // 500ms at 1x
+          const AUDIO_PLL_THRESHOLD = Math.max(0.10, 0.15 * audioSpeedScale);        // 100ms at 1x
           const AUDIO_MAX_PLL_ADJUST = 0.005;      // 0.5%
           const AUDIO_PLL_P = 0.15;                // Proportional gain
           const AUDIO_PLL_I = 0.02;                // Integral gain
@@ -2046,8 +2071,18 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // ---- VIDEO SYNC STRATEGY (Smooth PLL without seek-storm stutter) ----
         else if (entry.type === 'video') {
           const isRamped = (clip.speedRamp && clip.speedRamp.length >= 2) || ((clip.clip as any)?.speedFrames && (clip.clip as any).speedFrames.length > 0);
-          const VIDEO_HARD_SEEK_THRESHOLD = isRamped ? 1.2 : 0.45;  // Relax hard-seek threshold during ramp to prevent audio decode dropouts
-          const VIDEO_PLL_THRESHOLD = 0.025;       // 25ms
+          // SPEED FRAME FIX: drift thresholds must scale with the CURRENT segment
+          // speed. rawDrift is in MEDIA seconds but the perceptual error is in
+          // TIMELINE seconds: at 10x speed, 1.2s of media drift is only 120ms of
+          // timeline error — yet the old fixed 1.2s threshold made the PLL fight
+          // it with ±35% rate modulation (visible speed jitter) and hard-seek
+          // whenever a fast segment outpaced the decoder (browsers cap
+          // playbackRate), producing repeated decode restarts + buffering
+          // freezes on ramped timelines. Scaling by segment speed keeps the
+          // same timeline-time tolerance at every ramp speed.
+          const speedScale = Math.max(1, currentSegmentSpeed);
+          const VIDEO_HARD_SEEK_THRESHOLD = isRamped ? Math.max(0.45, 0.75 * speedScale) : 0.45;
+          const VIDEO_PLL_THRESHOLD = Math.max(0.025, 0.05 * speedScale);       // 25ms at 1x
           const VIDEO_MAX_PLL_ADJUST = isRamped ? 0.35 : 0.10;       // Dynamic playback rate modulation
 
           // REVERSE / FREEZE FRAME: browsers can't play <video> backward, so we
@@ -2112,6 +2147,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // Check if any active VIDEO element is still seeking or has insufficient decoded
       // data. When buffering is detected, the tick loop in PreviewCanvasContainer freezes
       // the clock advance so the playhead doesn't race ahead of the decoders.
+      // SPEED FRAME FIX: 2-tick hysteresis before raising the flag. isBuffering
+      // lives in the container's useShallow bundle, so every flip re-renders the
+      // whole container — during ramped playback the PLL-corrected seeks made it
+      // flip-flicker every other tick (render storm competing with the decoders).
+      // Two consecutive ticks (~33ms) filters transient seeks while the clock
+      // advances at most one frame ahead — imperceptible.
       if (playing && !scrubbing) {
         let anyBuffering = false;
         for (const clip of clips) {
@@ -2129,11 +2170,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         }
         const wasBuffering = store.isBuffering;
-        if (anyBuffering !== wasBuffering) {
-          store.setIsBuffering(anyBuffering);
+        if (anyBuffering) {
+          bufferingTickCount++;
+          if (!wasBuffering && bufferingTickCount >= 2) {
+            store.setIsBuffering(true);
+          }
+        } else {
+          bufferingTickCount = 0;
+          if (wasBuffering) {
+            store.setIsBuffering(false);
+          }
         }
       } else if (store.isBuffering) {
         // Clear buffering when paused or scrubbing
+        bufferingTickCount = 0;
         store.setIsBuffering(false);
       }
 
