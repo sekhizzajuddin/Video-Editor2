@@ -13,8 +13,17 @@ interface FrameStripOverlayProps {
   speedFrameSegments?: SpeedFrameSegment[];
 }
 
-// Cache of generated frame strips per media URL, so we only decode once per media item.
+// Cache of generated frame strips per media item, so we only decode once per
+// media item. Keyed by media id (stable across blob-URL restores) and purged
+// when the media is removed (the store dispatches 'procut-evict-media-cache'
+// on removeMedia — previously these JPEG data-URL arrays accumulated for the
+// whole session with no eviction).
 const stripCache = new Map<string, string[]>();
+if (typeof window !== 'undefined') {
+  window.addEventListener('procut-evict-media-cache', ((e: CustomEvent) => {
+    if (e.detail?.id) stripCache.delete(e.detail.id);
+  }) as EventListener);
+}
 
 export const FrameStripOverlay = React.memo(function FrameStripOverlay({
   media,
@@ -23,19 +32,19 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
   height,
   speedFrameSegments,
 }: FrameStripOverlayProps) {
-  const cachedStrip = media ? stripCache.get(media.url) : undefined;
+  const cachedStrip = media ? stripCache.get(media.id) : undefined;
   const [lazyStrip, setLazyStrip] = useState<string[] | null>(null);
 
   useEffect(() => {
     if (!media) return;
     if (media.frameStrip && media.frameStrip.length > 0) return;
-    if (stripCache.has(media.url)) return;
+    if (stripCache.has(media.id)) return;
     if (!media.url || media.url === 'PENDING_RESTORE') return;
     let cancelled = false;
     generateFrameStripOnDemand(media.url, media.duration || 0, 8, 120)
       .then((strip) => {
         if (cancelled) return;
-        stripCache.set(media.url, strip);
+        stripCache.set(media.id, strip);
         setLazyStrip(strip);
       })
       .catch(() => {

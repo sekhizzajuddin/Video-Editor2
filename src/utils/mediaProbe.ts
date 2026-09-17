@@ -269,7 +269,34 @@ export function detectMediaType(file: File): MediaType {
  * fast and the per-clip memory footprint stays small (one ~120-byte JPEG per
  * frame instead of one decoded frame buffer).
  */
+// PERF (multi-split fix): in-flight promise dedupe per URL. Each split segment
+// mounts its own FrameStripOverlay; when the media has no pre-computed
+// frameStrip, every overlay used to kick off its own generation — N concurrent
+// hidden <video> elements × up to 120 seeks each, a decoder storm competing
+// with preview playback. Concurrent callers now share one promise.
+const inFlightStripGenerations = new Map<string, Promise<string[]>>();
+
 export async function generateFrameStripOnDemand(
+  url: string,
+  duration: number,
+  count = 8,
+  maxWidth = 120
+): Promise<string[]> {
+  const inFlight = inFlightStripGenerations.get(url);
+  if (inFlight) return inFlight;
+
+  const generation = generateFrameStripInternal(url, duration, count, maxWidth);
+  inFlightStripGenerations.set(url, generation);
+  try {
+    return await generation;
+  } finally {
+    if (inFlightStripGenerations.get(url) === generation) {
+      inFlightStripGenerations.delete(url);
+    }
+  }
+}
+
+async function generateFrameStripInternal(
   url: string,
   duration: number,
   count = 8,

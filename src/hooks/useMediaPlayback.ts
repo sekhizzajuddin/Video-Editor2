@@ -945,6 +945,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const prevSyncCtRef = useRef<number>(-1);
   // PERF: Persistent Set reused every frame to avoid 2 heap allocations/frame (Array + Set).
   const playingIdsSetRef = useRef<Set<string>>(new Set());
+  // PERF (multi-split fix): the last boundary we pre-rolled a decoder for, so
+  // the warm-up seek runs once per split crossing instead of every sync tick.
+  const preRolledBoundaryRef = useRef<number | null>(null);
 
   // Worker export uses independent decoders. A paused <video> still owns a
   // decoder and decoded surfaces, so pause() alone is not sufficient after a
@@ -1690,6 +1693,24 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const pool = poolRef.current;
       setIsPlayingClock(playing);
 
+      // PERF: lazy per-tick split-group index — built ONCE per sync tick, and
+      // only when a clip's own pool entry is missing (the common path never
+      // pays for it). Replaces the full pool scan per clip per tick in the
+      // scrub/playback fallbacks. shareKey format is `${mediaId}::${groupId}`,
+      // so the group id is the part after '::'.
+      let splitGroupIdx: Map<string, MediaElement> | null = null;
+      const getSplitGroupEntry = (splitGroupId: string): MediaElement | null => {
+        if (!splitGroupIdx) {
+          splitGroupIdx = new Map();
+          for (const [, e] of pool) {
+            if (e.type !== 'video' || !e._shareKey) continue;
+            const gid = e._shareKey.split('::')[1];
+            if (gid && !splitGroupIdx.has(gid)) splitGroupIdx.set(gid, e);
+          }
+        }
+        return splitGroupIdx.get(splitGroupId) ?? null;
+      };
+
       // PERF + BUG FIX: Cache active clips list with loop/seek-backward detection.
       // Bug: when playback loops (t=30 → t=0), nextClipBoundaryRef was still > 0, so
       // `ct >= nextClipBoundary` was false and stale end-of-timeline clips were returned.
@@ -1755,6 +1776,67 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
         nextClipBoundaryRef.current = nextBoundary;
       }
+
+      // PERF (multi-split fix): pre-roll the INCOMING segment's decoder ~0.2s
+      // before a split boundary. When playback crosses a boundary, the next
+      // segment activates and issues a hard seek (decode restart from the
+      // nearest keyframe) — with many short segments that's a restart per
+      // boundary, and the buffering detector below then freezes the playhead
+      // each time. Seeking the incoming element to its start media time early
+      // lets the first frame decode before the boundary, so activation finds
+      // drift < 0.05 and skips the hard seek entirely.
+      // Only DEDICATED (own-element) segments are pre-rolled: if the incoming
+      // segment shares the currently-active element (contiguous chain), seeking
+      // it early would move the visible picture. Guarded per boundary so the
+      // warm-up runs once per crossing.
+      if (playing && !scrubbing) {
+        const boundary = nextClipBoundaryRef.current;
+        const lookahead = boundary - ct;
+        if (Number.isFinite(boundary) && lookahead > 0 && lookahead <= 0.2) {
+          if (preRolledBoundaryRef.current !== boundary) {
+            preRolledBoundaryRef.current = boundary;
+            let preRolled = false;
+            for (const track of sortedTracksRef.current) {
+              for (const tc of track.clips) {
+                if (Math.abs(tc.startTime - boundary) > 0.001) continue;
+                const entry = pool.get(tc.id); // own entry only — never the shared active element
+                if (!entry || entry.type !== 'video') break;
+                const el = entry.el as HTMLVideoElement;
+                if (el.seeking || el.readyState >= 2) break;
+                const mediaItem = mediaMapRef.current.get(tc.mediaId);
+                const maxDuration = mediaItem ? mediaItem.duration : 10000;
+                const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip(
+                  {
+                    id: tc.id,
+                    startTime: tc.startTime,
+                    duration: tc.duration,
+                    trimStart: tc.trimStart,
+                    speed: tc.speed,
+                    speedRamp: tc.speedRamp,
+                    speedFrames: tc.speedFrames,
+                    speedFrameSourceEnd: tc.speedFrameSourceEnd,
+                    isReversed: tc.isReversed,
+                    freezeFrame: tc.freezeFrame,
+                  },
+                  boundary
+                )));
+                if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.05) {
+                  el.currentTime = mediaTime;
+                  // If the element's src is (re)assigned before the boundary,
+                  // the load path replays this pending seek so the pre-roll
+                  // position survives the reload.
+                  pendingSeeksRef.current.set(tc.id, mediaTime);
+                }
+                preRolled = true;
+                break;
+              }
+              if (preRolled) break;
+            }
+          }
+        } else if (lookahead <= 0 || lookahead > 0.5) {
+          preRolledBoundaryRef.current = null;
+        }
+      }
       const clips = cachedActiveClipsRef.current;
       // PERF: Reuse a persistent Set instead of `new Set(clips.map(...))` every frame.
       // That pattern creates 2 heap objects (Array + Set) at 60fps = 7200 GC-eligible objects/min.
@@ -1775,19 +1857,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // During trim, ct is already getEffectivePreviewTime() (amber playhead position)
         const scrubTime = ct;
         for (const clip of clips) {
-          let entry = pool.get(clip.clipId);
-          if (!entry && clip.clip?.splitGroupId) {
-            for (const [, e] of pool) {
-              if (e.mediaId === clip.mediaId && e.type === 'video' && e._shareKey?.includes(clip.clip.splitGroupId)) {
-                entry = e;
-                break;
-              }
-            }
-          }
-          if (!entry || entry.type !== 'video') continue;
-          const mediaItem = mediaMap.get(clip.mediaId);
-          const maxDuration = mediaItem ? mediaItem.duration : 10000;
-          const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+        let entry = pool.get(clip.clipId);
+        if (!entry && clip.clip?.splitGroupId) {
+          entry = getSplitGroupEntry(clip.clip.splitGroupId) ?? undefined;
+        }
+        if (!entry || entry.type !== 'video') continue;
+        const mediaItem = mediaMap.get(clip.mediaId);
+        const maxDuration = mediaItem ? mediaItem.duration : 10000;
+        const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
             id: clip.clipId,
             startTime: clip.absStartTime,
             duration: clip.clipDuration,
@@ -1802,8 +1879,16 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const el = entry.el;
           // Don't fight an in-flight seek — the element's 'seeked' listener
           // triggers a canvas repaint the moment the new frame decodes.
+          // PERF: fastSeek snaps to the nearest keyframe without exact-frame
+          // decode — 2-10x faster per scrub tick. Scrub tolerates imprecision
+          // (the scrub-end finalize path re-seeks exactly + full-quality
+          // redraw), so intermediate ticks don't need exact frames.
           if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.03) {
-            el.currentTime = mediaTime;
+            if (typeof (el as HTMLVideoElement).fastSeek === 'function') {
+              (el as HTMLVideoElement).fastSeek(mediaTime);
+            } else {
+              el.currentTime = mediaTime;
+            }
           } else if (el.seeking) {
             pendingSeeksRef.current.set(clip.clipId, mediaTime);
           }
@@ -1816,13 +1901,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // ---- 2. Sync each active element ----
       for (const clip of clips) {
         let entry = pool.get(clip.clipId);
+        // PERF (multi-split fix): the fallback must ONLY match elements of the
+        // same split group. The previous `|| e.type === 'video'` catch-all
+        // grabbed the FIRST video element in pool iteration order (any track,
+        // any media) whenever this clip's own entry was missing, then drove its
+        // currentTime/playbackRate with this clip's mediaTime — two clips
+        // fighting over one decoder produced frame stutter and black frames.
         if (!entry && clip.clip?.splitGroupId) {
-          for (const [, e] of pool) {
-            if (e.mediaId === clip.mediaId && (e._shareKey?.includes(clip.clip.splitGroupId) || e.type === 'video')) {
-              entry = e;
-              break;
-            }
-          }
+          entry = getSplitGroupEntry(clip.clip.splitGroupId) ?? undefined;
         }
         if (!entry) continue;
 
@@ -1968,9 +2054,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // keep the element paused and manually seek each sync tick.
           if (clip.isReversed || clip.freezeFrame !== undefined) {
             if (!el.paused) el.pause();
-            // Seek to target time if we're more than one frame (~16ms) off
+            // Seek to target time if we're more than one frame (~16ms) off.
+            // PERF: fastSeek (keyframe-snap) keeps per-tick reverse scrubbing
+            // cheap; exactness isn't needed mid-reverse.
             if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.016) {
-              el.currentTime = mediaTime;
+              if (typeof (el as HTMLVideoElement).fastSeek === 'function') {
+                (el as HTMLVideoElement).fastSeek(mediaTime);
+              } else {
+                el.currentTime = mediaTime;
+              }
             }
           } else if (playing && !isReversing) {
             // Immediate resume if suspended (ensures video internal audio plays via Web Audio)

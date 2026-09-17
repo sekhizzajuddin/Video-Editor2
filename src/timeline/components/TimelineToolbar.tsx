@@ -38,7 +38,9 @@ export function TimelineToolbar({
   const removeSpeedFrame = useEditorStore((s) => s.removeSpeedFrame);
   const selectedSpeedFrame = useEditorStore((s) => s.selectedSpeedFrame);
   const clearSpeedFrames = useEditorStore((s) => s.clearSpeedFrames);
-  const currentTime = useEditorStore((s) => s.currentTime);
+  // PERF: read at click time instead of subscribing — this component only needs
+  // currentTime when the user clicks "Add Export Region", yet a subscription
+  // re-rendered the toolbar ~30Hz during playback.
   const selectedClipId = useEditorStore((s) => s.selectedClipId);
   const tracks = useEditorStore((s) => s.tracks);
   const totalDuration = useEditorStore((s) => s.totalDuration);
@@ -54,6 +56,7 @@ export function TimelineToolbar({
   const hasSpeedFrames = Boolean(selectedClip?.speedFrames && selectedClip.speedFrames.length > 0);
 
   const handleAddExportRegion = () => {
+    const currentTime = useEditorStore.getState().currentTime;
     let start = currentTime;
     let end = currentTime + 5;
 

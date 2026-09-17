@@ -178,6 +178,32 @@ export function PreviewCanvasContainer() {
     allClipsRef.current = allClips;
   }, [allClips]);
 
+  // PERF: cache the timeline max-end so the RAF tick doesn't O(N)-scan all
+  // clips every playback frame — recompute only when allClips changes.
+  const maxEndSequenceRef = useRef(0);
+  useEffect(() => {
+    let maxEnd = 0;
+    for (const c of allClips) {
+      const end = c.startTime + c.duration;
+      if (end > maxEnd) maxEnd = end;
+    }
+    maxEndSequenceRef.current = maxEnd;
+  }, [allClips]);
+
+  // PERF: cache the selected export-region bounds the same way (was an O(R)
+  // .find() per playback frame).
+  const selectedRegionBoundsRef = useRef<{ start: number; end: number } | null>(null);
+  const selectedExportRegionId = useEditorStore((s) => s.selectedExportRegionId);
+  const exportRegions = useEditorStore((s) => s.exportRegions);
+  useEffect(() => {
+    if (!selectedExportRegionId) {
+      selectedRegionBoundsRef.current = null;
+      return;
+    }
+    const r = (exportRegions || []).find((region) => region.id === selectedExportRegionId);
+    selectedRegionBoundsRef.current = r ? { start: r.startTime, end: r.endTime } : null;
+  }, [selectedExportRegionId, exportRegions]);
+
   // PERF: tracksSignature mega-string removed. Zustand provides a new `tracks` array reference
   // on any mutation, so reference equality (tracks !== prev.tracks) is O(1) and sufficient.
 
@@ -537,7 +563,6 @@ export function PreviewCanvasContainer() {
         const speed = state.playbackSpeed;
         const currentSeek = state.seek;
         const currentPause = state.pause;
-        const allClips = allClipsRef.current;
 
         let newTime = currentTimeRef.current;
 
@@ -562,15 +587,12 @@ export function PreviewCanvasContainer() {
         }
 
         if (newTime !== currentTimeRef.current) {
-          let maxEndSequence = 0;
-          for (const c of allClips) {
-            const end = c.startTime + c.duration;
-            if (end > maxEndSequence) maxEndSequence = end;
-          }
+          // PERF: both values are ref-cached (recomputed only on allClips /
+          // region change) — was an O(N) clip scan + O(R) region find per frame.
+          const maxEndSequence = maxEndSequenceRef.current;
 
           const isStretchLooping = state.dynamicStretch?.isActive && state.dynamicStretch?.isLoopingRegion;
-          const selectedRegionId = state.selectedExportRegionId;
-          const selectedRegion = selectedRegionId ? (state.exportRegions || []).find((r) => r.id === selectedRegionId) : null;
+          const selectedRegion = selectedRegionBoundsRef.current;
 
           if (isStretchLooping) {
             const rStart = state.dynamicStretch.markStart;
@@ -579,8 +601,8 @@ export function PreviewCanvasContainer() {
               newTime = dir >= 0 ? rStart : rEnd;
             }
           } else if (selectedRegion) {
-            const rStart = selectedRegion.startTime;
-            const rEnd = selectedRegion.endTime;
+            const rStart = selectedRegion.start;
+            const rEnd = selectedRegion.end;
             if (newTime >= rEnd || newTime < rStart) {
               newTime = dir >= 0 ? rStart : rEnd;
             }

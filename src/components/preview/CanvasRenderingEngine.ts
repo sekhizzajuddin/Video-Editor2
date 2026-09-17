@@ -13,7 +13,7 @@
  * - PropertyPanel: Applies clip transform, color filters, chroma keying, and masks.
  */
 
-import { TimelineTrack, MediaItem } from '@/types';
+import { TimelineTrack, MediaItem, TimelineClip } from '@/types';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
@@ -91,6 +91,22 @@ const IDENTITY_LUT = (() => {
 })();
 
 const _curveLutCache = new WeakMap<object, Uint8ClampedArray>();
+
+// PERF: per-clip mask raster cache keyed by a params signature. When a mask
+// has no animated values (the common case), the rasterized mask is identical
+// every frame — previously it was cleared and re-rendered EVERY frame,
+// including a full-canvas `ctx.filter = blur()` (one of the most expensive
+// Canvas2D ops). Animated masks simply miss the cache and take the live
+// redraw path. Bounded LRU so deleted clips' entries are evicted naturally.
+const maskRasterCache = new Map<string, { sig: string; canvas: HTMLCanvasElement }>();
+const MASK_CACHE_CAP = 12;
+
+// PERF: reference-keyed per-render caches (see renderCanvasEngine). Rebuilt
+// lazily only when the underlying store data reference changes.
+let _cachedMediaMap: Map<string, MediaItem> | null = null;
+let _cachedMediaMapRef: MediaItem[] | null = null;
+let _cachedClipsById: Map<string, TimelineClip> | null = null;
+let _cachedClipsByIdTracksRef: TimelineTrack[] | null = null;
 
 function getCachedCurveLUT(curve: any): Uint8ClampedArray {
   if (!curve || typeof curve !== 'object') return buildLUT(curve);
@@ -302,12 +318,56 @@ export async function renderCanvasEngine({
   const skipExpensiveFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || isMobilePlaying)));
   const skipUltraHeavyFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half' || isMobilePlaying)));
 
-  // PERF: build mediaMap once per render. mediaLibrary.find() per clip was
-  // an O(N×M) hot loop. With 5 clips × 50 media items, that's 250 comparisons
-  // per frame — measurable on slow devices.
-  const mediaMap = new Map<string, MediaItem>();
-  for (let i = 0; i < mediaLibraryRaw.length; i++) {
-    mediaMap.set(mediaLibraryRaw[i].id, mediaLibraryRaw[i]);
+  // PERF: build mediaMap once per mediaLibrary reference (was rebuilt every
+  // frame — O(M) Map.set per frame, M = media library size).
+  let mediaMap: Map<string, MediaItem>;
+  if (_cachedMediaMap && mediaLibraryRaw === _cachedMediaMapRef) {
+    mediaMap = _cachedMediaMap;
+  } else {
+    mediaMap = new Map<string, MediaItem>();
+    for (let i = 0; i < mediaLibraryRaw.length; i++) {
+      mediaMap.set(mediaLibraryRaw[i].id, mediaLibraryRaw[i]);
+    }
+    _cachedMediaMap = mediaMap;
+    _cachedMediaMapRef = mediaLibraryRaw as MediaItem[];
+  }
+
+  // PERF (multi-split fix): build split-sibling lookup indexes for the render.
+  // drawSingleClip's sibling fallback used to iterate ALL video elements and run
+  // tracks.flatMap().find() PER lookup, per frame, for every split clip whose
+  // element wasn't ready — O(N²) inside the render loop that stalled preview on
+  // heavily-split timelines.
+  // The clipsById pass (O(tracks × clips)) is cached on the tracks reference;
+  // the ready-element indexes are rebuilt every render (cheap — the pool holds
+  // a handful of elements) so readiness stays fresh across async loads.
+  let splitSiblingEl: Map<string, HTMLVideoElement>;
+  let mediaTrackSiblingEl: Map<string, HTMLVideoElement>;
+  {
+    let clipsById: Map<string, TimelineClip>;
+    if (_cachedClipsById && tracks === _cachedClipsByIdTracksRef) {
+      clipsById = _cachedClipsById;
+    } else {
+      clipsById = new Map<string, TimelineClip>();
+      for (const track of tracks) {
+        for (const c of track.clips) clipsById.set(c.id, c);
+      }
+      _cachedClipsById = clipsById;
+      _cachedClipsByIdTracksRef = tracks;
+    }
+    splitSiblingEl = new Map<string, HTMLVideoElement>();
+    mediaTrackSiblingEl = new Map<string, HTMLVideoElement>();
+    for (const [otherId, otherEl] of videoElements) {
+      if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
+      const oc = clipsById.get(otherId);
+      if (!oc) continue;
+      if (oc.splitGroupId && !splitSiblingEl.has(oc.splitGroupId)) {
+        splitSiblingEl.set(oc.splitGroupId, otherEl);
+      }
+      const mtKey = `${oc.mediaId}::${oc.trackId}`;
+      if (!mediaTrackSiblingEl.has(mtKey)) {
+        mediaTrackSiblingEl.set(mtKey, otherEl);
+      }
+    }
   }
 
   const now = performance.now();
@@ -533,7 +593,26 @@ export async function renderCanvasEngine({
     const mw = (mW / 100) * ow;
     const mh = (mH / 100) * oh;
     const feather = (mFeather / 100) * Math.min(ow, oh);
-    
+
+    // PERF: cache-hit fast path — when the animated mask params are unchanged
+    // since the last frame, the cached raster is reused and only the cheap
+    // `destination-in` composite runs (no clearRect/blur/path redraw). Rounded
+    // to 0.25px to absorb float jitter while catching real moves. Matte masks
+    // are never cached — their content is frame-dependent (source clip).
+    const maskSig = mask.type === 'matte'
+      ? null
+      : `${mask.type}|${mx.toFixed(2)}|${my.toFixed(2)}|${mw.toFixed(2)}|${mh.toFixed(2)}|${mRot.toFixed(2)}|${feather.toFixed(2)}|${mRoundness.toFixed(2)}|${mask.invert ? 1 : 0}|${ow}x${oh}`;
+    if (maskSig) {
+      const cached = maskRasterCache.get(clipId);
+      if (cached && cached.sig === maskSig) {
+        oCtx.save();
+        oCtx.globalCompositeOperation = 'destination-in';
+        oCtx.drawImage(cached.canvas, 0, 0);
+        oCtx.restore();
+        return;
+      }
+    }
+
     const maskCanvas = getOrCreateCanvas(offscreenCanvasPool.current, 'clip_mask_temp_' + clipId, ow, oh);
     const maskCtx = maskCanvas.getContext('2d')!;
     maskCtx.clearRect(0, 0, ow, oh);
@@ -612,7 +691,20 @@ export async function renderCanvasEngine({
       maskCtx.fillRect(0, 0, ow, oh);
       maskCtx.restore();
     }
-    
+
+    if (maskSig) {
+      maskRasterCache.delete(clipId);
+      maskRasterCache.set(clipId, { sig: maskSig, canvas: maskCanvas });
+      if (maskRasterCache.size > MASK_CACHE_CAP) {
+        for (const k of maskRasterCache.keys()) {
+          if (k !== clipId) {
+            maskRasterCache.delete(k);
+            break;
+          }
+        }
+      }
+    }
+
     oCtx.save();
     oCtx.globalCompositeOperation = 'destination-in';
     oCtx.drawImage(maskCanvas, 0, 0);
@@ -1308,16 +1400,15 @@ export async function renderCanvasEngine({
       if (mediaItem.type === 'video') {
         videoEl = videoElements.get(clip.id) || null;
         if ((!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) && clip.splitGroupId) {
-          // Sibling fallback: look for any loaded video element with the same splitGroupId or mediaId on the track
-          for (const [otherId, otherEl] of videoElements.entries()) {
-            if (otherEl && otherEl.readyState >= 1 && otherEl.videoWidth > 0) {
-              const otherClip = tracks.flatMap((t: any) => t.clips || []).find((c: any) => c.id === otherId);
-              if (otherClip && (otherClip.splitGroupId === clip.splitGroupId || (otherClip.mediaId === clip.mediaId && otherClip.trackId === clip.trackId))) {
-                videoEl = otherEl;
-                videoElements.set(clip.id, otherEl);
-                break;
-              }
-            }
+          // Sibling fallback (multi-split fix): O(1) lookup via the per-render
+          // indexes built above — was a full videoElements iteration plus a
+          // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
+          videoEl =
+            splitSiblingEl.get(clip.splitGroupId) ||
+            mediaTrackSiblingEl.get(`${clip.mediaId}::${clip.trackId}`) ||
+            null;
+          if (videoEl) {
+            videoElements.set(clip.id, videoEl);
           }
         }
         if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {

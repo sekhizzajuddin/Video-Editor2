@@ -17,6 +17,17 @@ import { FrameStripOverlay } from './FrameStripOverlay';
 import { WaveformOverlay } from './WaveformOverlay';
 import { TransitionTarget } from './TransitionTarget';
 
+// Module-level stable fallback descriptor (PERF: was recreated per render with
+// a fresh `createdAt: Date.now()`, defeating shallow comparisons).
+const defaultMedia: MediaItem = {
+  id: '',
+  name: 'Unknown',
+  type: 'video' as const,
+  duration: 30,
+  url: '',
+  createdAt: 0,
+};
+
 interface TimelineClipRowProps {
   track: TimelineTrack;
   tracks: TimelineTrack[];
@@ -649,14 +660,23 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
     [track.clips]
   );
 
-  const defaultMedia: MediaItem = {
-    id: '',
-    name: 'Unknown',
-    type: 'video' as const,
-    duration: 30,
-    url: '',
-    createdAt: Date.now(),
-  };
+  // ── PERF: stable per-clip media descriptors for text/kinetic clips ──────
+  // Previously `defaultMedia` (with a fresh `createdAt: Date.now()`) was
+  // recreated per render and every text clip's `media` prop was a brand-new
+  // object — TimelineClipItem's React.memo ALWAYS failed, so all text clips
+  // fully re-rendered whenever any row re-rendered. Memoised per track.clips.
+  const textMediaById = useMemo(() => {
+    const map = new Map<string, MediaItem>();
+    for (const clip of track.clips || []) {
+      if (!(clip as any).textSettings && !isKineticMediaId(clip.mediaId)) continue;
+      map.set(clip.id, {
+        ...defaultMedia,
+        type: 'text' as const,
+        name: getKineticClipLabel(clip as any, 'Text'),
+      });
+    }
+    return map;
+  }, [track.clips]);
 
   return (
     <div
@@ -762,15 +782,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
         // to `defaultMedia` and render as "Unknown" with a video icon. Resolve them
         // to a text-typed descriptor named after their actual content instead.
         const resolvedMedia = mediaMap.get(clip.mediaId);
-        const media = resolvedMedia ?? (
-          (clip as any).textSettings || isKineticMediaId(clip.mediaId)
-            ? {
-                ...defaultMedia,
-                type: 'text' as const,
-                name: getKineticClipLabel(clip as any, 'Text'),
-              }
-            : defaultMedia
-        );
+        const media = resolvedMedia ?? textMediaById.get(clip.id) ?? defaultMedia;
         const isSelected = selectedClipIds.includes(clip.id);
         // Trimming is only offered on the single selected clip — neighbouring
         // clips (and multi-selections) never get trim handles or trim cursors.

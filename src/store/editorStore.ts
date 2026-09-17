@@ -595,9 +595,9 @@ export const mapTracksDeep = (state: EditorState, modifier: (track: TimelineTrac
 };
 
 export const getAllClipsDeep = (state: EditorState): TimelineClip[] => {
-  const mainClips = state.tracks.flatMap((t) => t.clips || []);
-  const pipClips = Object.values(state.pipWindows || {}).flatMap(p => p.tracks.flatMap(t => t.clips || []));
-  return [...mainClips, ...pipClips];
+  // PERF: served from the reference-keyed index (see getClipIndex) — was a
+  // flatMap over all tracks + all PIP windows per call.
+  return [...getClipIndex(state).clipsById.values()];
 };
 
 /**
@@ -637,18 +637,54 @@ const mapPipWindowClips = (
   return changed ? next : pipWindows;
 };
 
-export const findClipDeep = (state: EditorState, clipId: string) => {
+// PERF: reference-keyed clip index — rebuilt lazily ONLY when the tracks or
+// pipWindows references change. Converts findClipDeep / getAllClipsDeep from
+// O(totalClips) scans to O(1) lookups: updateClip fires at 60Hz during slider
+// drags and every call used to scan the whole timeline including PIP tracks.
+// Store updates are immutable, so a reference match guarantees identical
+// content (mutations happen on clones, which become new references).
+let _clipIndexTracksRef: TimelineTrack[] | null = null;
+let _clipIndexPipRef: Record<string, PipWindow> | null | undefined;
+let _clipsByIdIndex: Map<string, TimelineClip> | null = null;
+let _clipOwnerIndex: Map<string, { track: TimelineTrack; isPip: boolean; pipId: string | null }> | null = null;
+
+const getClipIndex = (state: EditorState) => {
+  if (_clipsByIdIndex && _clipIndexTracksRef === state.tracks && _clipIndexPipRef === state.pipWindows) {
+    return { clipsById: _clipsByIdIndex, owners: _clipOwnerIndex! };
+  }
+  const clipsById = new Map<string, TimelineClip>();
+  const owners = new Map<string, { track: TimelineTrack; isPip: boolean; pipId: string | null }>();
   for (const track of state.tracks) {
-    const clip = track.clips.find(c => c.id === clipId);
-    if (clip) return { clip, track, isPip: false, pipId: null };
+    for (const clip of track.clips || []) {
+      clipsById.set(clip.id, clip);
+      owners.set(clip.id, { track, isPip: false, pipId: null });
+    }
   }
   for (const [pipId, pip] of Object.entries(state.pipWindows || {})) {
     for (const track of pip.tracks) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip) return { clip, track, isPip: true, pipId };
+      for (const clip of track.clips || []) {
+        // Main-track clips win — matches the old scan order (tracks first).
+        if (!clipsById.has(clip.id)) {
+          clipsById.set(clip.id, clip);
+          owners.set(clip.id, { track, isPip: true, pipId });
+        }
+      }
     }
   }
-  return null;
+  _clipsByIdIndex = clipsById;
+  _clipOwnerIndex = owners;
+  _clipIndexTracksRef = state.tracks;
+  _clipIndexPipRef = state.pipWindows;
+  return { clipsById, owners };
+};
+
+export const findClipDeep = (state: EditorState, clipId: string) => {
+  if (!clipId) return null;
+  const { clipsById, owners } = getClipIndex(state);
+  const clip = clipsById.get(clipId);
+  if (!clip) return null;
+  const owner = owners.get(clipId)!;
+  return { clip, track: owner.track, isPip: owner.isPip, pipId: owner.pipId };
 };
 
 export const findClipInTracks = (
@@ -657,6 +693,11 @@ export const findClipInTracks = (
   pipWindows?: Record<string, PipWindow>
 ): TimelineClip | undefined => {
   if (!clipId) return undefined;
+  // PERF: served from the reference-keyed index when the passed data matches
+  // the store's (the common case — callers pass store refs through).
+  if (tracks === _clipIndexTracksRef && pipWindows === _clipIndexPipRef && _clipsByIdIndex) {
+    return _clipsByIdIndex.get(clipId);
+  }
   if (tracks) {
     for (let i = 0; i < tracks.length; i++) {
       const clips = tracks[i].clips;
@@ -3991,6 +4032,26 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       else if (state.activePropertiesTab === 'text') defaultLabel = 'Edit Text';
       else if (state.activePropertiesTab === 'effects') defaultLabel = 'Adjust Effect';
 
+      // PERF (multi-split fix): no-op fast path. Store updates are immutable,
+      // so if every data reference is unchanged since the last snapshot nothing
+      // can have changed — skip without cloning or serializing anything. This
+      // is the common high-frequency case (recalc after actions, debounced
+      // snapshot triggers) and previously cost a full structuredClone PLUS two
+      // whole-project JSON.stringify serializations per call.
+      if (state.historyIndex >= 0 && state.history[state.historyIndex]) {
+        const lastSnap = state.history[state.historyIndex];
+        if (
+          lastSnap.tracks === state.tracks &&
+          lastSnap.pipWindows === (state.pipWindows || {}) &&
+          lastSnap.subtitles === (state.subtitles || []) &&
+          lastSnap.markers === (state.markers || []) &&
+          lastSnap.beatMarkers === (state.beatMarkers || []) &&
+          lastSnap.exportRegions === (state.exportRegions || [])
+        ) {
+          return {};
+        }
+      }
+
       const snapshot: EditorSnapshot = {
         tracks: structuredClone(state.tracks),
         currentTime: state.currentTime,
@@ -4002,6 +4063,9 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         label: label || defaultLabel,
       };
 
+      // Redundant-entry check (references differ but content may be identical,
+      // e.g. an update that rebuilt arrays with the same values). Kept on this
+      // slower path only — the fast path above catches the hot no-op cases.
       // Check if anything actually changed (ignoring currentTime and label)
       // Single stringify comparison instead of 10 separate calls
       if (state.historyIndex >= 0 && state.history[state.historyIndex]) {

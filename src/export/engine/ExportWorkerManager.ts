@@ -422,7 +422,10 @@ export class ExportWorkerManager {
       pipWindows: timeline.pipWindows || {},
     };
     
-    // Deep clone just in case there are nested non-serializable proxies
-    return JSON.parse(JSON.stringify(safeTimeline));
+    // Deep clone just in case there are nested non-serializable proxies.
+    // PERF: structuredClone is faster than the JSON stringify+parse round-trip
+    // (no string materialization of the whole project) and preserves typed
+    // arrays; the postMessage to the worker serializes anyway.
+    return structuredClone(safeTimeline);
   }
 }

@@ -77,8 +77,6 @@ function DesktopApp() {
     redo,
     zoomIn,
     zoomOut,
-    history,
-    historyIndex,
     tracks,
     selectClips,
     selectedTransitionClipId,
@@ -115,8 +113,6 @@ function DesktopApp() {
     redo: s.redo,
     zoomIn: s.zoomIn,
     zoomOut: s.zoomOut,
-    history: s.history,
-    historyIndex: s.historyIndex,
     tracks: s.tracks,
     selectClips: s.selectClips,
     selectedTransitionClipId: s.selectedTransitionClipId,
@@ -568,8 +564,12 @@ function DesktopApp() {
     };
   }, []);
 
-  const canUndo = historyIndex > 0;
-  const canRedo = historyIndex < history.length - 1;
+  // PERF: primitive boolean subscriptions (was the whole `history` array in the
+  // useShallow bundle — the top-level shell re-rendered on EVERY snapshot,
+  // i.e. every edit action). Booleans flip rarely, so this re-renders only on
+  // undo/redo availability changes.
+  const canUndo = useEditorStore((s) => s.historyIndex > 0);
+  const canRedo = useEditorStore((s) => s.historyIndex >= 0 && s.historyIndex < s.history.length - 1);
 
   const tools: { id: EditorTool; icon: any; label: string; shortcut: string }[] = [
     { id: 'select', icon: MousePointer2, label: 'Select', shortcut: 'V' },
