@@ -215,7 +215,7 @@ interface EditorActions {
   moveClips: (updates: { clipId: string; newStartTime: number; newTrackId?: string }[], resolveOverlap?: boolean) => void;
   resolveOverlaps: (clipIds: string[]) => void;
   tryMoveClip: (clipId: string, newStartTime: number, newTrackId?: string) => { canMove: boolean; newPosition: number };
-  splitClip: (clipId: string, splitTime: number) => void;
+  splitClip: (clipId: string, splitTime: number, saveHistory?: boolean) => { leftId: string; rightId: string } | null;
   applyAutoCuts: (clipId: string, aggressiveness: 'low' | 'medium' | 'high') => void;
   selectClip: (clipId: string | null, multi?: boolean) => void;
   selectClips: (clipIds: string[]) => void;
@@ -2871,7 +2871,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     get().saveSnapshot('Auto Jump Cuts');
   },
 
-  splitClip: (clipId, splitTime) => {
+  splitClip: (clipId, splitTime, saveHistory = true) => {
+    let splitResult: { leftId: string; rightId: string } | null = null;
     set((state) => {
       const isSelected = state.selectedClipIds.includes(clipId);
       let primarySelectedId = '';
@@ -2895,6 +2896,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         splitMap[id] = { left: generateId(), right: id };
       }
       
+      if (splitMap[clipId]) {
+        splitResult = { leftId: splitMap[clipId].left, rightId: splitMap[clipId].right };
+      }
+
       if (isSelected) {
         primarySelectedId = splitMap[clipId].right;
       }
@@ -3036,7 +3041,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       return { tracks, pipWindows, selectedKeyframeLines: newSelectedKeyframeLines };
     });
     get().recalcTotalDuration();
-    get().saveSnapshot('Split Clip');
+    if (saveHistory) {
+      get().saveSnapshot('Split Clip');
+    }
+    return splitResult;
   },
 
   selectClip: (id, multi = false) => {

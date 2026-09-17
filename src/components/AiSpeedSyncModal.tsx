@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useEditorStore } from '@/store/editorStore';
-import { X, Zap, Loader2, Sparkles, VolumeX, CheckCircle2, Film, Mic, ChevronRight, Layers } from 'lucide-react';
+import { X, Zap, Loader2, Sparkles, VolumeX, CheckCircle2, Film, Mic, ChevronRight, Layers, Scissors } from 'lucide-react';
 import { syncVideoClipWithTts, GEMINI_SPEED_SYNC_MODELS, GeminiSpeedSyncModel, AiSpeedSyncResult } from '@/utils/aiSpeedSync';
 import { toast } from 'sonner';
 
@@ -79,7 +79,7 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
 
   const [alignStartTime, setAlignStartTime] = useState(true);
   const [muteOriginalAudio, setMuteOriginalAudio] = useState(true);
-  const [selectedModel, setSelectedModel] = useState<GeminiSpeedSyncModel>('gemini-3.5-flash-preview');
+  const [selectedModel, setSelectedModel] = useState<GeminiSpeedSyncModel>('gemini-3.5-flash-lite');
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -113,7 +113,11 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
       );
 
       setSyncResult(result);
-      toast.success(`Speed Sync complete! Applied ${result.speedFrames.length} speed frames using ${result.successfulModel}.`);
+      if (result.ttsSplitApplied) {
+        toast.success(`Speed Sync complete! Split TTS at ${result.ttsSplitPoint?.toFixed(2)}s to match dialogue and applied ${result.speedFrames.length} speed frames.`);
+      } else {
+        toast.success(`Speed Sync complete! Applied ${result.speedFrames.length} speed frames using ${result.successfulModel}.`);
+      }
     } catch (err: any) {
       console.error('[AiSpeedSyncModal] Sync error:', err);
       toast.error(err?.message || 'Failed to sync video speed with TTS.');
@@ -164,7 +168,7 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
           </div>
           <div className="flex items-center gap-1 text-[10px] font-mono text-cyan-300">
             <span className="bg-cyan-500/20 px-1.5 py-0.5 rounded border border-cyan-500/30 font-semibold">
-              gemini-3.5-flash-preview
+              gemini-3.5-flash-lite
             </span>
             <ChevronRight className="w-3 h-3 text-white/30" />
             <span className="text-white/50">3.1 Flash Lite</span>
@@ -301,6 +305,15 @@ export const AiSpeedSyncModal: React.FC<{ onClose: () => void }> = ({ onClose })
                 {syncResult.successfulModel}
               </span>
             </div>
+            {syncResult.ttsSplitApplied && (
+              <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-start gap-2 text-[11px] text-amber-200">
+                <Scissors className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+                <div>
+                  <span className="font-semibold text-amber-300">TTS Split Applied at {syncResult.ttsSplitPoint?.toFixed(2)}s: </span>
+                  TTS voiceover had more sentences than the video clip ({syncResult.totalTtsSentences ? `${syncResult.totalTtsSentences} in TTS vs ${syncResult.matchingSentenceCount || 1} in video` : 'additional sentences'}). The video clip was speed-ramped to match the dialogue, and the remaining sentence(s) were split into a new clip on the audio track.
+                </div>
+              </div>
+            )}
             {syncResult.alignmentMode && (
               <div className="flex items-center gap-2 text-[11px]">
                 <span className={`px-1.5 py-0.5 rounded border font-semibold ${

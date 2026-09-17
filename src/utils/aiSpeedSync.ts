@@ -26,8 +26,8 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export const GEMINI_SPEED_SYNC_MODELS = [
-  'gemini-3.5-flash-preview',
   'gemini-3.5-flash-lite',
+  'gemini-3.5-flash-preview',
   'gemini-3.1-flash-lite',
   'gemini-3.8-flash',
   'gemini-2.5-flash',
@@ -69,6 +69,20 @@ export interface SpeedSyncVerdict {
   reason?: string;
 }
 
+export interface SpeedSyncSentence {
+  text: string;
+  startTime: number;
+  endTime: number;
+}
+
+export interface TtsExtraSentenceDetection {
+  hasMoreSentences: boolean;
+  matchingCutoffTime: number; // in seconds from TTS audio slice start
+  matchingSentenceCount?: number;
+  totalTtsSentences?: number;
+  reason?: string;
+}
+
 export interface AiSpeedSyncOptions {
   alignStartTime?: boolean;      // Align video start with TTS start (default true)
   muteOriginalAudio?: boolean;   // Mute original video audio so TTS is isolated (default true)
@@ -89,6 +103,15 @@ export interface AiSpeedSyncResult {
   verdict?: SpeedSyncVerdict;
   /** Number of anchors that stretch/hold the video across extra TTS words. */
   stretchFrameCount?: number;
+  /** Whether TTS had extra sentences and was split at the matching point. */
+  ttsSplitApplied?: boolean;
+  /** Split point in seconds relative to TTS clip start. */
+  ttsSplitPoint?: number;
+  /** ID of the trailing TTS clip preserved on the timeline. */
+  ttsRemainingClipId?: string;
+  matchingSentenceCount?: number;
+  totalTtsSentences?: number;
+  splitReason?: string;
 }
 
 /**
@@ -192,6 +215,10 @@ export async function runGeminiSpeedSync(
   verdict?: SpeedSyncVerdict;
   videoWords?: SyncWordTiming[];
   ttsWords?: SyncWordTiming[];
+  videoSentences?: SpeedSyncSentence[];
+  ttsSentences?: SpeedSyncSentence[];
+  ttsHasMoreSentences?: boolean;
+  matchingCutoffTtsTime?: number;
 }> {
   const apiKey = getGeminiKey();
   if (!apiKey) {
@@ -218,20 +245,25 @@ I have provided two audio recordings:
 - AUDIO 1 (First audio file): Original Video Clip Audio (Duration: ${videoDuration.toFixed(2)}s).
 - AUDIO 2 (Second audio file): TTS Voiceover Audio to synchronize with (Duration: ${ttsDuration.toFixed(2)}s).
 
-TASK — mark the timing of every word in BOTH audios:
+TASK — mark the timing of every word in BOTH audios and analyze sentence structure:
 1. Listen to AUDIO 1 and transcribe the spoken words with precise timestamps as "videoWords": [{ "word": "...", "time": seconds }].
 2. Listen to AUDIO 2 and transcribe the spoken words with precise timestamps as "ttsWords": [{ "word": "...", "time": seconds }].
-3. Report a verdict about the two audios:
+3. Report sentence analysis and comparison:
+   - "videoSentences": list of spoken sentences in AUDIO 1: [{ "text": "...", "startTime": seconds, "endTime": seconds }].
+   - "ttsSentences": list of spoken sentences in AUDIO 2: [{ "text": "...", "startTime": seconds, "endTime": seconds }].
+   - "ttsHasMoreSentences": true if AUDIO 2 (TTS) contains more sentences or additional dialogue beyond what is spoken in AUDIO 1 (Video).
+   - "matchingCutoffTtsTime": if ttsHasMoreSentences is true, the timestamp in seconds in AUDIO 2 where the matching video dialogue ends (immediately after the last sentence matching AUDIO 1, before the next sentence begins in AUDIO 2).
+4. Report a verdict about the two audios:
    - "ttsHasSpeech": true only if AUDIO 2 contains spoken speech (false if it is music, noise, or silence).
    - "videoHasSpeech": true only if AUDIO 1 contains spoken speech (false is fine — the video may be a silent AI-generated clip).
-   - "sameContent": true if AUDIO 2 is the SAME spoken content as AUDIO 1 (this means the user selected the original clip's own audio by mistake instead of a separate TTS voiceover).
+   - "sameContent": true ONLY if AUDIO 2 is the exact identical acoustic audio recording file as AUDIO 1 (same human voice and acoustics). If AUDIO 2 is a separate synthesized TTS voiceover speaking the same or similar script, set "sameContent" to false because synchronizing video to a matching TTS script is the primary intended function.
    - "reason": short explanation of the verdict.
-4. Also return 3 to 10 anchor points where sentence or phrase beginnings align, as a fallback:
+5. Also return 3 to 10 anchor points where sentence or phrase beginnings align, as a fallback:
    - "videoTime": seconds from AUDIO 1 start (0.00 to ${videoDuration.toFixed(2)}).
    - "ttsTime": seconds from AUDIO 2 start (0.00 to ${ttsDuration.toFixed(2)}).
    - "phrase": short description or transcribed words for this anchor.
    - "targetSpeed": recommended video speed multiplier between this and the previous anchor (e.g. 0.7x to 1.8x).
-5. IMPORTANT: the word timestamps will be matched programmatically — report ACCURATE word-level timestamps, not invented ones.
+6. IMPORTANT: the word timestamps will be matched programmatically — report ACCURATE word-level timestamps, not invented ones.
 
 RULES:
 - Word "time" values and anchor timestamps MUST be in seconds and within each audio's duration.
@@ -240,6 +272,9 @@ RULES:
   "verdict": { "ttsHasSpeech": true, "videoHasSpeech": true, "sameContent": false, "reason": "TTS is a separate voiceover" },
   "videoWords": [ { "word": "hello", "time": 0.8 } ],
   "ttsWords": [ { "word": "hello", "time": 1.1 } ],
+  "videoSentences": [ { "text": "Hello world.", "startTime": 0.8, "endTime": 1.9 } ],
+  "ttsSentences": [ { "text": "Hello world.", "startTime": 1.1, "endTime": 2.2 } ],
+  "ttsHasMoreSentences": false,
   "summary": "<1-2 sentence overview of pacing adjustment>",
   "anchors": [
     { "videoTime": 0.8, "ttsTime": 1.1, "phrase": "Intro sentence", "targetSpeed": 1.2 }
@@ -379,6 +414,31 @@ RULES:
     const videoWords = sanitizeWords(parsed.videoWords, videoDuration);
     const ttsWords = sanitizeWords(parsed.ttsWords, ttsDuration);
 
+    // Sanitize sentence breakdowns if returned by AI
+    const sanitizeSentences = (raw: unknown, duration: number): SpeedSyncSentence[] | undefined => {
+      if (!Array.isArray(raw) || raw.length === 0) return undefined;
+      const list: SpeedSyncSentence[] = [];
+      for (const s of raw.slice(0, 100)) {
+        const text = typeof s?.text === 'string' ? s.text.trim() : '';
+        const startTime = typeof s?.startTime === 'number' ? s.startTime : Number(s?.startTime);
+        const endTime = typeof s?.endTime === 'number' ? s.endTime : Number(s?.endTime);
+        if (!text || !Number.isFinite(startTime) || !Number.isFinite(endTime)) continue;
+        if (startTime < -0.05 || endTime > duration + 1.0 || endTime <= startTime) continue;
+        list.push({
+          text,
+          startTime: Number(Math.max(0, startTime).toFixed(3)),
+          endTime: Number(Math.min(duration, endTime).toFixed(3)),
+        });
+      }
+      return list.length > 0 ? list : undefined;
+    };
+    const videoSentences = sanitizeSentences(parsed.videoSentences, videoDuration);
+    const ttsSentences = sanitizeSentences(parsed.ttsSentences, ttsDuration);
+    const ttsHasMoreSentences = parsed.ttsHasMoreSentences === true;
+    const matchingCutoffTtsTime = typeof parsed.matchingCutoffTtsTime === 'number' && Number.isFinite(parsed.matchingCutoffTtsTime)
+      ? Number(parsed.matchingCutoffTtsTime.toFixed(3))
+      : undefined;
+
     // Sanitize and validate anchors
     const sanitizedAnchors: SyncAnchor[] = [];
     let prevVideo = 0;
@@ -418,7 +478,18 @@ RULES:
       }
     }
 
-    return { anchors: sanitizedAnchors, successfulModel, summary, verdict, videoWords, ttsWords };
+    return {
+      anchors: sanitizedAnchors,
+      successfulModel,
+      summary,
+      verdict,
+      videoWords,
+      ttsWords,
+      videoSentences,
+      ttsSentences,
+      ttsHasMoreSentences,
+      matchingCutoffTtsTime,
+    };
   } catch (parseErr: any) {
     throw new Error(`Failed to parse AI speed sync response as JSON: ${parseErr.message}`);
   }
@@ -518,6 +589,152 @@ export function buildAnchorsFromWordTimings(
 }
 
 /**
+ * Detects whether the TTS voiceover contains more sentences/dialogue than the
+ * video clip, and if so, computes the exact cutoff time (in seconds from TTS
+ * start) where the video's matching dialogue ends.
+ *
+ * Combines:
+ * 1. Explicit sentence breakdown (ttsSentences.length > videoSentences.length)
+ * 2. Explicit AI flag & cutoff (ttsHasMoreSentences, matchingCutoffTtsTime)
+ * 3. Word-level alignment analysis with trailing word counts, sentence boundary
+ *    punctuation (. ! ?), and audio duration gap.
+ */
+export function detectTtsExtraSentences(params: {
+  videoWords?: SyncWordTiming[];
+  ttsWords?: SyncWordTiming[];
+  videoSentences?: SpeedSyncSentence[];
+  ttsSentences?: SpeedSyncSentence[];
+  geminiHasMoreSentences?: boolean;
+  geminiMatchingCutoffTime?: number;
+  videoDuration: number;
+  ttsDuration: number;
+}): TtsExtraSentenceDetection {
+  const {
+    videoWords,
+    ttsWords,
+    videoSentences,
+    ttsSentences,
+    geminiHasMoreSentences,
+    geminiMatchingCutoffTime,
+    videoDuration,
+    ttsDuration,
+  } = params;
+
+  // 1. Check explicit sentence breakdown: TTS has more sentences than video
+  if (videoSentences && ttsSentences && videoSentences.length > 0 && ttsSentences.length > videoSentences.length) {
+    const matchedSentencesCount = videoSentences.length;
+    const lastMatchedTtsSentence = ttsSentences[matchedSentencesCount - 1];
+    const nextTtsSentence = ttsSentences[matchedSentencesCount];
+
+    if (lastMatchedTtsSentence && nextTtsSentence) {
+      // Place the split in the pause between sentences
+      const pauseMidpoint = (lastMatchedTtsSentence.endTime + nextTtsSentence.startTime) / 2;
+      const cutoff = Math.max(lastMatchedTtsSentence.endTime + 0.05, Math.min(nextTtsSentence.startTime - 0.05, pauseMidpoint));
+      if (cutoff > 0.25 && cutoff < ttsDuration - 0.25) {
+        return {
+          hasMoreSentences: true,
+          matchingCutoffTime: Number(cutoff.toFixed(3)),
+          matchingSentenceCount: matchedSentencesCount,
+          totalTtsSentences: ttsSentences.length,
+          reason: `TTS has ${ttsSentences.length} sentences; video clip only contains ${matchedSentencesCount} sentence${matchedSentencesCount > 1 ? 's' : ''}.`,
+        };
+      }
+    }
+  }
+
+  // 2. Check explicit AI flag and cutoff timestamp
+  if (
+    geminiHasMoreSentences === true &&
+    typeof geminiMatchingCutoffTime === 'number' &&
+    geminiMatchingCutoffTime > 0.3 &&
+    geminiMatchingCutoffTime < ttsDuration - 0.25
+  ) {
+    return {
+      hasMoreSentences: true,
+      matchingCutoffTime: Number(geminiMatchingCutoffTime.toFixed(3)),
+      reason: 'AI detected that TTS continues with additional sentences beyond the video clip dialogue.',
+    };
+  }
+
+  // 3. Word-level analysis with punctuation & duration gap
+  if (videoWords && ttsWords && videoWords.length > 0 && ttsWords.length > 0) {
+    const normalize = (w: string) =>
+      (w || '').toLowerCase().replace(/[.,!?،۔؟;:"'`\-–—()[\]{}]/g, '').trim();
+
+    const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+    const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+
+    if (vWords.length >= 2 && tWords.length >= 3) {
+      let vi = 0;
+      let lastMatchedTi = -1;
+      let maxVi = -1;
+      let matchCount = 0;
+
+      for (let ti = 0; ti < tWords.length; ti++) {
+        const tNorm = normalize(tWords[ti].word);
+        let matchIdx = -1;
+        for (let look = 0; look <= 3; look++) {
+          const cand = vWords[vi + look];
+          if (!cand) break;
+          if (normalize(cand.word) === tNorm) {
+            matchIdx = vi + look;
+            break;
+          }
+        }
+        if (matchIdx >= 0) {
+          lastMatchedTi = ti;
+          maxVi = Math.max(maxVi, matchIdx);
+          vi = matchIdx + 1;
+          matchCount++;
+        }
+      }
+
+      // If we matched the video speech near completion (at least 65% of words or within 2 words of the end)
+      const nearVideoEnd = maxVi >= vWords.length - Math.max(2, Math.floor(vWords.length * 0.35));
+
+      if (matchCount >= 2 && nearVideoEnd && lastMatchedTi >= 0 && lastMatchedTi < tWords.length - 1) {
+        const remainingTtsWords = tWords.slice(lastMatchedTi + 1);
+        const lastMatchedTime = tWords[lastMatchedTi].time;
+        const nextWordTime = remainingTtsWords[0].time;
+        const remainingDuration = ttsDuration - lastMatchedTime;
+
+        // Check if there is sentence-ending punctuation on the matched boundary
+        const lastWordRaw = tWords[lastMatchedTi].word || '';
+        const lastVWordRaw = vWords[maxVi]?.word || '';
+        const hasPunctuation = /[.!?؛۔]$/.test(lastWordRaw.trim()) || /[.!?؛۔]$/.test(lastVWordRaw.trim());
+
+        // Also check if any remaining TTS word has sentence punctuation
+        const remainingHasSentence = remainingTtsWords.some(w => /[.!?]/.test(w.word));
+
+        // Extra sentence criteria:
+        // - At least 3 extra words and at least 0.8s remaining duration
+        // - OR sentence punctuation and at least 2 extra words
+        const isExtraSentence =
+          (remainingTtsWords.length >= 3 && remainingDuration >= 0.8) ||
+          (hasPunctuation && remainingTtsWords.length >= 2) ||
+          (remainingHasSentence && remainingTtsWords.length >= 2);
+
+        if (isExtraSentence) {
+          // Calculate clean split point in the pause between sentences
+          let cutoff = (lastMatchedTime + 0.25 + nextWordTime) / 2;
+          cutoff = Math.max(lastMatchedTime + 0.1, Math.min(nextWordTime - 0.05, cutoff));
+
+          if (cutoff > 0.25 && cutoff < ttsDuration - 0.2) {
+            return {
+              hasMoreSentences: true,
+              matchingCutoffTime: Number(cutoff.toFixed(3)),
+              reason: `TTS has ${remainingTtsWords.length} trailing spoken words (${remainingDuration.toFixed(1)}s) after video dialogue ends.`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return { hasMoreSentences: false, matchingCutoffTime: 0 };
+}
+
+/**
  * Constructs clean, clamped SpeedFrame objects from the AI anchors.
  */
 export function buildSpeedFramesFromAnchors(
@@ -585,7 +802,9 @@ export async function syncVideoClipWithTts(
   videoClipId: string,
   ttsClipId: string,
   options: AiSpeedSyncOptions = {},
-  onProgress?: (progress: number, message: string) => void
+  onProgress?: (progress: number, message: string) => void,
+  _extractAudio = extractClipAudioToWav,
+  _runGemini = runGeminiSpeedSync
 ): Promise<AiSpeedSyncResult> {
   const store = useEditorStore.getState();
   const foundVideo = findClipInTracks(store.tracks, videoClipId, store.pipWindows);
@@ -610,10 +829,16 @@ export async function syncVideoClipWithTts(
   if (ttsClip.mediaId === videoClip.mediaId) {
     throw new Error('The TTS clip is the same media as the video clip. Select a separate TTS voiceover audio clip.');
   }
+  if (ttsClip.id === videoClip.id) {
+    throw new Error('Please select different clips for video and TTS audio.');
+  }
+  if (ttsClip.linkedClipId === videoClip.id || videoClip.linkedClipId === ttsClip.id) {
+    throw new Error('The selected audio clip is the unlinked original audio from this video clip. Please select a separate TTS voiceover clip.');
+  }
 
   // 1. Extract Video Audio
   onProgress?.(10, 'Scanning Video Clip audio...');
-  const videoAudio = await extractClipAudioToWav(
+  const videoAudio = await _extractAudio(
     videoClip,
     videoMedia?.url || '',
     videoMedia?.id
@@ -621,7 +846,7 @@ export async function syncVideoClipWithTts(
 
   // 2. Extract TTS Audio
   onProgress?.(30, 'Scanning TTS Voiceover audio...');
-  const ttsAudio = await extractClipAudioToWav(
+  const ttsAudio = await _extractAudio(
     ttsClip,
     ttsMedia.url,
     ttsMedia.id
@@ -640,7 +865,7 @@ export async function syncVideoClipWithTts(
 
   // 3. Gemini Multimodal Analysis — marks word timings in BOTH audios
   onProgress?.(55, 'AI marking word timings in video & TTS audio...');
-  const analysis = await runGeminiSpeedSync(
+  const analysis = await _runGemini(
     videoAudio.wavBlob,
     ttsAudio.wavBlob,
     videoAudio.duration,
@@ -655,22 +880,93 @@ export async function syncVideoClipWithTts(
       throw new Error('AI detected that the selected TTS clip does not contain speech (music/noise/silence). Please select a valid TTS voiceover clip.');
     }
     if (verdict.sameContent === true) {
-      throw new Error('AI detected that the selected audio is the original clip\'s own audio, not a separate TTS voiceover. Please select the TTS clip.');
+      // Differentiate between an identical duplicate audio file vs. a separate TTS voiceover reading the same script.
+      // If duration differs or word timestamps have shifted, it is a valid separate voiceover with different pacing!
+      const durationDiff = Math.abs(videoAudio.duration - ttsAudio.duration);
+      const hasWordTimings = Boolean(
+        analysis.videoWords && analysis.ttsWords &&
+        analysis.videoWords.length > 0 && analysis.ttsWords.length > 0
+      );
+
+      let wordsIdenticalTiming = false;
+      if (hasWordTimings && analysis.videoWords!.length === analysis.ttsWords!.length) {
+        wordsIdenticalTiming = analysis.videoWords!.every((vw, i) => {
+          const tw = analysis.ttsWords![i];
+          return Math.abs(vw.time - tw.time) < 0.04;
+        });
+      }
+
+      // Only reject if it is genuinely the identical recording at identical speed (zero pacing difference)
+      if (durationDiff < 0.05 && wordsIdenticalTiming) {
+        throw new Error('AI detected that the selected audio is the original clip\'s own audio, not a separate TTS voiceover. Please select the TTS clip.');
+      } else {
+        console.log('[AiSpeedSync] Note: AI reported sameContent=true (matching dialogue script), but pacing differences confirm it is a separate TTS voiceover. Proceeding with sync.');
+      }
     }
     // videoHasSpeech === false is NOT an error — silent AI-generated video is
     // expected; the cadence/word mapping still works via TTS timings.
   }
 
+  // ── Sentence Matching Detection: split TTS if it has more sentences ─────
+  const ttsExtraInfo = detectTtsExtraSentences({
+    videoWords: analysis.videoWords,
+    ttsWords: analysis.ttsWords,
+    videoSentences: analysis.videoSentences,
+    ttsSentences: analysis.ttsSentences,
+    geminiHasMoreSentences: analysis.ttsHasMoreSentences,
+    geminiMatchingCutoffTime: analysis.matchingCutoffTtsTime,
+    videoDuration: videoAudio.duration,
+    ttsDuration: ttsAudio.duration,
+  });
+
+  let activeTtsClip = ttsClip;
+  let ttsSplitApplied = false;
+  let ttsSplitPoint: number | undefined;
+  let ttsRemainingClipId: string | undefined;
+
+  if (
+    ttsExtraInfo.hasMoreSentences &&
+    ttsExtraInfo.matchingCutoffTime > 0.25 &&
+    ttsExtraInfo.matchingCutoffTime < ttsClip.duration - 0.2
+  ) {
+    const matchingCutoff = ttsExtraInfo.matchingCutoffTime;
+    onProgress?.(70, `Splitting TTS at matching point (${matchingCutoff.toFixed(2)}s)...`);
+    console.log(`[AiSpeedSync] TTS has more sentences than video clip. Splitting TTS at ${matchingCutoff}s...`);
+
+    const splitTimelineTime = ttsClip.startTime + matchingCutoff;
+    const splitResult = store.splitClip(ttsClip.id, splitTimelineTime, false);
+
+    ttsSplitApplied = true;
+    ttsSplitPoint = matchingCutoff;
+    ttsRemainingClipId = splitResult?.rightId || ttsClip.id;
+
+    // Retrieve the left clip (matching portion of TTS)
+    const currentTracks = useEditorStore.getState().tracks;
+    const leftClipId = splitResult?.leftId;
+    const foundLeftClip = leftClipId ? findClipInTracks(currentTracks, leftClipId, store.pipWindows) : null;
+
+    activeTtsClip = foundLeftClip || {
+      ...ttsClip,
+      duration: matchingCutoff,
+    };
+  }
+
   // ── Anchor derivation: prefer word-level matching, fall back to cadence ───
   let anchors = aiAnchors;
   let alignmentMode: 'word-level' | 'ai-anchors' = 'ai-anchors';
-  if (analysis.videoWords && analysis.ttsWords &&
-      analysis.videoWords.length > 0 && analysis.ttsWords.length > 0) {
+
+  const effectiveTtsDuration = ttsSplitApplied && ttsSplitPoint ? ttsSplitPoint : ttsAudio.duration;
+  const effectiveTtsWords = (ttsSplitApplied && ttsSplitPoint && analysis.ttsWords)
+    ? analysis.ttsWords.filter(w => w.time <= ttsSplitPoint + 0.05)
+    : analysis.ttsWords;
+
+  if (analysis.videoWords && effectiveTtsWords &&
+      analysis.videoWords.length > 0 && effectiveTtsWords.length > 0) {
     const wordAnchors = buildAnchorsFromWordTimings(
       analysis.videoWords,
-      analysis.ttsWords,
+      effectiveTtsWords,
       videoAudio.duration,
-      ttsAudio.duration
+      effectiveTtsDuration
     );
     if (wordAnchors.length >= 2) {
       anchors = wordAnchors;
@@ -678,11 +974,26 @@ export async function syncVideoClipWithTts(
     }
   }
 
+  // If TTS was split, ensure anchors do not exceed matching cutoff or contain trailing stretch
+  if (ttsSplitApplied && ttsSplitPoint) {
+    anchors = anchors.filter(a => !a.stretch && a.ttsTime < ttsSplitPoint! - 0.02);
+    if (anchors.length === 0) {
+      anchors = [
+        {
+          videoTime: Number((videoAudio.duration * 0.5).toFixed(3)),
+          ttsTime: Number((ttsSplitPoint * 0.5).toFixed(3)),
+          phrase: 'Matching pace',
+          targetSpeed: Math.min(4, Math.max(0.25, videoAudio.duration / ttsSplitPoint)),
+        },
+      ];
+    }
+  }
+
   // 4. Calculate Speed Frames
   onProgress?.(85, 'Calculating Speed Frames & rate-stretching video...');
   const { speedFrames, newDuration, fixedSourceEnd, segments } = buildSpeedFramesFromAnchors(
     videoClip,
-    ttsClip,
+    activeTtsClip,
     anchors,
     videoMedia?.duration
   );
@@ -694,7 +1005,7 @@ export async function syncVideoClipWithTts(
 
   const updatedClip: TimelineClip = {
     ...videoClip,
-    startTime: alignStart ? ttsClip.startTime : videoClip.startTime,
+    startTime: alignStart ? activeTtsClip.startTime : videoClip.startTime,
     duration: newDuration,
     speedFrames,
     speedFrameSourceEnd: fixedSourceEnd,
@@ -725,7 +1036,11 @@ export async function syncVideoClipWithTts(
   store.updateClip(videoClip.id, updatedClip);
   store.selectClip(videoClip.id);
   store.recalcTotalDuration();
-  store.saveSnapshot('AI Speed Sync with TTS');
+  store.saveSnapshot(
+    ttsSplitApplied
+      ? 'AI Speed Sync (Split TTS & Applied Speed Frames)'
+      : 'AI Speed Sync with TTS'
+  );
 
   onProgress?.(100, `Done! Synced with ${successfulModel}`);
 
@@ -741,5 +1056,11 @@ export async function syncVideoClipWithTts(
     alignmentMode,
     verdict,
     stretchFrameCount,
+    ttsSplitApplied,
+    ttsSplitPoint,
+    ttsRemainingClipId,
+    matchingSentenceCount: ttsExtraInfo.matchingSentenceCount,
+    totalTtsSentences: ttsExtraInfo.totalTtsSentences,
+    splitReason: ttsExtraInfo.reason,
   };
 }
