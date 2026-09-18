@@ -42,10 +42,13 @@ import {
   refineMaskEdges,
   getPooledCanvas,
   applySubjectNeonOutlineFlash,
+  ensureClipMasksReady,
   MaskAnalysisStatus,
 } from './aiBackground';
 
 // ─── Smart Orchestrator ─────────────────────────────────────────────────────
+
+import type { AiCutoutMode } from '@/types';
 
 export interface IntegrationOptions {
   /** User-selected quality */
@@ -68,6 +71,13 @@ export interface IntegrationOptions {
   spillSuppression: number;
   /** Target background color to suppress (e.g. green/blue screen hex) */
   spillColor?: string;
+  /** Cutout Mode: remove (transparent), blur, outline, color */
+  mode?: AiCutoutMode;
+  blurStrength?: number;
+  strokeColor?: string;
+  strokeWidth?: number;
+  strokeGlow?: boolean;
+  bgColor?: string;
 }
 
 const DEFAULT_OPTS: IntegrationOptions = {
@@ -80,6 +90,12 @@ const DEFAULT_OPTS: IntegrationOptions = {
   choke: 0,
   feather: 0,
   spillSuppression: 0,
+  mode: 'remove',
+  blurStrength: 12,
+  strokeColor: '#ffffff',
+  strokeWidth: 4,
+  strokeGlow: false,
+  bgColor: '#1e1e24',
 };
 
 /**
@@ -125,7 +141,15 @@ export async function applyAiBackgroundSmart(
         choke,
         feather,
         options.spillSuppression,
-        options.spillColor
+        options.spillColor,
+        {
+          mode: options.mode,
+          blurStrength: options.blurStrength,
+          strokeColor: options.strokeColor,
+          strokeWidth: options.strokeWidth,
+          strokeGlow: options.strokeGlow,
+          bgColor: options.bgColor,
+        }
       )
     ) {
       return;
@@ -203,7 +227,7 @@ export async function applyAiBackgroundSmart(
       // Composite whatever we have cached (might be stale — that's OK)
       const cached = getCachedMaskCanvas(clipId, width, height);
       if (cached) {
-        compositeMask(ctx, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId);
+        compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
       }
     } else {
       // EXPORT / PAUSED: Await synchronous high-quality mask
@@ -214,7 +238,7 @@ export async function applyAiBackgroundSmart(
         clipId,
         human,
         chosenModel,
-        false, // Never use MediaPipe for export
+        options.modelSelection !== 2, // Use MediaPipe GPU unless Ultra Studio IS-Net is selected
         options.useROI,
         width,
         height
@@ -222,7 +246,7 @@ export async function applyAiBackgroundSmart(
       if (mask) {
         cacheMaskCanvas(clipId, mask);
         markInferencePerformed(clipId);
-        compositeMask(ctx, mask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId);
+        compositeMask(ctx, sourceElement, mask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
       }
     }
   } catch (err) {
@@ -392,6 +416,7 @@ async function runSegmentationSync(
 
 function compositeMask(
   ctx: CanvasRenderingContext2D,
+  sourceElement: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
   maskCanvas: HTMLCanvasElement,
   width: number,
   height: number,
@@ -399,18 +424,109 @@ function compositeMask(
   feather: number,
   spillSuppression: number,
   spillColor?: string,
-  clipId: string = '_smart'
+  clipId: string = '_smart',
+  cutoutOptions?: IntegrationOptions
 ): void {
   const refinedMask = (choke !== 0 || feather > 0)
     ? refineMaskEdges(maskCanvas, width, height, choke, feather, `${clipId}_smart`)
     : maskCanvas;
 
-  ctx.globalCompositeOperation = 'destination-in';
-  ctx.drawImage(refinedMask as any, 0, 0, width, height);
-  ctx.globalCompositeOperation = 'source-over';
+  const mode = cutoutOptions?.mode || 'remove';
 
-  if (spillSuppression > 0) {
-    applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
+  if (mode === 'blur') {
+    // ── Mode: Portrait Background Blur (DSLR Bokeh) ──
+    const fgCanvas = getPooledCanvas(`${clipId}_smart_fg`, width, height);
+    const fgCtx = fgCanvas.getContext('2d');
+    if (fgCtx) {
+      fgCtx.clearRect(0, 0, width, height);
+      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'destination-in';
+      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'source-over';
+      if (spillSuppression > 0) {
+        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
+      }
+
+      ctx.save();
+      ctx.clearRect(0, 0, width, height);
+      const blurPx = Math.max(1, cutoutOptions?.blurStrength ?? 12);
+      ctx.filter = `blur(${blurPx}px)`;
+      ctx.drawImage(sourceElement as any, 0, 0, width, height);
+      ctx.restore();
+
+      ctx.drawImage(fgCanvas, 0, 0, width, height);
+    }
+  } else if (mode === 'color') {
+    // ── Mode: Studio / Solid Color Backdrop ──
+    const fgCanvas = getPooledCanvas(`${clipId}_smart_fg`, width, height);
+    const fgCtx = fgCanvas.getContext('2d');
+    if (fgCtx) {
+      fgCtx.clearRect(0, 0, width, height);
+      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'destination-in';
+      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'source-over';
+      if (spillSuppression > 0) {
+        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
+      }
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = cutoutOptions?.bgColor || '#1e1e24';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(fgCanvas, 0, 0, width, height);
+    }
+  } else if (mode === 'outline') {
+    // ── Mode: Sticker / Neon Outline (Shorts / Reels) ──
+    const fgCanvas = getPooledCanvas(`${clipId}_smart_fg`, width, height);
+    const fgCtx = fgCanvas.getContext('2d');
+    if (fgCtx) {
+      fgCtx.clearRect(0, 0, width, height);
+      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'destination-in';
+      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'source-over';
+      if (spillSuppression > 0) {
+        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
+      }
+
+      const strokeW = Math.max(1, cutoutOptions?.strokeWidth ?? 4);
+      const strokeCol = cutoutOptions?.strokeColor ?? '#ffffff';
+      const strokeCanvas = getPooledCanvas(`${clipId}_smart_stroke`, width, height);
+      const sCtx = strokeCanvas.getContext('2d');
+      if (sCtx) {
+        sCtx.clearRect(0, 0, width, height);
+        sCtx.drawImage(refinedMask as any, 0, 0, width, height);
+        sCtx.globalCompositeOperation = 'source-in';
+        sCtx.fillStyle = strokeCol;
+        sCtx.fillRect(0, 0, width, height);
+        sCtx.globalCompositeOperation = 'source-over';
+      }
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.save();
+      if (cutoutOptions?.strokeGlow) {
+        ctx.shadowColor = strokeCol;
+        ctx.shadowBlur = strokeW * 3;
+      }
+      const offsets = [-strokeW, 0, strokeW];
+      for (const ox of offsets) {
+        for (const oy of offsets) {
+          if (ox === 0 && oy === 0) continue;
+          ctx.drawImage(strokeCanvas, ox, oy, width, height);
+        }
+      }
+      ctx.restore();
+      ctx.drawImage(fgCanvas, 0, 0, width, height);
+    }
+  } else {
+    // ── Mode: Standard Transparent Cutout ──
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(refinedMask as any, 0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+
+    if (spillSuppression > 0) {
+      applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
+    }
   }
 }
 
@@ -423,6 +539,7 @@ export {
   startClipBackgroundAnalysis,
   subscribeClipBackgroundAnalysis,
   getClipAnalysisStatus,
+  ensureClipMasksReady,
   cleanupAiBackgroundResources,
   cleanupClipBackgroundState,
   invalidateMaskCache,

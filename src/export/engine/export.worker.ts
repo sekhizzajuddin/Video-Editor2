@@ -29,8 +29,10 @@ import * as WebMMuxerImport from 'webm-muxer';
 import { Gif89aEncoder } from '../gifEncoder';
 import { h264CodecCandidates } from '../quality';
 
+import { preRenderedMaskCache } from '@/utils/aiBackground';
+
 export type WorkerMessageType =
-  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null; mediaBuffers?: Record<string, ArrayBuffer> } }
+  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null; mediaBuffers?: Record<string, ArrayBuffer>; aiBackgroundMasks?: Record<string, Array<{ key: number; bitmap: ImageBitmap }>> } }
   | { type: 'CANCEL' };
 
 let isExporting = false;
@@ -46,7 +48,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
         message.payload.config, 
         message.payload.audioData,
         message.payload.fileHandle,
-        message.payload.mediaBuffers
+        message.payload.mediaBuffers,
+        message.payload.aiBackgroundMasks
       );
       break;
     case 'CANCEL':
@@ -321,11 +324,26 @@ async function handleExport(
   config: ExportWorkerConfig,
   audioData?: AudioExportPayload | null,
   fileHandle?: FileSystemFileHandle | null,
-  mediaBuffers?: Record<string, ArrayBuffer>
+  mediaBuffers?: Record<string, ArrayBuffer>,
+  aiBackgroundMasks?: Record<string, Array<{ key: number; bitmap: ImageBitmap }>>
 ) {
   console.log('[ExportWorker] STARTING v10 - format-aware export', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio, format: config.format });
   isExporting = true;
   isCancelled = false;
+
+  // Hydrate AI Background Cutout masks transferred from main thread
+  if (aiBackgroundMasks) {
+    for (const [clipId, maskItems] of Object.entries(aiBackgroundMasks)) {
+      let clipMap = preRenderedMaskCache.get(clipId);
+      if (!clipMap) {
+        clipMap = new Map();
+        preRenderedMaskCache.set(clipId, clipMap);
+      }
+      for (const item of maskItems) {
+        clipMap.set(item.key, item.bitmap);
+      }
+    }
+  }
 
   let outputFileHandle: FileSystemFileHandle | null = null;
   let writable: FileSystemWritableFileStream | null = null;

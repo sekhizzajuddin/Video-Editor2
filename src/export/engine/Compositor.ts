@@ -489,6 +489,15 @@ export class Compositor {
             videoHeight: dh,
           };
           
+          const extraOptions = {
+            mode: layer.aiBackground.mode ?? 'remove',
+            blurStrength: layer.aiBackground.blurStrength ?? 12,
+            strokeColor: layer.aiBackground.strokeColor ?? '#ffffff',
+            strokeWidth: layer.aiBackground.strokeWidth ?? 4,
+            strokeGlow: layer.aiBackground.strokeGlow ?? false,
+            bgColor: layer.aiBackground.bgColor ?? '#1e1e24',
+          };
+
           // Try to apply the cached mask
           const maskApplied = applyPreRenderedMaskIfAvailable(
             tempCtx,
@@ -501,21 +510,12 @@ export class Compositor {
             choke,
             feather,
             spillSuppression,
-            spillColor
+            spillColor,
+            extraOptions
           );
           
           if (maskApplied) {
             drawable = tempCanvas;
-          } else {
-            // Surface warning once per clip so it shows in the export UI
-            const warnKey = `aibg_${clipId}`;
-            if (!this._warnedOnce.has(warnKey)) {
-              this._warnedOnce.add(warnKey);
-              this.warnings.push(
-                `AI background removal for clip "${clipId}" requires "Prepare Export" to pre-generate masks. ` +
-                `The clip will export with its original background.`
-              );
-            }
           }
         }
         

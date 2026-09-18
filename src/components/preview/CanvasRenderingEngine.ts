@@ -1531,6 +1531,12 @@ export async function renderCanvasEngine({
                 feather: clip.aiBackground.feather ?? 0,
                 spillSuppression: clip.aiBackground.spillSuppression ?? 0,
                 spillColor: clip.aiBackground.spillColor,
+                mode: clip.aiBackground.mode ?? 'remove',
+                blurStrength: clip.aiBackground.blurStrength ?? 12,
+                strokeColor: clip.aiBackground.strokeColor ?? '#ffffff',
+                strokeWidth: clip.aiBackground.strokeWidth ?? 4,
+                strokeGlow: clip.aiBackground.strokeGlow ?? false,
+                bgColor: clip.aiBackground.bgColor ?? '#1e1e24',
               };
               if (isExporting) {
                 // Export: block until we have an exact synchronous mask for this frame

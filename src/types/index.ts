@@ -378,8 +378,16 @@ export interface ClipAnimations {
   'crop.right'?: PropertyKeyframe[];
 }
 
+export type AiCutoutMode = 'remove' | 'blur' | 'outline' | 'color';
+
 export interface ClipAiBackgroundSettings {
   enabled: boolean;
+  mode?: AiCutoutMode;      // 'remove' (transparent), 'blur' (portrait blur), 'outline' (sticker), 'color' (solid/studio)
+  blurStrength?: number;    // 0 to 40 px for background blur mode (default 12)
+  strokeColor?: string;     // Hex color for sticker/outline, e.g. '#ffffff' or '#06b6d4'
+  strokeWidth?: number;     // 1 to 20 px outline thickness (default 4)
+  strokeGlow?: boolean;     // Whether outline has a neon glow
+  bgColor?: string;         // Solid/studio background replacement color, e.g. '#1e1e24'
   edgeBlur: number;
   modelSelection?: 0 | 1 | 2; // 0: Fast GPU, 1: High Accuracy HD, 2: Ultra Studio / RVM
   playbackQuality?: 'full' | 'balanced' | 'performance'; // Controls inference strategy during playback

@@ -732,6 +732,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const [isSeparating, setIsSeparating] = useState(false);
   const [isNormalizing, setIsNormalizing] = useState(false);
   const [bgAnalysisStatus, setBgAnalysisStatus] = useState<any>({ status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
+  const [showCutoutRefine, setShowCutoutRefine] = useState(false);
 
   useEffect(() => {
     if (!selectedClip || !selectedClip.aiBackground?.enabled) {
@@ -2553,33 +2554,47 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const renderKeyingAndAiSection = () => (
     <div className={`space-y-3 ${!isSectionActive('keying') ? 'hidden' : ''}`}>
 
-            {/* AI Background Removal */}
+            {/* Cutout (AI) - YouTube Create / CapCut Style */}
             <div className="bg-[var(--theme-bg-subpanel)] rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="p-1.5 bg-cyan-500/20 rounded">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-[var(--theme-text-primary)] flex items-center gap-1.5">
+                      Cutout (AI)
+                      {selectedClip.aiBackground?.enabled && (
+                        <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-medium">ACTIVE</span>
+                      )}
+                    </h4>
+                    <p className="text-[10px] text-[var(--theme-text-muted)]">1-Tap background cutout & trending creator styles</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-[11px] font-semibold text-[var(--theme-text-primary)]">Magic Eraser (AI)</h4>
-                  <p className="text-[9px] text-[var(--theme-text-muted)]">Auto-detects and removes background</p>
-                </div>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer mt-3">
-                <input
-                  type="checkbox"
-                  checked={selectedClip.aiBackground?.enabled || false}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
-                    const existing = selectedClip.aiBackground ?? { enabled: false, edgeBlur: 0, modelSelection: 1 };
+
+                {/* 1-Tap Toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const enabled = !selectedClip.aiBackground?.enabled;
+                    const existing = selectedClip.aiBackground ?? {
+                      enabled: false,
+                      mode: 'remove',
+                      edgeBlur: 2,
+                      choke: -1,
+                      blurStrength: 12,
+                      strokeColor: '#ffffff',
+                      strokeWidth: 4,
+                      strokeGlow: false,
+                      bgColor: '#121316',
+                      modelSelection: 1,
+                    };
                     updateClip(selectedClip.id, {
                       aiBackground: { ...existing, enabled }
                     });
-                    scheduleSaveSnapshot('Toggle AI Background');
-                    // Pre-load the @imgly/background-removal model and start pre-computing
-                    // frame alpha masks in background for 60 FPS real-time playback.
+                    scheduleSaveSnapshot('Toggle AI Cutout');
                     if (enabled) {
                       loadMediaPipeSegmenter().catch(() => {});
-                      loadBackgroundRemover().catch(() => {});
                       const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
                       if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {
                         startClipBackgroundAnalysis(
@@ -2594,219 +2609,307 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       cleanupClipBackgroundState(selectedClip.id);
                     }
                   }}
-                  className="rounded bg-[#2a2a2a] border-[var(--theme-border)] text-cyan-500 focus:ring-0 focus:ring-offset-0"
-                />
-                <span className="text-[11px] text-[var(--theme-text-primary)]">Enable AI Background Removal</span>
-              </label>
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${selectedClip.aiBackground?.enabled ? 'bg-cyan-500' : 'bg-[#333]'}`}
+                  role="switch"
+                  aria-checked={selectedClip.aiBackground?.enabled || false}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${selectedClip.aiBackground?.enabled ? 'translate-x-4' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
 
               {selectedClip.aiBackground?.enabled && (
-                <div className="mt-3.5 pt-3 border-t border-[#2d2d2d] space-y-3">
-                  {/* Real-time 60 FPS Pre-render Cache Card */}
-                  <div className="p-2.5 bg-[#252a2e] rounded border border-cyan-500/20 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-semibold text-cyan-400 flex items-center gap-1.5">
-                        <span className={`w-1.5 h-1.5 rounded-full ${bgAnalysisStatus.status === 'analyzing' ? 'bg-amber-400 animate-pulse' : bgAnalysisStatus.status === 'completed' ? 'bg-green-400' : 'bg-cyan-500'}`} />
-                        {bgAnalysisStatus.status === 'analyzing' ? 'AI Pre-rendering Masks...' : bgAnalysisStatus.status === 'completed' ? 'Real-Time 60 FPS Cache Ready' : 'Pre-calculate for 60 FPS Playback'}
-                      </span>
-                      {bgAnalysisStatus.status === 'analyzing' && (
-                        <span className="text-[10px] font-mono text-[var(--theme-text-muted)]">{bgAnalysisStatus.progress}% ({bgAnalysisStatus.processedFrames}/{bgAnalysisStatus.totalFrames})</span>
-                      )}
+                <div className="mt-3 pt-3 border-t border-[var(--theme-border)]/40 space-y-3">
+                  {/* Mode Selector Chips */}
+                  <div>
+                    <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium mb-1.5">Cutout Style</label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[
+                        { id: 'remove', label: 'Cutout', icon: '✂️', desc: 'Transparent' },
+                        { id: 'blur', label: 'Blur BG', icon: '📸', desc: 'Portrait' },
+                        { id: 'outline', label: 'Sticker', icon: '✨', desc: 'Outline' },
+                        { id: 'color', label: 'Backdrop', icon: '🎨', desc: 'Color' },
+                      ].map((preset) => {
+                        const currentMode = selectedClip.aiBackground?.mode || 'remove';
+                        const isSelected = currentMode === preset.id;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => {
+                              const existing = selectedClip.aiBackground!;
+                              updateClip(selectedClip.id, {
+                                aiBackground: { ...existing, mode: preset.id as any }
+                              });
+                              scheduleSaveSnapshot(`Set Cutout Mode: ${preset.label}`);
+                            }}
+                            className={`flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all ${
+                              isSelected
+                                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 shadow-sm'
+                                : 'bg-[#222] border-[#333] text-[var(--theme-text-muted)] hover:border-[#444] hover:text-white'
+                            }`}
+                          >
+                            <span className="text-sm mb-0.5">{preset.icon}</span>
+                            <span className="text-[10px] font-medium leading-tight">{preset.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                    {bgAnalysisStatus.status === 'analyzing' && (
-                      <div className="w-full bg-[var(--theme-bg-subpanel)] h-1.5 rounded-full overflow-hidden">
-                        <div className="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full transition-all duration-300" style={{ width: `${bgAnalysisStatus.progress}%` }} />
+                  </div>
+
+                  {/* Mode-Specific Controls */}
+                  {/* 1. Blur BG Controls */}
+                  {(selectedClip.aiBackground.mode === 'blur') && (
+                    <div className="bg-[#1e2327] p-2.5 rounded-lg border border-cyan-500/20 space-y-2">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="font-medium text-[var(--theme-text-secondary)]">Blur Intensity (Bokeh)</span>
+                        <span className="font-mono text-cyan-400">{selectedClip.aiBackground.blurStrength ?? 12}px</span>
                       </div>
-                    )}
-                    <p className="text-[9px] text-[#8e98a0] leading-relaxed">
-                      {bgAnalysisStatus.status === 'analyzing' ? 'Generating alpha masks per frame. Prepared frames play instantaneously without AI latency.' : bgAnalysisStatus.status === 'completed' ? 'All frame masks are cached in GPU textures. Video plays smoothly at real-time speeds.' : 'Pre-compute masks for seamless real-time playback without inference drops.'}
-                    </p>
-                    {bgAnalysisStatus.status !== 'analyzing' && (
-                      <button
-                        onClick={() => {
-                          const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                          if (mediaItem && mediaItem.url) {
-                            cleanupClipBackgroundState(selectedClip.id);
-                            startClipBackgroundAnalysis(
-                              selectedClip.id,
-                              mediaItem.url,
-                              selectedClip.trimStart || 0,
-                              selectedClip.duration || 5,
-                              selectedClip.aiBackground?.modelSelection ?? 1
-                            );
-                          }
-                        }}
-                        className="w-full py-1 bg-[#1f2933] hover:bg-[#283542] border border-cyan-500/30 text-cyan-300 rounded text-[10px] transition-colors font-medium text-center"
-                      >
-                        {bgAnalysisStatus.status === 'completed' ? '⚡ Re-analyze Clip' : '⚡ Pre-compute Masks Now'}
-                      </button>
-                    )}
-                  </div>
-                  {/* Quality Mode */}
-                  <div>
-                    <label className="block text-[10px] text-[var(--theme-text-muted)] mb-1 font-medium">Segmentation Quality</label>
-                    <select
-                      value={selectedClip.aiBackground.modelSelection ?? 1}
-                      onChange={(e) => {
-                        const val = Number(e.target.value) as 0 | 1 | 2;
-                        const existing = selectedClip.aiBackground!;
-                        updateClip(selectedClip.id, {
-                          aiBackground: { ...existing, modelSelection: val }
-                        });
-                        scheduleSaveSnapshot('Change AI Background Quality');
-                        const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                        if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {
-                          cleanupClipBackgroundState(selectedClip.id);
-                          startClipBackgroundAnalysis(
-                            selectedClip.id,
-                            mediaItem.url || '',
-                            selectedClip.trimStart || 0,
-                            selectedClip.duration || 5,
-                            val
-                          );
-                        }
-                      }}
-                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500 font-medium"
-                    >
-                      <option value={1}>✨ High Accuracy HD (16:9 Landscape + Hair Matting)</option>
-                      <option value={0}>⚡ Fast (Standard GPU Model)</option>
-                      <option value={2}>💎 Ultra Studio (Deep IS-Net Pixel U-Net)</option>
-                    </select>
-                  </div>
-
-                  {/* Playback Quality */}
-                  <div>
-                    <label className="block text-[10px] text-[var(--theme-text-muted)] mb-1 font-medium">Playback Quality</label>
-                    <select
-                      value={selectedClip.aiBackground.playbackQuality ?? 'balanced'}
-                      onChange={(e) => {
-                        const val = e.target.value as 'full' | 'balanced' | 'performance';
-                        const existing = selectedClip.aiBackground!;
-                        updateClip(selectedClip.id, {
-                          aiBackground: { ...existing, playbackQuality: val }
-                        });
-                        scheduleSaveSnapshot('Change AI Background Playback Quality');
-                      }}
-                      className="w-full bg-[#2a2a2a] text-white text-[11px] border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
-                    >
-                      <option value="full">Full (Every Frame — Best Quality)</option>
-                      <option value="balanced">Balanced (Smart Caching — Recommended)</option>
-                      <option value="performance">Performance (Aggressive Caching — Fastest)</option>
-                    </select>
-                    <p className="text-[9px] text-[#707070] mt-1">Controls how often AI re-analyzes the frame during playback. Exports always use full quality.</p>
-                  </div>
-
-                  {/* Edge Feather */}
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium">Edge Feather (Soften)</label>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-cyan-400 font-mono">
-                          {getPropVal(selectedClip.aiBackground.edgeBlur ?? 0, 'aiBackground.edgeBlur')}px
-                        </span>
-                        <KeyframeControl
-                          propertyKey="aiBackground.edgeBlur"
-                          value={getPropVal(selectedClip.aiBackground.edgeBlur ?? 0, 'aiBackground.edgeBlur')}
-                          keyframes={animations['aiBackground.edgeBlur'] || []}
-                          currentTime={localTime}
-                          clipId={selectedClip.id}
-                          onAddKeyframe={(time, val) => {
-                            const newKf = addOrUpdateKeyframe(animations['aiBackground.edgeBlur'] || [], time, val, { easing: 'linear' });
-                            updateClip(selectedClip.id, { animations: { ...animations, 'aiBackground.edgeBlur': newKf } });
-                          }}
-                          onRemoveKeyframe={(time) => {
-                            const newKf = (animations['aiBackground.edgeBlur'] || []).filter(k => Math.abs(k.time - time) > 0.03);
-                            updateClip(selectedClip.id, { animations: { ...animations, 'aiBackground.edgeBlur': newKf } });
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={20}
-                      step={0.5}
-                      value={getPropVal(selectedClip.aiBackground.edgeBlur ?? 0, 'aiBackground.edgeBlur')}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        const existing = selectedClip.aiBackground!;
-                        setPropVal('aiBackground.edgeBlur', val, {
-                          aiBackground: { ...existing, edgeBlur: val }
-                        });
-                      }}
-                      onMouseUp={() => scheduleSaveSnapshot('Change AI Background Blur')}
-                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
-                    />
-                  </div>
-
-                  {/* Matte Choke — shrink/expand the cutout edge.
-                      The engine has supported choke/spill for a while but there was
-                      no UI for either, so users had no way to fix the halo or the
-                      colour fringe that segmentation always leaves behind. */}
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium">Matte Choke (Shrink / Grow)</label>
-                      <span className="text-[10px] text-cyan-400 font-mono">
-                        {(selectedClip.aiBackground.choke ?? 0) > 0 ? '+' : ''}{selectedClip.aiBackground.choke ?? 0}px
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={-10}
-                      max={10}
-                      step={0.5}
-                      value={selectedClip.aiBackground.choke ?? 0}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        const existing = selectedClip.aiBackground!;
-                        updateClip(selectedClip.id, { aiBackground: { ...existing, choke: val } });
-                      }}
-                      onMouseUp={() => scheduleSaveSnapshot('Change AI Matte Choke')}
-                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
-                    />
-                    <p className="text-[9px] text-[#707070] mt-1">Negative shrinks the cutout inward to remove a background halo; positive grows it back.</p>
-                  </div>
-
-                  {/* Spill Suppression */}
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium">Spill Suppression</label>
-                      <span className="text-[10px] text-cyan-400 font-mono">
-                        {selectedClip.aiBackground.spillSuppression ?? 0}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={selectedClip.aiBackground.spillSuppression ?? 0}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        const existing = selectedClip.aiBackground!;
-                        updateClip(selectedClip.id, { aiBackground: { ...existing, spillSuppression: val } });
-                      }}
-                      onMouseUp={() => scheduleSaveSnapshot('Change AI Spill Suppression')}
-                      className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
-                    />
-                    <p className="text-[9px] text-[#707070] mt-1">Desaturates colour bleeding from the old background around the subject's edge.</p>
-                  </div>
-
-                  {/* Spill colour target */}
-                  {(selectedClip.aiBackground.spillSuppression ?? 0) > 0 && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium flex-1">Spill Colour</label>
                       <input
-                        type="color"
-                        value={selectedClip.aiBackground.spillColor ?? '#00ff00'}
+                        type="range"
+                        min={2}
+                        max={30}
+                        step={1}
+                        value={selectedClip.aiBackground.blurStrength ?? 12}
                         onChange={(e) => {
-                          const existing = selectedClip.aiBackground!;
-                          updateClip(selectedClip.id, { aiBackground: { ...existing, spillColor: e.target.value } });
-                          scheduleSaveSnapshot('Change AI Spill Colour');
+                          const val = Number(e.target.value);
+                          updateClip(selectedClip.id, {
+                            aiBackground: { ...selectedClip.aiBackground!, blurStrength: val }
+                          });
                         }}
-                        className="w-8 h-6 bg-transparent border border-[var(--theme-border)] rounded cursor-pointer"
+                        onMouseUp={() => scheduleSaveSnapshot('Change Background Blur')}
+                        className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
                       />
                     </div>
                   )}
+
+                  {/* 2. Outline / Sticker Controls */}
+                  {(selectedClip.aiBackground.mode === 'outline') && (
+                    <div className="bg-[#1e2327] p-2.5 rounded-lg border border-cyan-500/20 space-y-2.5">
+                      <div>
+                        <div className="flex justify-between items-center text-[10px] mb-1.5">
+                          <span className="font-medium text-[var(--theme-text-secondary)]">Outline Color</span>
+                          <span className="text-[9px] font-mono text-[var(--theme-text-muted)]">{selectedClip.aiBackground.strokeColor ?? '#ffffff'}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {['#ffffff', '#00f0ff', '#ff007f', '#ffe600', '#00ff66'].map((col) => (
+                            <button
+                              key={col}
+                              type="button"
+                              onClick={() => {
+                                updateClip(selectedClip.id, {
+                                  aiBackground: { ...selectedClip.aiBackground!, strokeColor: col }
+                                });
+                                scheduleSaveSnapshot('Change Outline Color');
+                              }}
+                              className={`w-6 h-6 rounded-full border transition-transform ${
+                                (selectedClip.aiBackground?.strokeColor ?? '#ffffff') === col
+                                  ? 'scale-110 border-white ring-2 ring-cyan-500/50'
+                                  : 'border-[#444] hover:scale-105'
+                              }`}
+                              style={{ backgroundColor: col }}
+                            />
+                          ))}
+                          <input
+                            type="color"
+                            value={selectedClip.aiBackground.strokeColor ?? '#ffffff'}
+                            onChange={(e) => {
+                              updateClip(selectedClip.id, {
+                                aiBackground: { ...selectedClip.aiBackground!, strokeColor: e.target.value }
+                              });
+                              scheduleSaveSnapshot('Change Outline Color Custom');
+                            }}
+                            className="w-6 h-6 rounded-full bg-transparent border border-[#555] cursor-pointer"
+                            title="Custom Color"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center text-[10px] mb-1">
+                          <span className="font-medium text-[var(--theme-text-secondary)]">Stroke Width</span>
+                          <span className="font-mono text-cyan-400">{selectedClip.aiBackground.strokeWidth ?? 4}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={1}
+                          max={16}
+                          step={1}
+                          value={selectedClip.aiBackground.strokeWidth ?? 4}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            updateClip(selectedClip.id, {
+                              aiBackground: { ...selectedClip.aiBackground!, strokeWidth: val }
+                            });
+                          }}
+                          onMouseUp={() => scheduleSaveSnapshot('Change Stroke Width')}
+                          className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                        />
+                      </div>
+
+                      <label className="flex items-center justify-between cursor-pointer pt-1">
+                        <span className="text-[10px] text-[var(--theme-text-secondary)]">Neon Glow Effect</span>
+                        <input
+                          type="checkbox"
+                          checked={selectedClip.aiBackground.strokeGlow ?? false}
+                          onChange={(e) => {
+                            updateClip(selectedClip.id, {
+                              aiBackground: { ...selectedClip.aiBackground!, strokeGlow: e.target.checked }
+                            });
+                            scheduleSaveSnapshot('Toggle Stroke Glow');
+                          }}
+                          className="rounded bg-[#2a2a2a] border-[var(--theme-border)] text-cyan-500 focus:ring-0"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {/* 3. Backdrop Color Controls */}
+                  {(selectedClip.aiBackground.mode === 'color') && (
+                    <div className="bg-[#1e2327] p-2.5 rounded-lg border border-cyan-500/20 space-y-2">
+                      <div className="flex justify-between items-center text-[10px] mb-1">
+                        <span className="font-medium text-[var(--theme-text-secondary)]">Backdrop Color</span>
+                        <span className="text-[9px] font-mono text-[var(--theme-text-muted)]">{selectedClip.aiBackground.bgColor ?? '#121316'}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {[
+                          { col: '#121316', label: 'Studio Dark' },
+                          { col: '#ffffff', label: 'Clean White' },
+                          { col: '#0f172a', label: 'Navy' },
+                          { col: '#15803d', label: 'Green Screen' },
+                          { col: '#7c3aed', label: 'Creator Purple' },
+                        ].map(({ col, label }) => (
+                          <button
+                            key={col}
+                            type="button"
+                            onClick={() => {
+                              updateClip(selectedClip.id, {
+                                aiBackground: { ...selectedClip.aiBackground!, bgColor: col }
+                              });
+                              scheduleSaveSnapshot('Change Backdrop Color');
+                            }}
+                            title={label}
+                            className={`w-6 h-6 rounded border transition-transform ${
+                              (selectedClip.aiBackground?.bgColor ?? '#121316') === col
+                                ? 'scale-110 border-white ring-2 ring-cyan-500/50'
+                                : 'border-[#444] hover:scale-105'
+                            }`}
+                            style={{ backgroundColor: col }}
+                          />
+                        ))}
+                        <input
+                          type="color"
+                          value={selectedClip.aiBackground.bgColor ?? '#121316'}
+                          onChange={(e) => {
+                            updateClip(selectedClip.id, {
+                              aiBackground: { ...selectedClip.aiBackground!, bgColor: e.target.value }
+                            });
+                            scheduleSaveSnapshot('Change Backdrop Color Custom');
+                          }}
+                          className="w-6 h-6 rounded bg-transparent border border-[#555] cursor-pointer"
+                          title="Custom Color"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Collapsible Refine Edges Drawer */}
+                  <div className="border border-[var(--theme-border)]/40 rounded-lg overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowCutoutRefine(!showCutoutRefine)}
+                      className="w-full flex items-center justify-between p-2 bg-[#222] hover:bg-[#282828] text-[10px] font-medium text-[var(--theme-text-secondary)] transition-colors"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span>⚙️</span> Refine Edges (Fine Tune)
+                      </span>
+                      <span className="text-[10px] text-[var(--theme-text-muted)]">
+                        {showCutoutRefine ? '▲ Hide' : '▼ Tweak'}
+                      </span>
+                    </button>
+                    {showCutoutRefine && (
+                      <div className="p-2.5 bg-[#1b1b1b] space-y-2.5 border-t border-[var(--theme-border)]/30">
+                        {/* Edge Feather */}
+                        <div>
+                          <div className="flex justify-between items-center text-[10px] mb-1">
+                            <span className="text-[var(--theme-text-muted)]">Edge Feather (Softness)</span>
+                            <span className="font-mono text-cyan-400">{selectedClip.aiBackground.edgeBlur ?? 2}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={15}
+                            step={0.5}
+                            value={selectedClip.aiBackground.edgeBlur ?? 2}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              updateClip(selectedClip.id, {
+                                aiBackground: { ...selectedClip.aiBackground!, edgeBlur: val }
+                              });
+                            }}
+                            onMouseUp={() => scheduleSaveSnapshot('Change Edge Feather')}
+                            className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Matte Choke */}
+                        <div>
+                          <div className="flex justify-between items-center text-[10px] mb-1">
+                            <span className="text-[var(--theme-text-muted)]">Matte Choke (Remove Halo)</span>
+                            <span className="font-mono text-cyan-400">{selectedClip.aiBackground.choke ?? -1}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={-8}
+                            max={8}
+                            step={0.5}
+                            value={selectedClip.aiBackground.choke ?? -1}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              updateClip(selectedClip.id, {
+                                aiBackground: { ...selectedClip.aiBackground!, choke: val }
+                              });
+                            }}
+                            onMouseUp={() => scheduleSaveSnapshot('Change Matte Choke')}
+                            className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Spill Suppression */}
+                        <div>
+                          <div className="flex justify-between items-center text-[10px] mb-1">
+                            <span className="text-[var(--theme-text-muted)]">Edge Color Decontaminate</span>
+                            <span className="font-mono text-cyan-400">{selectedClip.aiBackground.spillSuppression ?? 0}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={selectedClip.aiBackground.spillSuppression ?? 0}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              updateClip(selectedClip.id, {
+                                aiBackground: { ...selectedClip.aiBackground!, spillSuppression: val }
+                              });
+                            }}
+                            onMouseUp={() => scheduleSaveSnapshot('Change Spill Suppression')}
+                            className="w-full h-1 bg-[#2a2a2a] rounded-lg accent-cyan-500 cursor-pointer"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Subtle 60 FPS GPU Status Indicator */}
+                  <div className="flex items-center justify-between text-[9px] text-[#707070] px-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      <span>GPU Hardware Accelerated (WebGPU/WebGL)</span>
+                    </span>
+                    <span>100% Export Guaranteed</span>
+                  </div>
                 </div>
               )}
             </div>

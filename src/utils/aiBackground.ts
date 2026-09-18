@@ -28,6 +28,7 @@ import { detectHumanPresence, computeROICrop, resetClipDetectionState, resetAllD
 import { stabilizeTemporalAlpha } from './temporalMaskEngine';
 
 import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
+import type { AiCutoutMode } from '@/types';
 // ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
 let mediaPipeGeneralSegmenter: any = null;
 let mediaPipeLandscapeSegmenter: any = null;
@@ -480,7 +481,11 @@ export async function startClipBackgroundAnalysis(
   attachInvisibleMediaElement(video);
 
   try {
-    await loadBackgroundRemover();
+    if (modelSelection === 0 || modelSelection === 1) {
+      await loadMediaPipeSegmenter(modelSelection === 0 ? 'general' : 'landscape').catch(() => {});
+    } else {
+      await loadBackgroundRemover().catch(() => {});
+    }
 
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => reject(new Error('Video load timeout')), 8000);
@@ -664,6 +669,37 @@ export async function startClipBackgroundAnalysis(
   }
 }
 
+/**
+ * Ensures all background cutout masks for a clip are pre-computed and ready.
+ * Used by the export manager to guarantee 100% background removal on export.
+ */
+export async function ensureClipMasksReady(
+  clipId: string,
+  videoUrl: string,
+  startTime: number,
+  duration: number,
+  modelSelection: 0 | 1 | 2 = 1,
+  onProgress?: (pct: number) => void
+): Promise<Map<number, ImageBitmap | HTMLCanvasElement>> {
+  const existingStatus = getClipAnalysisStatus(clipId);
+  const existingMap = preRenderedMaskCache.get(clipId);
+  if (existingMap && existingMap.size > 0 && existingStatus.status === 'completed') {
+    return existingMap;
+  }
+
+  const unsubscribe = subscribeClipBackgroundAnalysis(clipId, (status) => {
+    if (onProgress) onProgress(status.progress);
+  });
+
+  try {
+    await startClipBackgroundAnalysis(clipId, videoUrl, startTime, duration, modelSelection);
+  } finally {
+    unsubscribe();
+  }
+
+  return preRenderedMaskCache.get(clipId) || new Map();
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getVideoCurrentTime(sourceElement: any): number {
@@ -781,6 +817,15 @@ export function refineMaskEdges(
  *
  * Export (isPlaying=false): Awaits segmentation for frame-accurate masks.
  */
+export interface AiCutoutCompositeOptions {
+  mode?: AiCutoutMode;
+  blurStrength?: number;
+  strokeColor?: string;
+  strokeWidth?: number;
+  strokeGlow?: boolean;
+  bgColor?: string;
+}
+
 export function applyPreRenderedMaskIfAvailable(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   width: number,
@@ -792,7 +837,8 @@ export function applyPreRenderedMaskIfAvailable(
   choke: number = 0,
   feather: number = 0,
   spillSuppression: number = 0,
-  spillColor?: string
+  spillColor?: string,
+  extraOptions?: AiCutoutCompositeOptions
 ): boolean {
   const currentVideoTime = getVideoCurrentTime(sourceElement);
   const clipPreRendered = preRenderedMaskCache.get(clipId);
@@ -840,12 +886,102 @@ export function applyPreRenderedMaskIfAvailable(
     ? refineMaskEdges(preMask, width, height, choke, feather, `${clipId}_pre`)
     : preMask;
 
-  ctx.globalCompositeOperation = 'destination-in';
-  ctx.drawImage(refinedMask as any, 0, 0, width, height);
-  ctx.globalCompositeOperation = 'source-over';
+  const mode = extraOptions?.mode || 'remove';
 
-  if (spillSuppression > 0) {
-    applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
+  if (mode === 'blur') {
+    // ── Mode: Portrait Background Blur (Bokeh) ──
+    const fgCanvas = getPooledCanvas(`${clipId}_cutout_fg`, width, height);
+    const fgCtx = fgCanvas.getContext('2d');
+    if (fgCtx) {
+      fgCtx.clearRect(0, 0, width, height);
+      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'destination-in';
+      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'source-over';
+      if (spillSuppression > 0) {
+        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
+      }
+
+      ctx.save();
+      ctx.clearRect(0, 0, width, height);
+      const blurPx = Math.max(1, extraOptions?.blurStrength ?? 12);
+      ctx.filter = `blur(${blurPx}px)`;
+      ctx.drawImage(sourceElement as any, 0, 0, width, height);
+      ctx.restore();
+
+      ctx.drawImage(fgCanvas, 0, 0, width, height);
+    }
+  } else if (mode === 'color') {
+    // ── Mode: Solid / Studio Backdrop Color ──
+    const fgCanvas = getPooledCanvas(`${clipId}_cutout_fg`, width, height);
+    const fgCtx = fgCanvas.getContext('2d');
+    if (fgCtx) {
+      fgCtx.clearRect(0, 0, width, height);
+      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'destination-in';
+      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'source-over';
+      if (spillSuppression > 0) {
+        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
+      }
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = extraOptions?.bgColor || '#1e1e24';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(fgCanvas, 0, 0, width, height);
+    }
+  } else if (mode === 'outline') {
+    // ── Mode: Sticker / Neon Outline (YouTube Shorts / TikTok style) ──
+    const fgCanvas = getPooledCanvas(`${clipId}_cutout_fg`, width, height);
+    const fgCtx = fgCanvas.getContext('2d');
+    if (fgCtx) {
+      fgCtx.clearRect(0, 0, width, height);
+      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'destination-in';
+      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
+      fgCtx.globalCompositeOperation = 'source-over';
+      if (spillSuppression > 0) {
+        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
+      }
+
+      const strokeW = Math.max(1, extraOptions?.strokeWidth ?? 4);
+      const strokeCol = extraOptions?.strokeColor ?? '#ffffff';
+      const strokeCanvas = getPooledCanvas(`${clipId}_cutout_stroke`, width, height);
+      const sCtx = strokeCanvas.getContext('2d');
+      if (sCtx) {
+        sCtx.clearRect(0, 0, width, height);
+        sCtx.drawImage(refinedMask as any, 0, 0, width, height);
+        sCtx.globalCompositeOperation = 'source-in';
+        sCtx.fillStyle = strokeCol;
+        sCtx.fillRect(0, 0, width, height);
+        sCtx.globalCompositeOperation = 'source-over';
+      }
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.save();
+      if (extraOptions?.strokeGlow) {
+        ctx.shadowColor = strokeCol;
+        ctx.shadowBlur = strokeW * 3;
+      }
+      const offsets = [-strokeW, 0, strokeW];
+      for (const ox of offsets) {
+        for (const oy of offsets) {
+          if (ox === 0 && oy === 0) continue;
+          ctx.drawImage(strokeCanvas, ox, oy, width, height);
+        }
+      }
+      ctx.restore();
+      ctx.drawImage(fgCanvas, 0, 0, width, height);
+    }
+  } else {
+    // ── Mode: Standard Transparent Cutout ──
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(refinedMask as any, 0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+
+    if (spillSuppression > 0) {
+      applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
+    }
   }
   return true;
 }

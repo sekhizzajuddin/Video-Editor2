@@ -3,6 +3,7 @@ import { ExportPhase } from '../types';
 import { AudioMixer } from './AudioMixer';
 import { normalizeVideoBlobForExport } from './VideoNormalizer';
 import { getFileFromDB } from '@/utils/projectPersistence';
+import { ensureClipMasksReady } from '@/utils/aiBackground';
 
 export interface ExporterCallbacks {
   onProgress: (progress: number, currentFrame: number, eta: number) => void;
@@ -165,6 +166,46 @@ export class ExportWorkerManager {
       delete m._audioBlob;
     }
 
+    // ── Automatic AI Cutout Pre-computation & Transfer ────────────────────────
+    // Guarantees 100% background removal on export by preparing masks on the
+    // main thread with MediaPipe GPU and transferring ImageBitmaps to the worker.
+    const aiMaskPayload: Record<string, Array<{ key: number; bitmap: ImageBitmap }>> = {};
+    for (const track of (serializedTimeline.tracks || [])) {
+      for (const clip of (track.clips || [])) {
+        if (clip.aiBackground?.enabled) {
+          this.checkActive(signal);
+          const mediaItem = (serializedTimeline.media || []).find((m: any) => m.id === clip.mediaId)
+            || (this.options.timeline.mediaLibrary || []).find((m: any) => m.id === clip.mediaId);
+          const mediaUrl = mediaItem?.url || '';
+          if (mediaUrl) {
+            const maskMap = await ensureClipMasksReady(
+              clip.id,
+              mediaUrl,
+              clip.trimStart || 0,
+              clip.duration || 5,
+              clip.aiBackground.modelSelection ?? 1
+            );
+            this.checkActive(signal);
+            if (maskMap && maskMap.size > 0) {
+              const list: Array<{ key: number; bitmap: ImageBitmap }> = [];
+              for (const [key, bmpOrCanvas] of maskMap.entries()) {
+                if (bmpOrCanvas) {
+                  try {
+                    const clonedBmp = await createImageBitmap(bmpOrCanvas);
+                    list.push({ key, bitmap: clonedBmp });
+                    transferables.push(clonedBmp);
+                  } catch (e) {
+                    console.warn('[ExportWorkerManager] Could not clone mask bitmap:', e);
+                  }
+                }
+              }
+              aiMaskPayload[clip.id] = list;
+            }
+          }
+        }
+      }
+    }
+
     // Install completion/error/cancel handlers BEFORE posting START_EXPORT.
     // This also makes synchronous worker adapters and fast startup errors safe.
     return new Promise<{filename: string, savedViaRuntime: boolean}>((resolve, reject) => {
@@ -215,6 +256,7 @@ export class ExportWorkerManager {
             audioData: audioPayload,
             fileHandle: this.options.fileHandle || null,
             mediaBuffers,
+            aiBackgroundMasks: aiMaskPayload,
           },
         }, transferables);
         // Blobs/data now belong to the worker. download() only needs the output

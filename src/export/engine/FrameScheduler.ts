@@ -192,6 +192,12 @@ export interface RenderLayer {
     feather?: number;
     spillSuppression?: number;
     spillColor?: string;
+    mode?: 'remove' | 'blur' | 'outline' | 'color';
+    blurStrength?: number;
+    strokeColor?: string;
+    strokeWidth?: number;
+    strokeGlow?: boolean;
+    bgColor?: string;
   };
   objectRemoval?: {
     enabled: boolean;
@@ -325,13 +331,6 @@ export class FrameScheduler {
     const warnOnce = new Set<string>();
     for (const track of (this.timeline.tracks || [])) {
       for (const clip of (track.clips || [])) {
-        if (clip.aiBackground?.enabled && !warnOnce.has('aiBackground')) {
-          warnOnce.add('aiBackground');
-          this.warnings.push(
-            'AI background removal requires mask cache warm-up before export. ' +
-            'Please click "Prepare Export" to generate masks, or the clip will export with its original background.'
-          );
-        }
         if (clip.objectRemoval?.enabled && !warnOnce.has('objectRemoval')) {
           warnOnce.add('objectRemoval');
           this.warnings.push(
@@ -531,6 +530,12 @@ export class FrameScheduler {
               feather: clip.aiBackground.feather,
               spillSuppression: clip.aiBackground.spillSuppression,
               spillColor: clip.aiBackground.spillColor,
+              mode: clip.aiBackground.mode,
+              blurStrength: clip.aiBackground.blurStrength,
+              strokeColor: clip.aiBackground.strokeColor,
+              strokeWidth: clip.aiBackground.strokeWidth,
+              strokeGlow: clip.aiBackground.strokeGlow,
+              bgColor: clip.aiBackground.bgColor,
             } : undefined,
             objectRemoval: clip.objectRemoval?.enabled ? {
               enabled: true,
