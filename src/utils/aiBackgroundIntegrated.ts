@@ -185,7 +185,7 @@ export async function applyAiBackgroundSmart(
     if (!sceneChanged && cacheValid && !forceStale) {
       const cached = getCachedMaskCanvas(clipId, width, height);
       if (cached) {
-        compositeMask(ctx, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId);
+        compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
         return;
       }
     }
