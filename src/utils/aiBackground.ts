@@ -24,8 +24,9 @@
 
 import * as ortModule from 'onnxruntime-web';
 import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
-import { detectHumanPresence, computeROICrop, resetClipDetectionState, resetAllDetectionState } from './humanDetection';
+import { resetClipDetectionState, resetAllDetectionState } from './humanDetection';
 import { stabilizeTemporalAlpha } from './temporalMaskEngine';
+import { segmentWithRVM, loadRVMSession, resetRVMState, resetAllRVMStates, RVM_EMPTY_COVERAGE } from './rvmMatting';
 
 import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 import type { AiCutoutMode } from '@/types';
@@ -180,6 +181,20 @@ interface SimpleMaskCache {
 
 const maskCacheMap = new Map<string, SimpleMaskCache>();
 const segmentingInFlight = new Set<string>();
+
+// ── Empty-Mask Sentinel ──────────────────────────────────────────────────────
+// Marks "analyzed: no subject in this frame". Consumers must show the ORIGINAL
+// frame for these keys — never erase pixels. Identified by 1×1 dimensions so it
+// survives ImageBitmap cloning/thread transfer (reference equality would not).
+
+export function getEmptyMaskSentinel(): HTMLCanvasElement {
+  const s = getPooledCanvas('_empty_mask_sentinel', 1, 1);
+  return s;
+}
+
+function isEmptyMaskMarker(m: ImageBitmap | HTMLCanvasElement): boolean {
+  return m.width === 1 && m.height === 1;
+}
 
 // Redraw callback: debounced with requestAnimationFrame to prevent RAF storms
 let _onMaskReadyCallback: (() => void) | null = null;
@@ -396,8 +411,6 @@ export interface MaskAnalysisStatus {
 }
 
 const MASK_CACHE_FPS = 20; // Cache key granularity: 20 keys/sec for smooth playback lookup
-const KEYFRAME_INFERENCE_FPS = 4; // Only run ONNX inference 4 times/sec — masks don't change in 250ms
-                                  // 10s clip: 40 inferences instead of 200 (80% reduction!)
 export const preRenderedMaskCache = new Map<string, Map<number, ImageBitmap | HTMLCanvasElement>>();
 const analysisProgressMap = new Map<string, MaskAnalysisStatus>();
 const progressListeners = new Map<string, Set<(status: MaskAnalysisStatus) => void>>();
@@ -481,10 +494,18 @@ export async function startClipBackgroundAnalysis(
   attachInvisibleMediaElement(video);
 
   try {
-    if (modelSelection === 0 || modelSelection === 1) {
-      await loadMediaPipeSegmenter(modelSelection === 0 ? 'general' : 'landscape').catch(() => {});
-    } else {
-      await loadBackgroundRemover().catch(() => {});
+    // ── PRIMARY ENGINE: RVM (Robust Video Matting) — CapCut-class quality ──
+    // Recurrent temporal memory → hair-level alpha, zero flicker/ghosting.
+    // Falls back to MediaPipe / IS-Net when RVM is unavailable (no Float16Array
+    // support or model download failure).
+    const rvmSession = await loadRVMSession().catch(() => null);
+    const rvmReady = rvmSession != null;
+    if (!rvmReady) {
+      if (modelSelection === 0 || modelSelection === 1) {
+        await loadMediaPipeSegmenter(modelSelection === 0 ? 'general' : 'landscape').catch(() => {});
+      } else {
+        await loadBackgroundRemover().catch(() => {});
+      }
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -503,11 +524,11 @@ export async function startClipBackgroundAnalysis(
     const actualDuration = Math.min(isFinite(video.duration) ? Math.max(0.1, video.duration - startTime) : duration, duration);
 
     // ── High-Accuracy Temporal Keyframe Strategy ───────────────────────────
-    // For MediaPipe GPU models (modelSelection 0 or 1), inference runs in ~5ms per frame.
-    // We sample at full 20 FPS so there is zero temporal skipping or ghosting during motion.
-    // For Ultra Studio IS-Net (modelSelection 2), we sample at 10 FPS for fluid movement
-    // while keeping background analysis rapid via the ONNX proxy worker.
-    const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
+    // RVM (primary): recurrent memory keeps temporal coherence across keyframes,
+    // so 10 FPS sampling yields fluid, flicker-free mattes at ~50-100ms/frame.
+    // MediaPipe GPU (fallback, modelSelection 0/1) runs in ~5ms per frame —
+    // sampled at full 20 FPS. IS-Net (modelSelection 2 fallback) at 10 FPS.
+    const inferenceFps = rvmReady ? 10 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
     const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
     const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
     const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
@@ -517,8 +538,6 @@ export async function startClipBackgroundAnalysis(
     }
     const maskMap = preRenderedMaskCache.get(clipId)!;
 
-    // Always use fp16 for pre-analysis — 2-3× faster, negligible visual difference for video
-    const model = 'isnet_fp16' as const;
     let processed = 0;
 
     for (let i = 0; i < totalKeyframes; i++) {
@@ -560,72 +579,59 @@ export async function startClipBackgroundAnalysis(
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 360;
 
-      // ── Early-Exit: skip AI entirely if no human present in frame ──
-      const human = detectHumanPresence(video, clipId, 0.008);
-      if (!human.hasHuman) {
-        processed++;
-        const pct = Math.min(99, Math.round((processed / totalKeyframes) * 100));
-        updateClipAnalysisStatus(clipId, {
-          status: 'analyzing',
-          progress: pct,
-          processedFrames: processed,
-          totalFrames: totalKeyframes,
-        });
-        continue;
-      }
+      let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
+      let noSubject = false;
 
-      // ── Step 1: High Accuracy MediaPipe GPU Segmenter (modelSelection 0: General, 1: HD Landscape 16:9) ──
-      let bitmap: ImageBitmap | null = null;
-      if (modelSelection === 0 || modelSelection === 1) {
-        const mpType = modelSelection === 0 ? 'general' : 'landscape';
-        bitmap = await segmentSourceWithMediaPipe(video, mpType);
-      }
-
-      // ── Step 2: Fallback or Ultra Studio ONNX IS-Net model (modelSelection === 2) with Smart ROI ──
-      if (!bitmap) {
-        // For Ultra Studio mode (modelSelection === 2), use high resolution (768px) to preserve fine hair,
-        // glasses, and contour precision. For fallback from MediaPipe, use 512px.
-        const maxDim = modelSelection === 2 ? 768 : 512;
-
-        if (human.bbox) {
-          const crop = computeROICrop(w, h, human.bbox, 0.25, null);
-          const roiCanvas = getPooledCanvas('_analysis_roi', crop.sw, crop.sh);
-          const roiCtx = roiCanvas.getContext('2d');
-          if (roiCtx) {
-            roiCtx.clearRect(0, 0, crop.sw, crop.sh);
-            roiCtx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
-          }
-          const snap = await captureSnapshotBlob(roiCanvas, crop.sw, crop.sh, maxDim);
+      if (rvmReady) {
+        // ── PRIMARY: CapCut-grade RVM matting with recurrent temporal memory ──
+        // No skin-heuristic gating: RVM handles empty scenes gracefully
+        // (near-zero alpha), so gating would only introduce mask holes.
+        const rvmMaxDim = modelSelection === 2 ? 768 : 512;
+        const res = await segmentWithRVM(video, clipId, targetTime - startTime, rvmMaxDim).catch(() => null);
+        if (res && res.coverage >= RVM_EMPTY_COVERAGE) {
+          bitmap = res.bitmap;
+        } else if (res) {
+          // RVM (person-focused) sees no subject — could be an object clip.
+          // Try the general-purpose IS-Net model for this keyframe.
+          const maxDim = modelSelection === 2 ? 768 : 512;
+          const snap = await captureSnapshotBlob(video, w, h, maxDim);
           if (snap) {
-            const roiMaskBitmap = await segmentBlobToImageBitmap(snap.blob, model);
-            if (roiMaskBitmap) {
-              const fullCanvas = getPooledCanvas('_analysis_full', w, h);
-              const fCtx = fullCanvas.getContext('2d');
-              if (fCtx) {
-                fCtx.clearRect(0, 0, w, h);
-                fCtx.drawImage(roiMaskBitmap, crop.sx, crop.sy, crop.sw, crop.sh);
-              }
-              roiMaskBitmap.close();
-              bitmap = await createImageBitmap(fullCanvas);
-            }
+            bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
           }
+          if (!bitmap) noSubject = true;
+        } else {
+          // RVM failed this frame — treat as empty (never erase the frame)
+          noSubject = true;
+        }
+      } else {
+        // ── FALLBACK (no RVM): MediaPipe / IS-Net legacy pipeline ──
+        // NOTE: skin-tone human gating was REMOVED here — it skipped keyframes
+        // on non-skin subjects (pets, products, dark scenes), leaving mask
+        // holes that flickered during playback.
+        if (modelSelection === 0 || modelSelection === 1) {
+          const mpType = modelSelection === 0 ? 'general' : 'landscape';
+          bitmap = await segmentSourceWithMediaPipe(video, mpType);
         }
 
         if (!bitmap) {
+          const maxDim = modelSelection === 2 ? 768 : 512;
           const snap = await captureSnapshotBlob(video, w, h, maxDim);
           if (snap) {
-            bitmap = await segmentBlobToImageBitmap(snap.blob, model);
+            bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
           }
         }
+        if (!bitmap) noSubject = true;
       }
 
-      if (bitmap) {
-        // Fill this keyframe AND neighboring cache slots with the SAME
-        // ImageBitmap reference. Zero extra memory, O(1) playback lookup.
+      // Fill this keyframe AND neighboring cache slots with the SAME reference
+      // (zero extra memory, O(1) lookup). For no-subject frames, store the empty
+      // sentinel so consumers show the ORIGINAL frame instead of erasing pixels.
+      const fillValue = noSubject ? getEmptyMaskSentinel() : bitmap;
+      if (fillValue) {
         for (let f = 0; f < fillRatio; f++) {
           const fillKey = keyframeKey + f;
           if (fillKey < totalCacheSlots + timeToKey(startTime)) {
-            maskMap.set(fillKey, bitmap);
+            maskMap.set(fillKey, fillValue);
           }
         }
       }
@@ -710,6 +716,30 @@ function getVideoCurrentTime(sourceElement: any): number {
 }
 
 // ── Professional Matting & Edge Post-Processing ──────────────────────────────
+
+/**
+ * Measure the fraction of pixels with non-zero alpha in a mask.
+ * Used to detect "no subject" frames so they never erase the frame via
+ * destination-in compositing.
+ */
+export async function measureMaskCoverage(m: ImageBitmap | HTMLCanvasElement): Promise<number> {
+  try {
+    const w = m.width;
+    const h = m.height;
+    if (w <= 0 || h <= 0) return 0;
+    const c = getPooledCanvas('_cov_measure', w, h);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return 1;
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(m as CanvasImageSource, 0, 0);
+    const d = ctx.getImageData(0, 0, w, h).data;
+    let sum = 0;
+    for (let i = 3; i < d.length; i += 4) sum += d[i];
+    return sum / (255 * w * h);
+  } catch (_e) {
+    return 1; // Fail-open: assume subject present
+  }
+}
 
 /**
  * Suppress background color spill (e.g. green or blue fringe on hair/shoulders).
@@ -858,6 +888,9 @@ export function applyPreRenderedMaskIfAvailable(
   }
   if (!preMask) return false;
 
+  // Analyzed-but-no-subject frame → show the original frame (never erase pixels)
+  if (isEmptyMaskMarker(preMask)) return true;
+
   // Temporal Alpha Blending: smoothly interpolate between adjacent keyframe masks to eliminate popping/flicker
   const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
   const interval = 1 / inferenceFps;
@@ -866,7 +899,8 @@ export function applyPreRenderedMaskIfAvailable(
   const prevMask = clipPreRendered.get(prevKey);
   const nextMask = clipPreRendered.get(nextKey);
 
-  if (prevMask && nextMask && prevMask !== nextMask && isPlaying) {
+  if (prevMask && nextMask && prevMask !== nextMask && isPlaying &&
+      !isEmptyMaskMarker(prevMask) && !isEmptyMaskMarker(nextMask)) {
     const localT = Math.max(0, Math.min(1, (currentVideoTime % interval) / interval));
     const blendCanvas = getPooledCanvas(`${clipId}_temporal_blend`, width, height);
     const bCtx = blendCanvas.getContext('2d');
@@ -1027,26 +1061,47 @@ export async function applyAiBackgroundMask(
       if (shouldRefresh && !segmentingInFlight.has(clipId)) {
         segmentingInFlight.add(clipId);
 
-        const segmentPromise = (modelSelection === 0 || modelSelection === 1)
-          ? segmentSourceWithMediaPipe(sourceElement as any, modelSelection === 0 ? 'general' : 'landscape')
-              .then(async (mpBitmap) => {
-                if (mpBitmap) {
-                  const resCanvas = document.createElement('canvas');
-                  resCanvas.width = width;
-                  resCanvas.height = height;
-                  const rCtx = resCanvas.getContext('2d');
-                  if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
-                  mpBitmap.close();
-                  return resCanvas;
-                }
-                const snap = await captureSnapshotBlob(sourceElement, width, height, 512);
+        const analysisActive = getClipAnalysisStatus(clipId).status === 'analyzing';
+
+        const segmentPromise = (async (): Promise<HTMLCanvasElement | null> => {
+          // PRIMARY: CapCut-grade RVM with recurrent temporal memory.
+          // Skipped while the pre-analysis job runs — it fills masks
+          // progressively and shares the per-clip recurrent state.
+          if (!analysisActive) {
+            const res = await segmentWithRVM(sourceElement as any, clipId, currentVideoTime, 384).catch(() => null);
+            if (res) {
+              if (res.coverage < RVM_EMPTY_COVERAGE) return null; // no subject → original frame
+              const resCanvas = document.createElement('canvas');
+              resCanvas.width = width;
+              resCanvas.height = height;
+              const rCtx = resCanvas.getContext('2d');
+              if (rCtx) rCtx.drawImage(res.bitmap, 0, 0, width, height);
+              res.bitmap.close();
+              return resCanvas;
+            }
+          }
+          // FALLBACK: MediaPipe GPU → IS-Net snapshot
+          return (modelSelection === 0 || modelSelection === 1)
+            ? segmentSourceWithMediaPipe(sourceElement as any, modelSelection === 0 ? 'general' : 'landscape')
+                .then(async (mpBitmap) => {
+                  if (mpBitmap) {
+                    const resCanvas = document.createElement('canvas');
+                    resCanvas.width = width;
+                    resCanvas.height = height;
+                    const rCtx = resCanvas.getContext('2d');
+                    if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
+                    mpBitmap.close();
+                    return resCanvas;
+                  }
+                  const snap = await captureSnapshotBlob(sourceElement, width, height, 512);
+                  if (!snap) return null;
+                  return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+                })
+            : captureSnapshotBlob(sourceElement, width, height, 640).then(async (snap) => {
                 if (!snap) return null;
                 return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-              })
-          : captureSnapshotBlob(sourceElement, width, height, 640).then(async (snap) => {
-              if (!snap) return null;
-              return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-            });
+              });
+        })();
 
         segmentPromise
           .then((result) => {
@@ -1074,27 +1129,40 @@ export async function applyAiBackgroundMask(
         Math.abs(currentVideoTime - (cached?.lastVideoTime ?? -1)) > 0.04;
 
       if (!maskCanvas || timeMoved) {
-        if (modelSelection === 0 || modelSelection === 1) {
-          const mpType = modelSelection === 0 ? 'general' : 'landscape';
-          const mpBitmap = await segmentSourceWithMediaPipe(sourceElement as any, mpType);
-          if (mpBitmap) {
-            const resCanvas = document.createElement('canvas');
-            resCanvas.width = width;
-            resCanvas.height = height;
-            const rCtx = resCanvas.getContext('2d');
-            if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
-            mpBitmap.close();
-            maskCanvas = resCanvas;
-          }
+        // PRIMARY: CapCut-grade RVM matting
+        const rvmRes = await segmentWithRVM(sourceElement as any, clipId, currentVideoTime, modelSelection === 2 ? 768 : 512).catch(() => null);
+        if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
+          const resCanvas = document.createElement('canvas');
+          resCanvas.width = width;
+          resCanvas.height = height;
+          const rCtx = resCanvas.getContext('2d');
+          if (rCtx) rCtx.drawImage(rvmRes.bitmap, 0, 0, width, height);
+          rvmRes.bitmap.close();
+          maskCanvas = resCanvas;
         }
         if (!maskCanvas) {
-          const model = 'isnet_fp16';
-          const maxDim = modelSelection === 2 ? 1024 : 512;
-          const snap = await captureSnapshotBlob(sourceElement, width, height, maxDim);
-          if (snap) {
-            const result = await segmentBlob(snap.blob, snap.w, snap.h, model);
-            if (result) {
-              maskCanvas = result;
+          if (modelSelection === 0 || modelSelection === 1) {
+            const mpType = modelSelection === 0 ? 'general' : 'landscape';
+            const mpBitmap = await segmentSourceWithMediaPipe(sourceElement as any, mpType);
+            if (mpBitmap) {
+              const resCanvas = document.createElement('canvas');
+              resCanvas.width = width;
+              resCanvas.height = height;
+              const rCtx = resCanvas.getContext('2d');
+              if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
+              mpBitmap.close();
+              maskCanvas = resCanvas;
+            }
+          }
+          if (!maskCanvas) {
+            const model = 'isnet_fp16';
+            const maxDim = modelSelection === 2 ? 1024 : 512;
+            const snap = await captureSnapshotBlob(sourceElement, width, height, maxDim);
+            if (snap) {
+              const result = await segmentBlob(snap.blob, snap.w, snap.h, model);
+              if (result) {
+                maskCanvas = result;
+              }
             }
           }
         }
@@ -1269,6 +1337,7 @@ export function cleanupClipBackgroundState(clipId: string): void {
   }
   maskCacheMap.delete(clipId);
   segmentingInFlight.delete(clipId);
+  resetRVMState(clipId);
 
   const preMap = preRenderedMaskCache.get(clipId);
   if (preMap) {
@@ -1289,6 +1358,7 @@ export function cleanupAllBackgroundState(): void {
   preRenderedMaskCache.clear();
   analysisProgressMap.clear();
   resetAllDetectionState();
+  resetAllRVMStates();
 }
 
 export const cleanupAllAIResources = cleanupAllBackgroundState;

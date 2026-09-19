@@ -79,7 +79,8 @@ import {
   BeatSyncSection,
 } from './tabs/effects';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
-import { loadBackgroundRemover, loadMediaPipeSegmenter, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
+import { loadBackgroundRemover, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
+import { loadRVMSession } from '@/utils/rvmMatting';
 import PipTab from './tabs/PipTab';
 import { ENTER_EXIT_PRESETS } from '@/utils/clipEnterExitEngine';
 
@@ -2587,14 +2588,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       strokeWidth: 4,
                       strokeGlow: false,
                       bgColor: '#121316',
-                      modelSelection: 1,
+                      modelSelection: 2,
                     };
                     updateClip(selectedClip.id, {
                       aiBackground: { ...existing, enabled }
                     });
                     scheduleSaveSnapshot('Toggle AI Cutout');
                     if (enabled) {
-                      loadMediaPipeSegmenter().catch(() => {});
+                      loadRVMSession().catch(() => {});
                       const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
                       if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {
                         startClipBackgroundAnalysis(
@@ -2602,7 +2603,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           mediaItem.url || '',
                           selectedClip.trimStart || 0,
                           selectedClip.duration || 5,
-                          existing.modelSelection ?? 1
+                          existing.modelSelection ?? 2
                         );
                       }
                     } else {
@@ -2906,7 +2907,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <div className="flex items-center justify-between text-[9px] text-[#707070] px-1">
                     <span className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      <span>GPU Hardware Accelerated (WebGPU/WebGL)</span>
+                      <span>RVM Neural Matting (WebGPU/WASM)</span>
                     </span>
                     <span>100% Export Guaranteed</span>
                   </div>

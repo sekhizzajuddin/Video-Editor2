@@ -757,24 +757,70 @@ interface CachedSegments {
 }
 const segmentsCache = new WeakMap<object, CachedSegments>();
 
+// BUG 4 FIX: Secondary ID-based cache for inline object literals.
+// The playback loop in useMediaPlayback.ts creates fresh object literals
+// `{ id: clip.clipId, speedFrames: ... }` on every sync tick (~60Hz). Because
+// each object has a new reference, the WeakMap achieves 0% hit rate. This
+// Map keyed by `clipId:frameCount:duration:sourceEnd` serves as a fallback
+// that catches those cases. Entries are evicted when the fingerprint changes
+// (i.e., clip was edited). Cap at 100 entries to bound memory.
+interface IdCachedSegments {
+  fingerprint: string;
+  segments: SpeedFrameSegment[];
+}
+const segmentsCacheById = new Map<string, IdCachedSegments>();
+const SEGMENTS_CACHE_BY_ID_MAX = 100;
+
+function getSegmentCacheFingerprint(
+  clip: { duration: number; trimStart: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
+  sourceDuration?: number
+): string {
+  return `${(clip.speedFrames?.length ?? 0)}:${clip.duration.toFixed(4)}:${(clip.speedFrameSourceEnd ?? 0).toFixed(4)}:${clip.trimStart.toFixed(4)}:${sourceDuration ?? 'u'}`;
+}
+
 /**
  * Computes all segments between boundaries (clip start edge 0, speed frames 1..n, clip end edge duration).
  * If no speed frames exist, returns empty array.
  * If 1 or more speed frames exist, calculates rates using adjacent speed frames OR clip edges when no adjacent frame exists.
  */
 export function getSpeedFrameSegments(
-  clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
+  clip: { id?: string; duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
   sourceDuration?: number
 ): SpeedFrameSegment[] {
   if (!clip.speedFrames || clip.speedFrames.length === 0) return [];
 
+  // 1. Try WeakMap (works when the same clip object reference is reused)
   const cached = segmentsCache.get(clip);
   if (cached && cached.sourceDuration === sourceDuration) {
     return cached.segments;
   }
 
+  // 2. BUG 4 FIX: Try ID-based cache (catches inline object literals from playback loop)
+  const clipId = (clip as any).id;
+  if (clipId) {
+    const fp = getSegmentCacheFingerprint(clip, sourceDuration);
+    const idCached = segmentsCacheById.get(clipId);
+    if (idCached && idCached.fingerprint === fp) {
+      // Also populate WeakMap for this reference so subsequent calls in the
+      // same tick (getSpeedForClipAtTime) hit the fast path.
+      segmentsCache.set(clip, { sourceDuration, segments: idCached.segments });
+      return idCached.segments;
+    }
+  }
+
   const segments = computeSpeedFrameSegments(clip, sourceDuration);
   segmentsCache.set(clip, { sourceDuration, segments });
+
+  // Populate ID-based cache
+  if (clipId) {
+    if (segmentsCacheById.size >= SEGMENTS_CACHE_BY_ID_MAX) {
+      // Evict oldest entry
+      const firstKey = segmentsCacheById.keys().next().value;
+      if (firstKey !== undefined) segmentsCacheById.delete(firstKey);
+    }
+    segmentsCacheById.set(clipId, { fingerprint: getSegmentCacheFingerprint(clip, sourceDuration), segments });
+  }
+
   return segments;
 }
 

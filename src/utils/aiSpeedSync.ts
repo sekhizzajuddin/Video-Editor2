@@ -246,8 +246,8 @@ I have provided two audio recordings:
 - AUDIO 2 (Second audio file): TTS Voiceover Audio to synchronize with (Duration: ${ttsDuration.toFixed(2)}s).
 
 TASK — mark the timing of every word in BOTH audios and analyze sentence structure:
-1. Listen to AUDIO 1 and transcribe the spoken words with precise timestamps as "videoWords": [{ "word": "...", "time": seconds }].
-2. Listen to AUDIO 2 and transcribe the spoken words with precise timestamps as "ttsWords": [{ "word": "...", "time": seconds }].
+1. Listen to AUDIO 1 and transcribe the spoken words with precise START timestamps as "videoWords": [{ "word": "...", "time": seconds }]. The "time" value MUST be the exact moment the speaker begins uttering the word (onset), NOT the center or end of the word.
+2. Listen to AUDIO 2 and transcribe the spoken words with precise START timestamps as "ttsWords": [{ "word": "...", "time": seconds }]. The "time" value MUST be the exact moment the speaker begins uttering the word (onset), NOT the center or end of the word.
 3. Report sentence analysis and comparison:
    - "videoSentences": list of spoken sentences in AUDIO 1: [{ "text": "...", "startTime": seconds, "endTime": seconds }].
    - "ttsSentences": list of spoken sentences in AUDIO 2: [{ "text": "...", "startTime": seconds, "endTime": seconds }].
@@ -521,25 +521,28 @@ export function buildAnchorsFromWordTimings(
   ttsDuration: number
 ): SyncAnchor[] {
   const normalize = (w: string) =>
-    (w || '').toLowerCase().replace(/[.,!?،۔؟;:"'`\-–—()[\]{}]/g, '').trim();
+    (w || '').toLowerCase().replace(/[.,!?،۔؟;:\"'`\-–—()\[\]{}]/g, '').trim();
 
   const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
   const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
   if (vWords.length === 0 || tWords.length === 0) return [];
 
-  const anchors: SyncAnchor[] = [];
+  const rawAnchors: SyncAnchor[] = [];
   let vi = 0;          // video word cursor — strictly monotone forward
   let lastTts = -1;
+  let lastVideo = -1;  // BUG 7 FIX: track video time monotonicity
   let matchedAny = false;
+  let consecutiveMisses = 0; // BUG 2 FIX: track consecutive failures
 
   for (let ti = 0; ti < tWords.length; ti++) {
     const tWord = tWords[ti];
     const tNorm = normalize(tWord.word);
 
-    // ±3-word lookahead match (handles small transcription shifts without
-    // breaking monotonicity — same strategy as the improved pair algorithm).
+    // BUG 2 FIX: expanded lookahead from 3 to 8 words — handles larger video
+    // intro/filler phrases (e.g. "Hey guys welcome back today..." where TTS
+    // starts at "today" = 4 words deep) that the old ±3 window could never reach.
     let matchIdx = -1;
-    for (let look = 0; look <= 3; look++) {
+    for (let look = 0; look <= 8; look++) {
       const cand = vWords[vi + look];
       if (!cand) break;
       if (normalize(cand.word) === tNorm) { matchIdx = vi + look; break; }
@@ -547,17 +550,29 @@ export function buildAnchorsFromWordTimings(
 
     if (matchIdx >= 0) {
       const vWord = vWords[matchIdx];
-      if (tWord.time > lastTts + 0.05 && vWord.time < videoDuration - 0.05) {
-        anchors.push({
+      // BUG 7 FIX: enforce BOTH video and TTS time monotonicity
+      if (tWord.time > lastTts + 0.05 && vWord.time > lastVideo + 0.03 && vWord.time < videoDuration - 0.05) {
+        rawAnchors.push({
           videoTime: Number(vWord.time.toFixed(3)),
           ttsTime: Number(tWord.time.toFixed(3)),
           phrase: tWord.word,
           matched: true,
         });
         lastTts = tWord.time;
+        lastVideo = vWord.time;
         matchedAny = true;
       }
       vi = matchIdx + 1;
+      consecutiveMisses = 0;
+    } else {
+      consecutiveMisses++;
+      // BUG 2 FIX: skip-ahead mechanism — when 5+ consecutive TTS words fail
+      // to match, the video cursor may be stuck behind a long filler phrase.
+      // Advance vi by 1 to try scanning from the next video word position.
+      if (consecutiveMisses >= 5 && vi < vWords.length - 1) {
+        vi++;
+        consecutiveMisses = 0;
+      }
     }
     // Unmatched TTS word (extra / filler): intentionally skipped — the linear
     // interpolation through the surrounding matched anchors stretches the
@@ -565,6 +580,22 @@ export function buildAnchorsFromWordTimings(
   }
 
   if (!matchedAny) return [];
+
+  // BUG 6 FIX: Merge anchors closer than 0.25s apart into phrase-level anchors
+  // to prevent micro-jitter from per-word speed oscillations (Gemini timestamps
+  // have ±50ms variance, causing wild 0.3x → 3.5x speed swings between words).
+  // Keep the LAST anchor of each phrase (best positional accuracy at phrase end).
+  const anchors: SyncAnchor[] = [];
+  for (let i = 0; i < rawAnchors.length; i++) {
+    const anchor = rawAnchors[i];
+    const next = rawAnchors[i + 1];
+    // Emit this anchor if it's the last one OR if the next anchor is ≥0.25s away in TTS time
+    if (!next || (next.ttsTime - anchor.ttsTime) >= 0.25) {
+      anchors.push(anchor);
+    }
+    // Otherwise skip this anchor (too close to the next) — the next word in
+    // the same phrase will represent the phrase boundary more accurately.
+  }
 
   // Trailing hold — "TTS wording is better than video clip": when the TTS
   // keeps speaking after the video's last matched word, HOLD the video near
@@ -753,14 +784,18 @@ export function buildSpeedFramesFromAnchors(
   const currentSpan = videoClip.speedFrameSourceEnd
     ? (videoClip.speedFrameSourceEnd - trimStart)
     : (videoClip.duration * effectiveSpeed);
-  const fixedSourceEnd = videoClip.speedFrameSourceEnd ?? (trimStart + currentSpan);
+  let fixedSourceEnd = videoClip.speedFrameSourceEnd ?? (trimStart + currentSpan);
 
   const newDuration = Math.max(0.2, ttsClip.duration);
 
   // Convert each anchor into a SpeedFrame
   const validFrames: SpeedFrame[] = [];
-  let lastOffset = 0;
-  let lastSource = trimStart;
+  // BUG 3 FIX: Initialize lastOffset to -0.06 so the first anchor at
+  // ttsTime=0.05s (clamped minimum) passes the `> lastOffset + 0.05` check.
+  // Previously, lastOffset=0 caused any anchor at ttsTime ≤ 0.10s to fail
+  // `0.05 > 0 + 0.05 = false`, silently dropping the critical first-word anchor.
+  let lastOffset = -0.06;
+  let lastSource = trimStart - 0.02;
 
   for (let i = 0; i < anchors.length; i++) {
     const anchor = anchors[i];
@@ -775,6 +810,23 @@ export function buildSpeedFramesFromAnchors(
       });
       lastOffset = offset;
       lastSource = src;
+    }
+  }
+
+  // BUG 1 FIX: When a trailing hold (stretch) anchor exists, cap fixedSourceEnd
+  // to the hold anchor's source position plus a small advance. Without this fix,
+  // the segment boundary at clip end still mapped to the FULL original source
+  // duration, causing all unconsumed video (often 1-3s) to be crammed into the
+  // final 50ms → 30x-50x speed spike at the very end of the clip.
+  // Now the clip ends near the last meaningful content instead of rushing forward.
+  const hasStretchAnchor = anchors.some(a => a.stretch);
+  if (hasStretchAnchor && validFrames.length > 0) {
+    const lastFrame = validFrames[validFrames.length - 1];
+    // Cap source end just slightly past the last frame's source position
+    // so the final segment has a gentle crawl instead of a speed explosion
+    const stretchSourceEnd = lastFrame.sourceTime + 0.05;
+    if (stretchSourceEnd < fixedSourceEnd) {
+      fixedSourceEnd = stretchSourceEnd;
     }
   }
 
@@ -1007,6 +1059,10 @@ export async function syncVideoClipWithTts(
     ...videoClip,
     startTime: alignStart ? activeTtsClip.startTime : videoClip.startTime,
     duration: newDuration,
+    // Reset base speed to 1.0 — speed frames now control per-segment playback
+    // rate. A stale clip.speed (e.g. 2.0 from user edits) would corrupt
+    // getClipSourceEnd fallback calculations.
+    speed: 1.0,
     speedFrames,
     speedFrameSourceEnd: fixedSourceEnd,
     audioSettings: muteOriginal

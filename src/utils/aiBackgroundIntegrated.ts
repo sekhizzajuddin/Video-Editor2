@@ -43,8 +43,14 @@ import {
   getPooledCanvas,
   applySubjectNeonOutlineFlash,
   ensureClipMasksReady,
+  measureMaskCoverage,
   MaskAnalysisStatus,
 } from './aiBackground';
+
+import {
+  segmentWithRVM,
+  RVM_EMPTY_COVERAGE,
+} from './rvmMatting';
 
 // ─── Smart Orchestrator ─────────────────────────────────────────────────────
 
@@ -159,17 +165,10 @@ export async function applyAiBackgroundSmart(
     const human = detectHumanPresence(sourceElement, clipId, options.skinThreshold);
 
     if (!human.hasHuman) {
-      // No human in frame: if we have a cached mask, fade it out over 3 frames
-      // instead of snapping to nothing (prevents pop-out artifacts)
-      const cached = getCachedMaskCanvas(clipId, width, height);
-      if (cached) {
-        // Fade out cached mask
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.globalAlpha = 0.3; // Rapid fade
-        ctx.drawImage(cached, 0, 0, width, height);
-        ctx.globalAlpha = 1.0;
-        ctx.globalCompositeOperation = 'source-over';
-      }
+      // No subject in frame → show the ORIGINAL frame. Never erase pixels:
+      // the previous behavior multiplied the frame alpha via destination-in,
+      // which faded the ENTIRE frame (subject + background) to transparent —
+      // the "vanishing video" bug on clips without people.
       return;
     }
 
@@ -277,9 +276,32 @@ async function runSegmentationAsync(
   try {
     let maskCanvas: HTMLCanvasElement | null = null;
 
-    // Try 1: MediaPipe on full frame (fastest)
-    if (tryMediaPipe) {
-      const videoTime = source && 'currentTime' in source ? (source as HTMLVideoElement).currentTime : 0;
+    const videoTime = source && 'currentTime' in source ? (source as HTMLVideoElement).currentTime : 0;
+
+    // Try 0: RVM (CapCut-grade) — recurrent temporal memory, best quality.
+    // Skipped while the pre-analysis job runs: it feeds RVM states sequentially
+    // across keyframes, and concurrent live inference would seek-jump the
+    // shared per-clip state, degrading the pre-computed mattes.
+    const analysisActive = getClipAnalysisStatus(clipId).status === 'analyzing';
+    if (!analysisActive) {
+      const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 384).catch(() => null);
+      if (rvmRes) {
+        if (rvmRes.coverage < RVM_EMPTY_COVERAGE) {
+          // No subject in frame — cache nothing so the frame stays original
+          return;
+        }
+        maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
+        const mCtx = maskCanvas.getContext('2d');
+        if (mCtx) {
+          mCtx.clearRect(0, 0, targetW, targetH);
+          mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
+        }
+        rvmRes.bitmap.close();
+      }
+    }
+
+    // Try 1: MediaPipe on full frame (fastest fallback)
+    if (!maskCanvas && tryMediaPipe) {
       const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
       if (mpBitmap) {
         maskCanvas = getPooledCanvas(`${clipId}_async_mp`, targetW, targetH);
@@ -331,6 +353,13 @@ async function runSegmentationAsync(
       }
     }
 
+    // Final guard: never cache a no-subject mask — destination-in with a
+    // near-empty mask erases the entire frame. Cache nothing instead so the
+    // frame stays original.
+    if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
+      maskCanvas = null;
+    }
+
     if (maskCanvas) {
       cacheMaskCanvas(clipId, maskCanvas);
       markInferencePerformed(clipId);
@@ -359,8 +388,23 @@ async function runSegmentationSync(
 ): Promise<HTMLCanvasElement | null> {
   let maskCanvas: HTMLCanvasElement | null = null;
 
-  if (tryMediaPipe) {
-    const videoTime = (source as HTMLVideoElement).currentTime || 0;
+  const videoTime = (source as HTMLVideoElement).currentTime || 0;
+
+  // Try 0: RVM (CapCut-grade) — recurrent temporal memory, best quality
+  const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, targetW >= 768 ? 768 : 512).catch(() => null);
+  if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
+    maskCanvas = document.createElement('canvas');
+    maskCanvas.width = targetW;
+    maskCanvas.height = targetH;
+    const mCtx = maskCanvas.getContext('2d');
+    if (mCtx) {
+      mCtx.clearRect(0, 0, targetW, targetH);
+      mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
+    }
+    rvmRes.bitmap.close();
+  }
+
+  if (!maskCanvas && tryMediaPipe) {
     const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
     if (mpBitmap) {
       maskCanvas = document.createElement('canvas');
@@ -407,6 +451,13 @@ async function runSegmentationSync(
     if (snap) {
       maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
     }
+  }
+
+  // Final guard: never return a no-subject mask — destination-in with a
+  // near-empty mask erases the entire frame. Return null so the caller keeps
+  // the original frame (CapCut behavior: no subject → no cutout applied).
+  if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
+    return null;
   }
 
   return maskCanvas;

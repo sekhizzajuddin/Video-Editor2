@@ -2071,6 +2071,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // ---- VIDEO SYNC STRATEGY (Smooth PLL without seek-storm stutter) ----
         else if (entry.type === 'video') {
           const isRamped = (clip.speedRamp && clip.speedRamp.length >= 2) || ((clip.clip as any)?.speedFrames && (clip.clip as any).speedFrames.length > 0);
+          const hasSpeedFramesOnly = hasSpeedFrames && (!clip.speedRamp || clip.speedRamp.length < 2);
           // SPEED FRAME FIX: drift thresholds must scale with the CURRENT segment
           // speed. rawDrift is in MEDIA seconds but the perceptual error is in
           // TIMELINE seconds: at 10x speed, 1.2s of media drift is only 120ms of
@@ -2080,9 +2081,18 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // playbackRate), producing repeated decode restarts + buffering
           // freezes on ramped timelines. Scaling by segment speed keeps the
           // same timeline-time tolerance at every ramp speed.
+          //
+          // BUG 5 FIX: Speed-frame clips (from AI Speed Sync) need MUCH tighter
+          // thresholds than regular speed ramps. Word-level lip-sync requires
+          // ≤50ms accuracy, but the old 0.75×speedScale threshold allowed up to
+          // 1.5s drift at 2x speed — far too wide.
           const speedScale = Math.max(1, currentSegmentSpeed);
-          const VIDEO_HARD_SEEK_THRESHOLD = isRamped ? Math.max(0.45, 0.75 * speedScale) : 0.45;
-          const VIDEO_PLL_THRESHOLD = Math.max(0.025, 0.05 * speedScale);       // 25ms at 1x
+          const VIDEO_HARD_SEEK_THRESHOLD = hasSpeedFramesOnly
+            ? Math.max(0.12, 0.15 * speedScale)
+            : (isRamped ? Math.max(0.45, 0.75 * speedScale) : 0.45);
+          const VIDEO_PLL_THRESHOLD = hasSpeedFramesOnly
+            ? Math.max(0.02, 0.03 * speedScale)
+            : Math.max(0.025, 0.05 * speedScale);
           const VIDEO_MAX_PLL_ADJUST = isRamped ? 0.35 : 0.10;       // Dynamic playback rate modulation
 
           // REVERSE / FREEZE FRAME: browsers can't play <video> backward, so we
