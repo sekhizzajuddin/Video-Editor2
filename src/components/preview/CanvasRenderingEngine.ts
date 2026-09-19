@@ -50,6 +50,7 @@ import { drawTextBackground } from '@/utils/textBackgrounds';
 import {
   findActiveTransition,
   buildTransitionPlan,
+  applyTransitionPostEffect,
   type ActiveTransition,
   type LayerDraw,
 } from '@/utils/transitionEngine';
@@ -2661,14 +2662,21 @@ export async function renderCanvasEngine({
   const drawTransitionLayer = async (
     clipToDraw: any,
     layer: LayerDraw,
-    bufferKey: string
+    bufferKey: string,
+    blitCtx?: CanvasRenderingContext2D,
+    bufScaleOverride?: number
   ) => {
     if (!layer.visible) return;
 
     // The buffer holds ONLY the frame region (W x H in local units), rendered at
     // the same device resolution the frame currently occupies so the layer is not
     // softened by a round-trip through a lower-res buffer.
-    const bufScale = Math.max(0.1, canvas_scale * viewport.zoom);
+    // PERF: capped at 1× device resolution — the buffer is blitted back at
+    // W×H anyway, so super-sampling a moving blend is wasted fill rate. During
+    // a transition BOTH clips render (plus their own media buffers), so a
+    // transition frame costs ~2.5× a normal frame; this cap removes the two
+    // super-sampled renders without any visible quality change.
+    const bufScale = Math.min(1, Math.max(0.1, bufScaleOverride ?? (canvas_scale * viewport.zoom)));
     const bufW = Math.max(1, Math.round(W * bufScale));
     const bufH = Math.max(1, Math.round(H * bufScale));
 
@@ -2687,34 +2695,66 @@ export async function renderCanvasEngine({
     await drawSingleClip(clipToDraw, 1, undefined, bctx);
     bctx.restore();
 
-    // Blit the finished layer with the transition's geometry + alpha. `ctx` is
-    // already in local frame space, so we work in W/H units throughout.
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
+    // Blit the finished layer with the transition's geometry + alpha. `blitCtx`
+    // (or the main frame ctx) is already in local frame space, so we work in
+    // W/H units throughout.
+    const outCtx = blitCtx || ctx;
+    outCtx.save();
+    outCtx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
 
     if (layer.clipRect) {
       const r = layer.clipRect;
-      ctx.beginPath();
-      ctx.rect(r.x * W, r.y * H, r.w * W, r.h * H);
-      ctx.clip();
+      outCtx.beginPath();
+      outCtx.rect(r.x * W, r.y * H, r.w * W, r.h * H);
+      outCtx.clip();
     }
 
     // Geometry is expressed in frame fractions, so it is resolution independent.
     const cxF = W / 2;
     const cyF = H / 2;
-    ctx.translate(cxF + layer.translateX * W, cyF + layer.translateY * H);
-    if (layer.rotation) ctx.rotate(layer.rotation);
-    if (layer.scale !== 1) ctx.scale(layer.scale, layer.scale);
-    ctx.translate(-cxF, -cyF);
+    outCtx.translate(cxF + layer.translateX * W, cyF + layer.translateY * H);
+    if (layer.rotation) outCtx.rotate(layer.rotation);
+    if (layer.scale !== 1) outCtx.scale(layer.scale, layer.scale);
+    outCtx.translate(-cxF, -cyF);
 
-    ctx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
-    ctx.restore();
+    outCtx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+    outCtx.restore();
   };
 
   /** Render a full clip-to-clip transition (both layers + overlay + post effect). */
   const drawTransition = async (active: ActiveTransition) => {
     const plan = buildTransitionPlan(active);
     anyClipDrawn = true;
+
+    if (plan.postEffect !== 'none' && plan.postEffectAmount > 0.001) {
+      // Pixel post-effect (rgbSplit / pixelate): render the whole transition
+      // composite into a full-frame scratch buffer, apply the pixel effect to
+      // the buffer (putImageData ignores transforms and works in device pixels
+      // — the composite ctx is in transformed frame space), then blit back.
+      const bufScale = Math.min(1, Math.max(0.1, canvas_scale * viewport.zoom));
+      const bufW = Math.max(1, Math.round(W * bufScale));
+      const bufH = Math.max(1, Math.round(H * bufScale));
+      const postBuf = getOrCreateCanvas(offscreenCanvasPool.current, '__transition_post', bufW, bufH);
+      const pctx = postBuf.getContext('2d');
+      if (pctx) {
+        pctx.setTransform(1, 0, 0, 1, 0, 0);
+        pctx.clearRect(0, 0, postBuf.width, postBuf.height);
+        pctx.save();
+        pctx.scale(bufScale, bufScale);
+        await drawTransitionLayer(active.from, plan.from, '__transition_from', pctx as CanvasRenderingContext2D, bufScale);
+        await drawTransitionLayer(active.to, plan.to, '__transition_to', pctx as CanvasRenderingContext2D, bufScale);
+        if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
+          pctx.globalAlpha = Math.min(1, plan.overlay.alpha);
+          pctx.fillStyle = plan.overlay.color;
+          pctx.fillRect(0, 0, W, H);
+          pctx.globalAlpha = 1;
+        }
+        pctx.restore();
+        applyTransitionPostEffect(pctx as CanvasRenderingContext2D, postBuf.width, postBuf.height, plan.postEffect, plan.postEffectAmount);
+        ctx.drawImage(postBuf, 0, 0, postBuf.width, postBuf.height, 0, 0, W, H);
+      }
+      return;
+    }
 
     await drawTransitionLayer(active.from, plan.from, '__transition_from');
     await drawTransitionLayer(active.to, plan.to, '__transition_to');

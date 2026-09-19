@@ -174,6 +174,13 @@ export interface RenderLayer {
   };
   zIndex: number;
   sourceRotation?: number;
+  /**
+   * Speed-ramp/trim-aware SOURCE media time (same mapping the preview's video
+   * element reports). The AI background mask cache is keyed by source time, so
+   * the Compositor's mask lookup MUST use this — clip-local time misses for
+   * trimmed or speed-changed clips and the cutout silently vanishes on export.
+   */
+  sourceMediaTime?: number;
   blendMode?: GlobalCompositeOperation;
   order?: number;
   transitionGeometry?: {
@@ -221,9 +228,16 @@ export interface FrameOverlay {
   alpha: number;
 }
 
+/** Full-frame pixel post-effect from an active transition (rgbSplit / pixelate). */
+export interface FramePostEffect {
+  type: 'none' | 'rgbSplit' | 'pixelate';
+  amount: number;
+}
+
 export interface FramePlan {
   layers: RenderLayer[];
   overlays: FrameOverlay[];
+  postEffect?: FramePostEffect;
 }
 
 export class FrameScheduler {
@@ -590,6 +604,7 @@ export class FrameScheduler {
                             transitionGeometry,
                             blendMode,
                             sourceRotation: testDecoder?.rotation || 0,
+                            sourceMediaTime: Number.isFinite(localTimeSeconds) ? Math.max(0, localTimeSeconds) : 0,
                           });
                         }
                       } catch {
@@ -628,6 +643,7 @@ export class FrameScheduler {
                       transitionGeometry,
                       blendMode,
                       sourceRotation: decoder?.rotation || 0,
+                      sourceMediaTime: safeTimeSeconds,
                     });
                   }
                 } catch {
@@ -762,6 +778,7 @@ export class FrameScheduler {
 
   async getFramePlanAtTime(timestampSeconds: number): Promise<FramePlan> {
     const overlays: FrameOverlay[] = [];
+    let postEffect: FramePostEffect | undefined;
     for (const track of this.timeline.tracks || []) {
       if (track.hidden) continue;
       const active = findActiveTransition(track.clips || [], timestampSeconds);
@@ -770,9 +787,15 @@ export class FrameScheduler {
       if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
         overlays.push({ color: plan.overlay.color, alpha: plan.overlay.alpha });
       }
+      // Pixel post-effects (rgbSplit / pixelate) must reach the Compositor —
+      // previously they were computed here and silently dropped, so glitch and
+      // pixelate transitions exported as plain dissolves.
+      if (plan.postEffect !== 'none' && plan.postEffectAmount > 0.001) {
+        postEffect = { type: plan.postEffect, amount: plan.postEffectAmount };
+      }
     }
     const layers = await this.getLayersAtTime(timestampSeconds);
-    return { layers, overlays };
+    return { layers, overlays, postEffect };
   }
 
   /**

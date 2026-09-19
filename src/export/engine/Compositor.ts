@@ -1,4 +1,4 @@
-import { RenderLayer, FrameOverlay } from './FrameScheduler';
+import { RenderLayer, FrameOverlay, FramePostEffect } from './FrameScheduler';
 import { ExportWorkerConfig } from './export.worker';
 import {
   applyColorGradingWheelsOnData,
@@ -13,6 +13,7 @@ import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { drawPerspectiveTexture, getProjectedCorners } from '@/utils/canvasEffects';
 import { generateObjectRemovalInpaint } from '@/utils/objectRemoval';
 import { applyPreRenderedMaskIfAvailable, preRenderedMaskCache } from '@/utils/aiBackground';
+import { applyTransitionPostEffect } from '@/utils/transitionEngine';
 import { drawTextBackground } from '@/utils/textBackgrounds';
 import { applyEasing, smoothNoise } from '@/utils/textAnimationEasing';
 
@@ -301,7 +302,7 @@ export class Compositor {
     }
   }
 
-  public async render(layers: RenderLayer[], overlays: FrameOverlay[] = []) {
+  public async render(layers: RenderLayer[], overlays: FrameOverlay[] = [], postEffect?: FramePostEffect) {
     // Fill background
     this.ctx.fillStyle = '#0a0a0a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -480,8 +481,13 @@ export class Compositor {
           const spillSuppression = layer.aiBackground.spillSuppression ?? 0;
           const spillColor = layer.aiBackground.spillColor;
           
-          // Source media time: timeline time minus clip start
-          const sourceTime = (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0);
+          // Source media time: timeline time minus clip start.
+          // The pre-rendered AI mask cache is keyed by SOURCE media time (what
+          // the preview's video element reports: trimStart + elapsed·speed), so
+          // the speed/trim-aware mapping is REQUIRED — clip-local time missed
+          // the cache for trimmed or speed-changed clips and the cutout
+          // silently vanished on export.
+          const sourceTime = layer.sourceMediaTime ?? ((layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
           
           const mockElement = {
             currentTime: sourceTime,
@@ -781,6 +787,13 @@ export class Compositor {
       targetCtx.fillStyle = ov.color;
       targetCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
       targetCtx.restore();
+    }
+
+    // Full-frame transition pixel post-effect (rgbSplit / pixelate).
+    // Applied after layers + overlays so the exported frame matches the
+    // preview's transition composite order.
+    if (postEffect && postEffect.type !== 'none' && postEffect.amount > 0.001) {
+      applyTransitionPostEffect(this.ctx, this.canvas.width, this.canvas.height, postEffect.type, postEffect.amount);
     }
 
     // ── Particle effects (full-frame pass) ──────────────────────────────────

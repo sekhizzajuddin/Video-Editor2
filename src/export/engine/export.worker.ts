@@ -682,7 +682,7 @@ async function handleExport(
       // getFramePlanAtTime also resolves clip-to-clip transitions (layer blend +
       // any full-frame overlay) using the same engine the preview uses, so the
       // exported file matches what the user saw.
-      const { layers, overlays } = await withTimeout(
+      const { layers, overlays, postEffect } = await withTimeout(
         scheduler.getFramePlanAtTime(timestampSeconds),
         20_000,
         `Source decoding stalled at ${timestampSeconds.toFixed(2)}s. The export was stopped instead of hanging.`,
@@ -690,7 +690,7 @@ async function handleExport(
       renderedLayerCount += layers.length;
 
       // Render frame with WebGL (or 2D fallback if context lost)
-      await compositor.render(layers, overlays);
+      await compositor.render(layers, overlays, postEffect);
 
       // Surface compositor warnings (e.g. missing AI background masks) to the UI
       for (const w of compositor.warnings) {
