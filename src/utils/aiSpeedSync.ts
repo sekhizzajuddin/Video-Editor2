@@ -5,6 +5,8 @@ import { audioBufferToWav } from './autoCaptions';
 import { extractJsonFromLlmResponse } from './jsonHelper';
 import { calculateSpeedFramesRamp, getSpeedFrameSegments, SpeedFrameSegment } from './speedRamp';
 import { getFileFromDB } from '@/utils/projectPersistence';
+import { getPreferredGroqKey, hasAnyGroqKey } from './ai-copilot/groqChat';
+import { globalRateLimiter } from './ai-copilot/RateLimiter';
 
 export async function blobToBase64(blob: Blob): Promise<string> {
   if (typeof FileReader !== 'undefined') {
@@ -34,6 +36,23 @@ export const GEMINI_SPEED_SYNC_MODELS = [
 ] as const;
 
 export type GeminiSpeedSyncModel = typeof GEMINI_SPEED_SYNC_MODELS[number];
+
+export const GROQ_WHISPER_MODELS = [
+  'whisper-large-v3-turbo',
+  'whisper-large-v3',
+] as const;
+
+export type GroqWhisperModel = typeof GROQ_WHISPER_MODELS[number];
+
+export const GROQ_REASONING_MODELS = [
+  'openai/gpt-oss-120b',
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+] as const;
+
+export type GroqReasoningModel = typeof GROQ_REASONING_MODELS[number];
+
+export type SpeedSyncProvider = 'auto' | 'groq' | 'gemini';
 
 export interface SyncAnchor {
   videoTime: number;  // offset in seconds from video clip trimmed start
@@ -86,7 +105,10 @@ export interface TtsExtraSentenceDetection {
 export interface AiSpeedSyncOptions {
   alignStartTime?: boolean;      // Align video start with TTS start (default true)
   muteOriginalAudio?: boolean;   // Mute original video audio so TTS is isolated (default true)
-  targetModel?: GeminiSpeedSyncModel; // Preferred starting model
+  provider?: SpeedSyncProvider;  // 'auto' | 'groq' | 'gemini' (default 'auto')
+  targetModel?: GeminiSpeedSyncModel; // Preferred starting Gemini model
+  groqWhisperModel?: GroqWhisperModel; // Preferred Groq Whisper model
+  groqReasoningModel?: GroqReasoningModel; // Preferred Groq Reasoning model
 }
 
 export interface AiSpeedSyncResult {
@@ -496,6 +518,379 @@ RULES:
 }
 
 /**
+ * Transcribes an audio blob using Groq's official Whisper endpoint
+ * (whisper-large-v3-turbo / whisper-large-v3) with word-level timestamps
+ * (response_format: 'verbose_json', timestamp_granularities: ['word', 'segment']).
+ *
+ * Returns exact acoustic word boundaries accurate to ~10-20ms.
+ */
+export async function transcribeWithGroqWhisper(
+  audioBlob: Blob,
+  preferredModel?: GroqWhisperModel
+): Promise<{
+  text: string;
+  words: SyncWordTiming[];
+  sentences: SpeedSyncSentence[];
+  duration: number;
+  model: string;
+}> {
+  const { key: apiKey } = getPreferredGroqKey();
+  if (!apiKey) {
+    throw new Error('Groq API Key is missing. Please configure it in Settings or set VITE_GROQ_API_KEY.');
+  }
+
+  const modelOrder: GroqWhisperModel[] = preferredModel
+    ? [preferredModel, ...GROQ_WHISPER_MODELS.filter(m => m !== preferredModel)]
+    : [...GROQ_WHISPER_MODELS];
+
+  let lastError: Error | null = null;
+
+  for (const model of modelOrder) {
+    try {
+      console.log(`[AiSpeedSync] Transcribing audio with Groq Whisper model: ${model}...`);
+      await globalRateLimiter.waitForSlot();
+      if (globalRateLimiter.isInCooldown()) {
+        await globalRateLimiter.waitForSlot();
+      }
+      globalRateLimiter.recordCall();
+
+      const form = new FormData();
+      form.append('file', audioBlob, 'audio.wav');
+      form.append('model', model);
+      form.append('response_format', 'verbose_json');
+      form.append('timestamp_granularities[]', 'word');
+      form.append('timestamp_granularities[]', 'segment');
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.status === 429) {
+        globalRateLimiter.startCooldown('groq_429_whisper');
+        lastError = new Error(`Groq Whisper model ${model} rate limited (429)`);
+        console.warn(`[AiSpeedSync] Groq Whisper model ${model} rate limited (429)`);
+        continue;
+      }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        lastError = new Error(`Groq Whisper ${model} returned HTTP ${res.status}: ${errText.slice(0, 160)}`);
+        console.warn(`[AiSpeedSync] Groq Whisper model ${model} failed (${res.status}):`, errText.slice(0, 160));
+        continue;
+      }
+
+      const data = await res.json();
+      const words: SyncWordTiming[] = (data?.words || []).map((w: any) => ({
+        word: (w.word || '').trim(),
+        time: Number((typeof w.start === 'number' ? w.start : 0).toFixed(3)),
+      })).filter((w: SyncWordTiming) => w.word.length > 0 && Number.isFinite(w.time));
+
+      const sentences: SpeedSyncSentence[] = (data?.segments || []).map((s: any) => ({
+        text: (s.text || '').trim(),
+        startTime: Number((typeof s.start === 'number' ? s.start : 0).toFixed(3)),
+        endTime: Number((typeof s.end === 'number' ? s.end : 0).toFixed(3)),
+      })).filter((s: SpeedSyncSentence) => s.text.length > 0);
+
+      console.log(`[AiSpeedSync] Successfully transcribed with Groq Whisper (${model}): ${words.length} words, ${sentences.length} segments`);
+
+      return {
+        text: (data?.text || '').trim(),
+        words,
+        sentences,
+        duration: typeof data?.duration === 'number' ? data.duration : 0,
+        model,
+      };
+    } catch (err: any) {
+      console.warn(`[AiSpeedSync] Groq Whisper error with model ${model}:`, err);
+      lastError = err;
+    }
+  }
+
+  throw lastError ?? new Error('Groq Whisper transcription failed on all models.');
+}
+
+/**
+ * Runs AI Speed Sync analysis using Groq Whisper for acoustic word-level
+ * timestamps and Groq reasoning (openai/gpt-oss-120b) for dialogue alignment.
+ */
+export async function runGroqSpeedSync(
+  videoAudioBlob: Blob | null,
+  ttsAudioBlob: Blob,
+  videoDuration: number,
+  ttsDuration: number,
+  preferredWhisperModel?: GroqWhisperModel,
+  preferredReasoningModel?: GroqReasoningModel
+): Promise<{
+  anchors: SyncAnchor[];
+  successfulModel: string;
+  summary: string;
+  verdict?: SpeedSyncVerdict;
+  videoWords?: SyncWordTiming[];
+  ttsWords?: SyncWordTiming[];
+  videoSentences?: SpeedSyncSentence[];
+  ttsSentences?: SpeedSyncSentence[];
+  ttsHasMoreSentences?: boolean;
+  matchingCutoffTtsTime?: number;
+}> {
+  const { key: apiKey } = getPreferredGroqKey();
+  if (!apiKey) {
+    throw new Error('Groq API Key is missing. Please configure it in Settings or set VITE_GROQ_API_KEY.');
+  }
+
+  // 1. Transcribe TTS audio with Groq Whisper
+  console.log('[AiSpeedSync] Transcribing TTS audio with Groq Whisper...');
+  const ttsWhisper = await transcribeWithGroqWhisper(ttsAudioBlob, preferredWhisperModel);
+  const ttsWords = ttsWhisper.words;
+  const ttsSentences = ttsWhisper.sentences;
+
+  // 2. If video has audio, transcribe video audio with Groq Whisper
+  let videoWords: SyncWordTiming[] | undefined;
+  let videoSentences: SpeedSyncSentence[] | undefined;
+  let videoText = '';
+  let successfulWhisperModel = ttsWhisper.model;
+
+  if (videoAudioBlob) {
+    try {
+      console.log('[AiSpeedSync] Transcribing Video audio with Groq Whisper...');
+      const videoWhisper = await transcribeWithGroqWhisper(videoAudioBlob, preferredWhisperModel);
+      videoWords = videoWhisper.words;
+      videoSentences = videoWhisper.sentences;
+      videoText = videoWhisper.text;
+      successfulWhisperModel = `${videoWhisper.model} / ${ttsWhisper.model}`;
+    } catch (vErr) {
+      console.warn('[AiSpeedSync] Video audio Whisper transcription failed or video has no clear speech:', vErr);
+      videoWords = [];
+      videoSentences = [];
+    }
+  }
+
+  const hasVideoSpeech = Boolean(videoWords && videoWords.length > 0);
+  const hasTtsSpeech = ttsWords.length > 0;
+
+  if (!hasTtsSpeech) {
+    return {
+      anchors: [],
+      successfulModel: `Groq Whisper (${successfulWhisperModel})`,
+      summary: 'TTS audio contains no recognizable speech.',
+      verdict: {
+        ttsHasSpeech: false,
+        videoHasSpeech: hasVideoSpeech,
+        sameContent: false,
+        reason: 'Groq Whisper detected no speech in the TTS audio file.',
+      },
+      videoWords,
+      ttsWords,
+      videoSentences,
+      ttsSentences,
+      ttsHasMoreSentences: false,
+    };
+  }
+
+  // 3. Reasoning with Groq LLM (openai/gpt-oss-120b -> llama-3.3-70b-versatile -> llama-3.1-8b-instant)
+  const reasoningOrder: GroqReasoningModel[] = preferredReasoningModel
+    ? [preferredReasoningModel, ...GROQ_REASONING_MODELS.filter(m => m !== preferredReasoningModel)]
+    : [...GROQ_REASONING_MODELS];
+
+  let verdict: SpeedSyncVerdict = {
+    ttsHasSpeech: true,
+    videoHasSpeech: hasVideoSpeech,
+    sameContent: false,
+    reason: 'TTS voiceover with Whisper acoustic word alignment.',
+  };
+  let ttsHasMoreSentences = false;
+  let matchingCutoffTtsTime: number | undefined;
+  let summary = 'Synchronized video playback speed with TTS voiceover using Groq Whisper.';
+  let successfulReasoningModel = '';
+  let rawAnchors: SyncAnchor[] = [];
+
+  let systemPrompt = '';
+  let userPrompt = '';
+
+  if (hasVideoSpeech) {
+    systemPrompt = `You are a world-class audio-visual synchronization and dialogue alignment specialist.
+You are given the exact Whisper-transcribed words and sentence segments of:
+1. Video Audio (${videoDuration.toFixed(2)}s)
+2. TTS Voiceover Audio (${ttsDuration.toFixed(2)}s)
+
+Your task:
+1. Compare the sentences between Video and TTS.
+2. Determine if TTS has extra sentences or additional dialogue beyond what is spoken in the Video clip (e.g. video dialogue ends after sentence N, but TTS continues speaking more sentences).
+3. If TTS has extra sentences, specify the exact cutoff timestamp in seconds in the TTS audio (matchingCutoffTtsTime) where the matching video dialogue ends, right before the next unmatched sentence begins.
+4. Verdict:
+   - sameContent: false (if TTS is a synthesized voiceover, even reading the same script, set false so speed sync can proceed). Set true ONLY if it is the exact identical acoustic recording file.
+   - ttsHasSpeech: true
+   - videoHasSpeech: true
+   - reason: concise explanation.
+5. Provide a short summary of the pacing differences.
+6. Provide 3 to 8 fallback anchors: [{ "videoTime": seconds, "ttsTime": seconds, "phrase": "...", "targetSpeed": number }].
+
+Return ONLY strict JSON matching this structure:
+{
+  "verdict": { "ttsHasSpeech": true, "videoHasSpeech": true, "sameContent": false, "reason": "..." },
+  "ttsHasMoreSentences": boolean,
+  "matchingCutoffTtsTime": number,
+  "summary": "...",
+  "anchors": [ { "videoTime": 1.0, "ttsTime": 1.2, "phrase": "...", "targetSpeed": 1.0 } ]
+}`;
+
+    userPrompt = `VIDEO AUDIO:
+- Duration: ${videoDuration.toFixed(2)}s
+- Transcript: "${videoText}"
+- Sentences: ${JSON.stringify(videoSentences)}
+
+TTS AUDIO:
+- Duration: ${ttsDuration.toFixed(2)}s
+- Transcript: "${ttsWhisper.text}"
+- Sentences: ${JSON.stringify(ttsSentences)}`;
+  } else {
+    // Video has no speech — analyze TTS cadence and distribute natural speed ramping
+    systemPrompt = `You are a professional video speed-ramping and pacing editor.
+The user wants to sync a video clip (${videoDuration.toFixed(2)}s) with a TTS voiceover (${ttsDuration.toFixed(2)}s).
+The video clip has no dialogue, so we must pace the video to match the spoken rhythm and sentence structure of the TTS audio provided.
+
+TASK:
+1. Analyze the TTS cadence, sentence pauses, and punchlines from these exact Whisper-transcribed words and segments.
+2. Distribute 3 to 8 speed frame anchor points to create dynamic, cinematic speed ramping:
+   - Slightly accelerate video through spoken pauses.
+   - Settle at natural speed (0.9x - 1.2x) on key phrases and emphasis words.
+3. For each anchor:
+   - "videoTime": mapped source moment in seconds (0.00 to ${videoDuration.toFixed(2)}).
+   - "ttsTime": spoken timestamp in TTS audio (0.00 to ${ttsDuration.toFixed(2)}).
+   - "phrase": words spoken or event at this moment.
+   - "targetSpeed": speed multiplier.
+
+Return ONLY strict JSON matching this structure:
+{
+  "verdict": { "ttsHasSpeech": true, "videoHasSpeech": false, "sameContent": false, "reason": "..." },
+  "summary": "...",
+  "anchors": [ { "videoTime": 1.0, "ttsTime": 1.2, "phrase": "...", "targetSpeed": 1.1 } ]
+}`;
+
+    userPrompt = `TTS AUDIO (${ttsDuration.toFixed(2)}s):
+- Transcript: "${ttsWhisper.text}"
+- Sentences: ${JSON.stringify(ttsSentences)}`;
+  }
+
+  for (const model of reasoningOrder) {
+    try {
+      console.log(`[AiSpeedSync] Running Groq reasoning with model: ${model}...`);
+      await globalRateLimiter.waitForSlot();
+      if (globalRateLimiter.isInCooldown()) {
+        await globalRateLimiter.waitForSlot();
+      }
+      globalRateLimiter.recordCall();
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 35000);
+
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.2,
+          response_format: { type: 'json_object' },
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.status === 429) {
+        globalRateLimiter.startCooldown('groq_429_chat');
+        console.warn(`[AiSpeedSync] Groq reasoning model ${model} rate limited (429)`);
+        continue;
+      }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.warn(`[AiSpeedSync] Groq reasoning model ${model} failed (${res.status}):`, errText.slice(0, 160));
+        continue;
+      }
+
+      const chatData = await res.json();
+      const content = chatData?.choices?.[0]?.message?.content;
+      if (!content) continue;
+
+      const parsed = JSON.parse(extractJsonFromLlmResponse(content));
+      if (parsed.verdict) verdict = parsed.verdict;
+      if (typeof parsed.ttsHasMoreSentences === 'boolean') ttsHasMoreSentences = parsed.ttsHasMoreSentences;
+      if (typeof parsed.matchingCutoffTtsTime === 'number') matchingCutoffTtsTime = parsed.matchingCutoffTtsTime;
+      if (parsed.summary) summary = parsed.summary;
+      if (Array.isArray(parsed.anchors)) rawAnchors = parsed.anchors;
+
+      successfulReasoningModel = model;
+      console.log(`[AiSpeedSync] Successfully analyzed with Groq model: ${model}`);
+      break;
+    } catch (rErr) {
+      console.warn(`[AiSpeedSync] Groq reasoning failed with model ${model}:`, rErr);
+    }
+  }
+
+  // Sanitize fallback anchors
+  const sanitizedAnchors: SyncAnchor[] = [];
+  let prevVideo = -1;
+  let prevTts = -1;
+  for (const a of rawAnchors) {
+    const vTime = Number(a.videoTime);
+    const tTime = Number(a.ttsTime);
+    if (!Number.isFinite(vTime) || !Number.isFinite(tTime)) continue;
+    if (vTime > prevVideo + 0.05 && tTime > prevTts + 0.05 && vTime < videoDuration && tTime < ttsDuration) {
+      sanitizedAnchors.push({
+        videoTime: Number(vTime.toFixed(3)),
+        ttsTime: Number(tTime.toFixed(3)),
+        phrase: a.phrase || '',
+        targetSpeed: typeof a.targetSpeed === 'number' ? Math.min(4, Math.max(0.25, a.targetSpeed)) : 1.0,
+      });
+      prevVideo = vTime;
+      prevTts = tTime;
+    }
+  }
+
+  if (sanitizedAnchors.length === 0) {
+    const stepCount = 3;
+    for (let i = 1; i <= stepCount; i++) {
+      sanitizedAnchors.push({
+        videoTime: Number(((videoDuration * i) / (stepCount + 1)).toFixed(3)),
+        ttsTime: Number(((ttsDuration * i) / (stepCount + 1)).toFixed(3)),
+        phrase: `Anchor ${i}`,
+        targetSpeed: Math.min(4, Math.max(0.25, videoDuration / ttsDuration)),
+      });
+    }
+  }
+
+  const modelLabel = successfulReasoningModel
+    ? `Groq Whisper (${successfulWhisperModel}) + ${successfulReasoningModel}`
+    : `Groq Whisper (${successfulWhisperModel})`;
+
+  return {
+    anchors: sanitizedAnchors,
+    successfulModel: modelLabel,
+    summary,
+    verdict,
+    videoWords,
+    ttsWords,
+    videoSentences,
+    ttsSentences,
+    ttsHasMoreSentences,
+    matchingCutoffTtsTime,
+  };
+}
+
+/**
  * Deterministic word-level alignment: matches TTS word timings against video
  * word timings and builds anchors — the alignment MATH is done here, not left
  * to the model (the AI only marks word timings in both audios).
@@ -704,7 +1099,7 @@ export function detectTtsExtraSentences(params: {
       for (let ti = 0; ti < tWords.length; ti++) {
         const tNorm = normalize(tWords[ti].word);
         let matchIdx = -1;
-        for (let look = 0; look <= 3; look++) {
+        for (let look = 0; look <= 8; look++) {
           const cand = vWords[vi + look];
           if (!cand) break;
           if (normalize(cand.word) === tNorm) {
@@ -856,7 +1251,8 @@ export async function syncVideoClipWithTts(
   options: AiSpeedSyncOptions = {},
   onProgress?: (progress: number, message: string) => void,
   _extractAudio = extractClipAudioToWav,
-  _runGemini = runGeminiSpeedSync
+  _runGemini = runGeminiSpeedSync,
+  _runGroq = runGroqSpeedSync
 ): Promise<AiSpeedSyncResult> {
   const store = useEditorStore.getState();
   const foundVideo = findClipInTracks(store.tracks, videoClipId, store.pipWindows);
@@ -915,15 +1311,63 @@ export async function syncVideoClipWithTts(
     throw new Error('The selected TTS clip audio is silent. Please select a valid TTS voiceover clip with speech.');
   }
 
-  // 3. Gemini Multimodal Analysis — marks word timings in BOTH audios
-  onProgress?.(55, 'AI marking word timings in video & TTS audio...');
-  const analysis = await _runGemini(
-    videoAudio.wavBlob,
-    ttsAudio.wavBlob,
-    videoAudio.duration,
-    ttsAudio.duration,
-    options.targetModel
-  );
+  // 3. AI Analysis & Word Timing
+  // Provider resolution:
+  // - If provider is 'groq': use Groq Whisper + reasoning (throw if Groq fails)
+  // - If provider is 'gemini': use Gemini Multimodal
+  // - If provider is 'auto' (default): try Groq if Groq key exists, else Gemini. If Groq fails, fall back to Gemini.
+  const provider = options.provider || 'auto';
+  const shouldTryGroq = (provider === 'groq' || provider === 'auto') && hasAnyGroqKey();
+
+  let analysis: {
+    anchors: SyncAnchor[];
+    successfulModel: string;
+    summary: string;
+    verdict?: SpeedSyncVerdict;
+    videoWords?: SyncWordTiming[];
+    ttsWords?: SyncWordTiming[];
+    videoSentences?: SpeedSyncSentence[];
+    ttsSentences?: SpeedSyncSentence[];
+    ttsHasMoreSentences?: boolean;
+    matchingCutoffTtsTime?: number;
+  };
+
+  if (shouldTryGroq) {
+    try {
+      onProgress?.(50, 'Transcribing with Groq Whisper & analyzing word timing...');
+      analysis = await _runGroq(
+        videoAudio.wavBlob,
+        ttsAudio.wavBlob,
+        videoAudio.duration,
+        ttsAudio.duration,
+        options.groqWhisperModel,
+        options.groqReasoningModel
+      );
+    } catch (groqErr) {
+      console.warn('[AiSpeedSync] Groq Whisper/reasoning failed:', groqErr);
+      if (provider === 'groq') {
+        throw groqErr;
+      }
+      onProgress?.(55, 'Groq unavailable, falling back to Gemini Multimodal...');
+      analysis = await _runGemini(
+        videoAudio.wavBlob,
+        ttsAudio.wavBlob,
+        videoAudio.duration,
+        ttsAudio.duration,
+        options.targetModel
+      );
+    }
+  } else {
+    onProgress?.(55, 'AI marking word timings in video & TTS audio...');
+    analysis = await _runGemini(
+      videoAudio.wavBlob,
+      ttsAudio.wavBlob,
+      videoAudio.duration,
+      ttsAudio.duration,
+      options.targetModel
+    );
+  }
+
   const { anchors: aiAnchors, successfulModel, summary, verdict } = analysis;
 
   // ── Wrong-audio-clip validation (AI verdict) ──────────────────────────────

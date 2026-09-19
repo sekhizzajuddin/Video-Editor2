@@ -604,6 +604,70 @@ export function getTransitionAudioGains(progress: number): { fromGain: number; t
 }
 
 /**
+ * Apply a transition's full-frame pixel post-effect (rgbSplit / pixelate) to an
+ * already-composited frame.
+ *
+ * Lives here — not in the renderers — so the preview canvas and the exporter
+ * can never drift apart on how these effects look (the classic "fine in
+ * preview, wrong in the export" failure).
+ *
+ * Works with both HTMLCanvasElement and OffscreenCanvas 2D contexts, so it is
+ * safe to call inside the export worker (where `document` does not exist).
+ * `ctx` must be in the frame's own pixel space: getImageData/putImageData
+ * ignore transforms and operate on device pixels of the target canvas.
+ */
+export function applyTransitionPostEffect(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  w: number,
+  h: number,
+  type: 'none' | 'rgbSplit' | 'pixelate',
+  amount: number
+): void {
+  if (type === 'none' || !(amount > 0.001) || w <= 0 || h <= 0) return;
+  try {
+    if (type === 'rgbSplit') {
+      const src = ctx.getImageData(0, 0, w, h);
+      const out = ctx.createImageData(w, h);
+      const s = src.data;
+      const d = out.data;
+      const off = Math.max(1, Math.round(amount * Math.max(3, w * 0.02)));
+      for (let y = 0; y < h; y++) {
+        const row = y * w;
+        for (let x = 0; x < w; x++) {
+          const i = (row + x) * 4;
+          const rx = Math.min(w - 1, x + off);
+          const bx = Math.max(0, x - off);
+          d[i] = s[(row + rx) * 4];          // R shifted right
+          d[i + 1] = s[i + 1];               // G stays
+          d[i + 2] = s[(row + bx) * 4 + 2];  // B shifted left
+          d[i + 3] = s[i + 3];
+        }
+      }
+      ctx.putImageData(out, 0, 0);
+    } else if (type === 'pixelate') {
+      // Downscale to a blocky resolution, then upscale with smoothing disabled
+      // so each block has hard edges (the classic mosaic look).
+      const blocks = Math.max(4, Math.round(48 * (1 - amount * 0.85)));
+      const bw = Math.max(1, Math.round(w / blocks));
+      const bh = Math.max(1, Math.round(h / blocks));
+      const tmp = typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(bw, bh)
+        : document.createElement('canvas');
+      tmp.width = bw;
+      tmp.height = bh;
+      const tctx = tmp.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      if (!tctx) return;
+      tctx.drawImage(ctx.canvas, 0, 0, w, h, 0, 0, bw, bh);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(tmp, 0, 0, bw, bh, 0, 0, w, h);
+      ctx.imageSmoothingEnabled = true;
+    }
+  } catch {
+    /* ignore: read-back can fail on a tainted canvas */
+  }
+}
+
+/**
  * The set of transition kinds the Properties panel can offer, with the parameters
  * each one actually respects. Used to build the control UI so we never show a
  * slider that does nothing.

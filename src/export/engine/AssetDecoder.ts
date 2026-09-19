@@ -123,16 +123,38 @@ export class AssetDecoder {
     this.lastRequestedTime = -1;
   }
 
+  /**
+   * Restart the sequential iterator AT the requested source time.
+   *
+   * Transition overlap makes the compositor ask for two DIFFERENT source times
+   * from one shared decoder within the same output frame (outgoing clip near
+   * its trim end, incoming clip near its start). When the second request lands
+   * before the first, a plain resetIterator() would restart from position 0 and
+   * walk forward — re-decoding the entire video EVERY transition frame, which
+   * stalled exports at the transition. canvases(startTimestamp) repositions the
+   * iterator directly, so the next in-order request continues from here.
+   */
+  private restartIteratorAt(timestampSeconds: number): void {
+    try { this.iterator?.return?.(); } catch {}
+    this.iterator = this.sink && typeof (this.sink as any).canvases === 'function'
+      ? (this.sink as any).canvases(timestampSeconds)[Symbol.asyncIterator]()
+      : null;
+    this.current = null;
+    this.lookahead = null;
+    this.lastRequestedTime = timestampSeconds;
+  }
+
   private async decodeSequential(timestampSeconds: number): Promise<CanvasImageSource | null> {
     if (!this.iterator) {
       const wrapped = await this.sink!.getCanvas(timestampSeconds);
       return wrapped?.canvas || null;
     }
 
-    // A media item may be reused later with a source-time reset. Restart only
-    // for genuine backwards movement; normal forward playback never seeks.
+    // A media item may be reused later with a source-time reset. A backwards
+    // request (transition overlap) must NOT walk from position 0 — restart the
+    // iterator at the requested time instead.
     if (this.lastRequestedTime >= 0 && timestampSeconds + 0.0005 < this.lastRequestedTime) {
-      this.resetIterator();
+      this.restartIteratorAt(timestampSeconds);
     }
     this.lastRequestedTime = timestampSeconds;
 

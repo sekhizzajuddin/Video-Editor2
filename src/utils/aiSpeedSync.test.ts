@@ -4,10 +4,15 @@ import {
   buildAnchorsFromWordTimings,
   detectTtsExtraSentences,
   GEMINI_SPEED_SYNC_MODELS,
+  GROQ_WHISPER_MODELS,
+  GROQ_REASONING_MODELS,
   runGeminiSpeedSync,
+  runGroqSpeedSync,
+  transcribeWithGroqWhisper,
   SyncAnchor,
 } from './aiSpeedSync';
 import { TimelineClip } from '@/types';
+import { useEditorStore } from '@/store/editorStore';
 
 describe('aiSpeedSync', () => {
   it('has the correct Gemini model fallback sequence per user specification', () => {
@@ -815,6 +820,131 @@ describe('aiSpeedSync', () => {
       expect(detection.hasMoreSentences).toBe(true);
       expect(detection.matchingCutoffTime).toBeGreaterThan(1.8);
       expect(detection.matchingCutoffTime).toBeLessThan(3.0);
+    });
+  });
+
+  describe('Groq Whisper & GPT-OSS-120b Speed Sync', () => {
+    it('defines the correct Groq Whisper and reasoning models', () => {
+      expect(GROQ_WHISPER_MODELS).toContain('whisper-large-v3-turbo');
+      expect(GROQ_WHISPER_MODELS).toContain('whisper-large-v3');
+      expect(GROQ_REASONING_MODELS).toContain('openai/gpt-oss-120b');
+      expect(GROQ_REASONING_MODELS).toContain('llama-3.3-70b-versatile');
+      expect(GROQ_REASONING_MODELS).toContain('llama-3.1-8b-instant');
+    });
+
+    it('transcribeWithGroqWhisper parses verbose_json words and segments accurately', async () => {
+      const mockBlob = new Blob(['dummy audio'], { type: 'audio/wav' });
+      const mockResponse = {
+        text: 'Hello world. This is a test.',
+        words: [
+          { word: 'Hello', start: 0.12, end: 0.45 },
+          { word: 'world.', start: 0.50, end: 0.85 },
+          { word: 'This', start: 1.10, end: 1.30 },
+          { word: 'is', start: 1.32, end: 1.45 },
+          { word: 'a', start: 1.48, end: 1.55 },
+          { word: 'test.', start: 1.60, end: 1.95 },
+        ],
+        segments: [
+          { id: 0, text: 'Hello world.', start: 0.12, end: 0.85 },
+          { id: 1, text: 'This is a test.', start: 1.10, end: 1.95 },
+        ],
+        duration: 2.0,
+      };
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as any);
+
+      useEditorStore.getState().updateSettings({ groqApiKey: 'test-groq-key' });
+
+      try {
+        const result = await transcribeWithGroqWhisper(mockBlob);
+        expect(result.words.length).toBe(6);
+        expect(result.words[0].word).toBe('Hello');
+        expect(result.words[0].time).toBe(0.12);
+        expect(result.sentences.length).toBe(2);
+        expect(result.sentences[0].text).toBe('Hello world.');
+        expect(result.sentences[0].startTime).toBe(0.12);
+        expect(result.sentences[0].endTime).toBe(0.85);
+        expect(result.model).toBe('whisper-large-v3-turbo');
+      } finally {
+        globalThis.fetch = originalFetch;
+        useEditorStore.getState().updateSettings({ groqApiKey: '' });
+      }
+    });
+
+    it('runGroqSpeedSync combines Whisper transcription with Groq reasoning verdict', async () => {
+      const mockVideoBlob = new Blob(['dummy video audio'], { type: 'audio/wav' });
+      const mockTtsBlob = new Blob(['dummy tts audio'], { type: 'audio/wav' });
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/audio/transcriptions')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              text: 'Prime cause of action.',
+              words: [
+                { word: 'Prime', start: 0.2, end: 0.5 },
+                { word: 'cause', start: 0.6, end: 0.9 },
+                { word: 'of', start: 0.95, end: 1.1 },
+                { word: 'action.', start: 1.15, end: 1.6 },
+              ],
+              segments: [
+                { id: 0, text: 'Prime cause of action.', start: 0.2, end: 1.6 },
+              ],
+              duration: 2.0,
+            }),
+          } as any;
+        }
+        if (url.includes('/chat/completions')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      verdict: {
+                        ttsHasSpeech: true,
+                        videoHasSpeech: true,
+                        sameContent: false,
+                        reason: 'Separate TTS voiceover with Whisper word-level timing',
+                      },
+                      ttsHasMoreSentences: false,
+                      summary: 'Synced with Groq Whisper and openai/gpt-oss-120b',
+                      anchors: [
+                        { videoTime: 0.2, ttsTime: 0.2, phrase: 'Prime', targetSpeed: 1.0 },
+                        { videoTime: 1.15, ttsTime: 1.15, phrase: 'action.', targetSpeed: 1.0 },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            }),
+          } as any;
+        }
+        return { ok: false, status: 404 } as any;
+      });
+
+      useEditorStore.getState().updateSettings({ groqApiKey: 'test-groq-key' });
+
+      try {
+        const result = await runGroqSpeedSync(mockVideoBlob, mockTtsBlob, 2.0, 2.0);
+        expect(result.successfulModel).toContain('Groq Whisper');
+        expect(result.successfulModel).toContain('openai/gpt-oss-120b');
+        expect(result.verdict?.sameContent).toBe(false);
+        expect(result.videoWords?.length).toBe(4);
+        expect(result.ttsWords?.length).toBe(4);
+      } finally {
+        globalThis.fetch = originalFetch;
+        useEditorStore.getState().updateSettings({ groqApiKey: '' });
+      }
     });
   });
 });
