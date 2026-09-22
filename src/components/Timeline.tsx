@@ -6,7 +6,7 @@
 //   src/mobile/components/MobileTimeline.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -14,7 +14,6 @@ import {
   RULER_HEIGHT,
   getTrackTop,
   getTrackHeight,
-  formatCentisecondTime,
   useTimelineState,
   useTimelineScroll,
   useVoiceoverRecording,
@@ -188,81 +187,15 @@ export function Timeline() {
 
   const sortedMarkers = useMemo(() => [...markers].sort((a, b) => a.time - b.time), [markers]);
 
-  const rulerData = useMemo(() => {
-    const markersData: { time: number; label: string; type: 'major' | 'medium' | 'minor' }[] = [];
-
-    let majorInterval = 1.0;
-    let mediumInterval = 0.5;
-    let minorInterval = 0.1;
-    let labelMedium = false;
-
-    if (zoomLevel >= 300) {
-      majorInterval = 1.0;
-      mediumInterval = 0.5;
-      minorInterval = 0.05; // 50ms sub-bars when zoomed in
-      labelMedium = false;
-    } else if (zoomLevel >= 150) {
-      majorInterval = 1.0;
-      mediumInterval = 0.5;
-      minorInterval = 0.1; // 100ms sub-bars
-      labelMedium = false;
-    } else if (zoomLevel >= 60) {
-      majorInterval = 1.0;
-      mediumInterval = 0.5;
-      minorInterval = 0.1; // 100ms sub-bars
-      labelMedium = false;
-    } else if (zoomLevel >= 30) {
-      majorInterval = 2.0;
-      mediumInterval = 1.0;
-      minorInterval = 0.5;
-      labelMedium = false;
-    } else if (zoomLevel >= 14) {
-      majorInterval = 5.0;
-      mediumInterval = 2.5;
-      minorInterval = 1.0;
-      labelMedium = false;
-    } else if (zoomLevel >= 6) {
-      majorInterval = 10.0;
-      mediumInterval = 5.0;
-      minorInterval = 2.0;
-      labelMedium = false;
-    } else {
-      majorInterval = 30.0;
-      mediumInterval = 15.0;
-      minorInterval = 5.0;
-      labelMedium = false;
-    }
-
-    const maxTime = totalDuration + 60;
-    const minorCentis = Math.max(1, Math.round(minorInterval * 100));
-    const mediumCentis = Math.max(1, Math.round(mediumInterval * 100));
-    const majorCentis = Math.max(1, Math.round(majorInterval * 100));
-    const maxCentis = Math.round(maxTime * 100);
-
-    for (let c = 0; c <= maxCentis; c += minorCentis) {
-      const time = c / 100;
-      let type: 'major' | 'medium' | 'minor' = 'minor';
-      let label = '';
-
-      if (c % majorCentis === 0) {
-        type = 'major';
-        label = formatCentisecondTime(time);
-      } else if (c % mediumCentis === 0) {
-        type = 'medium';
-        if (labelMedium) {
-          label = formatCentisecondTime(time);
-        }
-      } else {
-        type = 'minor';
-      }
-
-      markersData.push({ time, label, type });
-    }
-
-    return markersData;
-  }, [zoomLevel, totalDuration]);
+  // P2 PERF: the full whole-timeline rulerData memo (180k–361k tick objects for a
+  // 5-hour video, rebuilt per zoom step) was removed — TimelineRuler now generates
+  // ticks for the visible window only (see TimelineRuler.tsx).
 
   const timelineWidth = (totalDuration + 30) * zoomLevel;
+
+  // P2 PERF: stable callback — the inline lambda defeated PipFloatingWindow's
+  // React.memo on every Timeline render.
+  const closePipWindow = useCallback(() => setActivePipWindow(null), [setActivePipWindow]);
 
   // Universal click-outside listener to deselect Speed Frame
   useEffect(() => {
@@ -356,7 +289,6 @@ export function Timeline() {
               outPoint={outPoint}
               sortedMarkers={sortedMarkers}
               beatMarkers={beatMarkers}
-              rulerData={rulerData}
               seek={seek}
               setMarkerContextMenu={setMarkerContextMenu}
               handleRulerPointerDown={dragHandlers.handleRulerPointerDown}
@@ -372,7 +304,7 @@ export function Timeline() {
             >
               <div className="relative" style={{ width: `${timelineWidth}px`, minHeight: '100%' }}>
                 {/* Grid lines aligned with ruler markers */}
-                <TimelineGridLines rulerData={rulerData} zoomLevel={zoomLevel} />
+                <TimelineGridLines zoomLevel={zoomLevel} />
 
                 {/* In-point vertical dashed line */}
                 {inPoint !== null && (
@@ -478,7 +410,11 @@ export function Timeline() {
                   const mediaType = dropPreview.mediaType || 'video';
                   const colors = CLIP_COLORS[mediaType] || CLIP_COLORS.video;
                   const hoveredTrackIdx = tracks.findIndex((t) => t.id === hoveredTrackId);
-                  const activeTrackIdx = hoveredTrackIdx >= 0 ? hoveredTrackIdx : dropPreview.trackIdx;
+                  // P3 FIX: PIP tracks aren't in the main tracks array — feeding a
+                  // PIP-local index into getTrackTop(main tracks) landed the ghost
+                  // on the wrong main track. Skip the ghost for PIP hovers.
+                  if (hoveredTrackIdx === -1) return null;
+                  const activeTrackIdx = hoveredTrackIdx;
                   return (
                     <div
                       className={`absolute rounded pointer-events-none z-40 border-2 border-dashed shadow-lg opacity-70 ${colors.bg} ${colors.border ?? 'border-white/30'}`}
@@ -504,7 +440,7 @@ export function Timeline() {
                     pipWindow={pipData.activePip}
                     parentClip={pipData.parentClip}
                     zoomLevel={zoomLevel}
-                    onClose={() => setActivePipWindow(null)}
+                    onClose={closePipWindow}
                     tracks={tracks}
                     selectedClipIds={selectedClipIds}
                     draggingClipId={draggingClipId}

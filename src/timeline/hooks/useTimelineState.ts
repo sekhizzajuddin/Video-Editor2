@@ -160,6 +160,19 @@ export function useTimelineState() {
     }
   }, []);
 
+  // P1 SAFETY: If the Timeline unmounts mid-gesture (view switch, hot remount),
+  // endTransactionSafe() never runs and the store transaction stays open forever —
+  // saveSnapshot() would silently skip every future snapshot (undo broken).
+  // Commit whatever the gesture changed as one snapshot on unmount.
+  useEffect(() => {
+    return () => {
+      if (transactionActiveRef.current) {
+        transactionActiveRef.current = false;
+        useEditorStore.getState().endTransaction();
+      }
+    };
+  }, []);
+
   // AI SFX Generator States
   const [sfxModalClipId, setSfxModalClipId] = useState<string | null>(null);
   const [sfxCategory, setSfxCategory] = useState<string>('explosion');

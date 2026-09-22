@@ -439,6 +439,33 @@ export function synthesizeProceduralSFX(category: string, duration: number): Pro
           osc.start(crackleTime);
           osc.stop(crackleTime + 0.02);
         }
+      } else {
+        // P4 FIX: unknown category fell through every branch → a SILENT empty
+        // buffer was rendered and placed on the timeline with no warning.
+        // Fall back to a generic swoosh so the SFX is at least audible.
+        const bufferSize = Math.max(1, sampleRate * duration);
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const noiseFilter = offlineCtx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.setValueAtTime(1400, 0);
+        noiseFilter.Q.setValueAtTime(0.8, 0);
+
+        const noiseGain = offlineCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.001, 0);
+        noiseGain.gain.linearRampToValueAtTime(0.5, duration * 0.2);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, duration);
+
+        noiseSource.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(offlineCtx.destination);
+        noiseSource.start(0);
       }
 
       const renderedBuffer = await offlineCtx.startRendering();

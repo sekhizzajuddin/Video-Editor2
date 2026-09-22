@@ -4,6 +4,7 @@ import type { TimelineClip, ParticleEffectType, ClipParticleSettings } from '@/t
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
 import { toast } from 'sonner';
 import { generateId } from '../timelineUtils';
+import { getTrackAtY } from '../trackGeometry';
 import { DEFAULT_TRACK_HEIGHT, THIN_TRACK_HEIGHT } from '../timelineConstants';
 import type { TimelineState } from './useTimelineState';
 
@@ -42,7 +43,27 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         // Only return early if track is missing AND we are dropping something that strictly requires a track (like transitions, FX, etc.)
         // Media items, files, and templates can be dropped on empty space to auto-create tracks.
         const hasTemplate = e.dataTransfer.getData('application/procut-template');
-        if (!hasTemplate) return;
+        if (!hasTemplate) {
+          // P3 FIX: clear the stale ghost/highlight — the drop ended here but the
+          // gray highlight and ghost clip used to remain rendered.
+          setHoveredTrackId(null);
+          setDropPreview(null);
+          return;
+        }
+      }
+
+      // P3 FIX: container-level drop (empty space) used to discard the drop x
+      // position entirely — addClip auto-appended to the END of the first valid
+      // track. Resolve the hovered track from the Y coordinate instead.
+      if (!track && trackId === '') {
+        const container = (e.currentTarget as HTMLElement);
+        const containerRect = container.getBoundingClientRect();
+        const relY = e.clientY - containerRect.top + container.scrollTop;
+        const idx = getTrackAtY(state.tracks, relY);
+        const resolvedTrack = idx >= 0 && idx < state.tracks.length ? state.tracks[idx] : null;
+        if (resolvedTrack && !resolvedTrack.locked) {
+          track = resolvedTrack;
+        }
       }
 
       // ── Transition drop → apply to closest clip boundary ──
@@ -65,13 +86,6 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
             isStart = true;
           }
           const distEnd = Math.abs(dropTime - (c.startTime + c.duration));
-          // Use <= here so if they are exactly adjacent, we prefer applying transitionIn to the incoming clip (right clip)
-          if (distEnd <= minDistance && distEnd < 2.0) { 
-            // Actually, for an intersection, applying transitionIn to the next clip is standard for 'fade in'
-            // We'll let the logic prefer the second clip's start if they are exactly equal by using < for distEnd,
-            // Wait, if we use < it prefers the first one. If we use <= it prefers the second one.
-            // Let's use < so it just picks whichever is strictly closer.
-          }
           if (distEnd < minDistance) {
             minDistance = distEnd;
             closestClip = c;
@@ -79,7 +93,10 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
         }
 
-        if (closestClip && minDistance < 5.0) { // Apply if dropped within 5 seconds of a boundary
+        // P3 FIX: threshold scaled in PIXELS, not seconds — the old 5s threshold
+        // meant 2000px at zoom 400 (dropping "anywhere nearby" attached) vs
+        // 100px at zoom 20.
+        if (closestClip && minDistance * zoomLevel < 40) { // Apply if dropped within ~40px of a boundary
           const nameLower = transitionName.toLowerCase();
           const type = nameLower.includes('dissolve') ? 'dissolve'
                      : nameLower.includes('wipe') ? 'wipe'
@@ -123,7 +140,8 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
           const x = e.clientX - rect.left;
           const y = e.clientY - rect.top;
-          const dropTime = x / zoomLevel;
+          // P3 FIX: clamp — this was the only unclamped x / zoomLevel division
+          const dropTime = Math.max(0, x / zoomLevel);
           
           const hitClip = track.clips.find(
             (c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration
@@ -353,15 +371,32 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
 
         (async () => {
           const { probeFile } = await import('@/utils/mediaProbe');
+          // P3 FIX: the OS-file drop path performed ZERO validation — dropping a
+          // .exe/.docx created a garbage "image" clip with a success toast. Same
+          // whitelist as the MediaPanel import.
+          const supportedExtensions = [
+            '.mp4', '.webm', '.ogg', '.mov', '.mkv',
+            '.mp3', '.wav', '.m4a', '.aac',
+            '.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg',
+            '.cube'
+          ];
           for (const file of files) {
+            const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+            if (!supportedExtensions.includes(ext)) {
+              toast.error(`Unsupported file type: ${file.name}`);
+              continue;
+            }
+            let mediaItem: import('@/types').MediaItem | null = null;
             try {
-              const mediaItem = await probeFile(file);
+              mediaItem = await probeFile(file);
               useEditorStore.getState().addMedia(mediaItem, file);
               const isText = mediaItem.type === 'text';
               const newClip: TimelineClip = {
                 id: generateId(),
                 mediaId: mediaItem.id,
-                trackId,
+                // P3 FIX: use the resolved track (container-level drops used to
+                // pass trackId:'' and auto-append to the first valid track)
+                trackId: track?.id || trackId,
                 startTime,
                 duration: isText ? 3 : (mediaItem.type === 'image' ? 5 : mediaItem.duration),
                 trimStart: 0,
@@ -375,6 +410,11 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
               toast.success(`Imported: ${file.name}`);
             } catch (err) {
               console.error('Failed to import dropped file', err);
+              // P1 FIX: if addMedia failed, probeFile's object URL still pins the
+              // whole file blob in memory — revoke it.
+              if (mediaItem?.url && mediaItem.url.startsWith('blob:')) {
+                try { URL.revokeObjectURL(mediaItem.url); } catch { /* noop */ }
+              }
               toast.error(`Failed to import ${file.name}`);
             }
           }
@@ -386,10 +426,19 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
 
       // ── Media Item Drop ──
       const mediaId = e.dataTransfer.getData('application/procut-media');
-      if (!mediaId) return;
+      if (!mediaId) {
+        // P3 FIX: clear the stale ghost/highlight on this early return
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        return;
+      }
 
       const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === mediaId);
-      if (!media) return;
+      if (!media) {
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        return;
+      }
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -400,7 +449,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const newClip: TimelineClip = {
         id: generateId(),
         mediaId,
-        trackId,
+        // P3 FIX: use the resolved track (container-level drops used to pass
+        // trackId:'' and auto-append to the first valid track)
+        trackId: track?.id || trackId,
         startTime,
         duration: isText ? 3 : (media.type === 'image' ? 5 : media.duration),
         trimStart: 0,

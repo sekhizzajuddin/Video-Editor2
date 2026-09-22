@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { Gauge, Check, Repeat, X, RotateCcw, ChevronsLeftRight } from 'lucide-react';
+import { useWindowDragCleanup } from '../useWindowDragCleanup';
 
 interface DynamicStretchOverlayProps {
   zoomLevel: number;
@@ -73,6 +74,7 @@ function DynamicStretchContent({
   onApply,
   onCancel,
 }: DynamicStretchContentProps) {
+  const windowDragCleanupRef = useWindowDragCleanup();
   const { markStart, markEnd, isConfirmed, originalRegionDuration, stretchedDuration, isLoopingRegion, maintainDuration } =
     dynamicStretch;
 
@@ -105,15 +107,18 @@ function DynamicStretchContent({
         onUpdateMark({ markStart: newStart });
       };
 
-      const onPointerUp = () => {
+      const cleanupListeners = () => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        windowDragCleanupRef.current = null;
       };
+      const onPointerUp = cleanupListeners;
+      windowDragCleanupRef.current = cleanupListeners;
 
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
     },
-    [markStart, markEnd, clipStart, zoomLevel, onUpdateMark]
+    [markStart, markEnd, clipStart, zoomLevel, onUpdateMark, windowDragCleanupRef]
   );
 
   // ── Drag Right Boundary (Out point) in Mark Mode ──
@@ -130,15 +135,18 @@ function DynamicStretchContent({
         onUpdateMark({ markEnd: newEnd });
       };
 
-      const onPointerUp = () => {
+      const cleanupListeners = () => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        windowDragCleanupRef.current = null;
       };
+      const onPointerUp = cleanupListeners;
+      windowDragCleanupRef.current = cleanupListeners;
 
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
     },
-    [markStart, markEnd, clipEnd, zoomLevel, onUpdateMark]
+    [markStart, markEnd, clipEnd, zoomLevel, onUpdateMark, windowDragCleanupRef]
   );
 
   // ── Drag Body to slide the mark window across the clip ──
@@ -157,15 +165,18 @@ function DynamicStretchContent({
         onUpdateMark({ markStart: newStart, markEnd: newStart + curDur });
       };
 
-      const onPointerUp = () => {
+      const cleanupListeners = () => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        windowDragCleanupRef.current = null;
       };
+      const onPointerUp = cleanupListeners;
+      windowDragCleanupRef.current = cleanupListeners;
 
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
     },
-    [isConfirmed, markStart, markEnd, clipStart, clipEnd, zoomLevel, onUpdateMark]
+    [isConfirmed, markStart, markEnd, clipStart, clipEnd, zoomLevel, onUpdateMark, windowDragCleanupRef]
   );
 
   // ── Drag Stretch Handle in Confirmed Mode (Squeeze / Extend) ──
@@ -182,15 +193,18 @@ function DynamicStretchContent({
         onUpdateDrag(newDuration);
       };
 
-      const onPointerUp = () => {
+      const cleanupListeners = () => {
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
+        windowDragCleanupRef.current = null;
       };
+      const onPointerUp = cleanupListeners;
+      windowDragCleanupRef.current = cleanupListeners;
 
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
     },
-    [stretchedDuration, zoomLevel, onUpdateDrag]
+    [stretchedDuration, zoomLevel, onUpdateDrag, windowDragCleanupRef]
   );
 
   return (

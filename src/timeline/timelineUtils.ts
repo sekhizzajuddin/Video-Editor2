@@ -10,10 +10,15 @@ import type { TimelineTrack } from '@/types';
 export function formatCentisecondTime(time: number): string {
   if (isNaN(time) || time < 0) time = 0;
   const totalCentis = Math.round(time * 100);
-  const mins = Math.floor(totalCentis / 6000);
+  // P4 FIX: hours field — a 5-hour timeline used to render as "300:00:00".
+  const hours = Math.floor(totalCentis / 360000);
+  const mins = Math.floor((totalCentis % 360000) / 6000);
   const secs = Math.floor((totalCentis % 6000) / 100);
   const centis = totalCentis % 100;
 
+  if (hours > 0) {
+    return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
   const secsStr = mins > 0 ? secs.toString().padStart(2, '0') : secs.toString();
   const centisStr = centis.toString().padStart(2, '0');
 

@@ -1,7 +1,7 @@
-import { useCallback } from 'react';
-import { useEditorStore, findClipDeep } from '@/store/editorStore';
+import { useCallback, useRef } from 'react';
+import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
-import type { TimelineClip, TimelineTrack } from '@/types';
+import type { TimelineClip } from '@/types';
 import { synthesizeProceduralSFX } from '../sfxSynth';
 import { parseTransliteratedResponse } from '../timelineUtils';
 import type { TimelineState } from './useTimelineState';
@@ -72,6 +72,27 @@ export function useTimelineAI({ timelineState }: UseTimelineAIDeps) {
     setIsTranscribing,
   } = timelineState;
 
+  // P1 FIX: track the audition Audio element + blob URL — repeated auditions used
+  // to leak blob URLs (never revoked) and overlap concurrent playback.
+  const auditionAudioRef = useRef<HTMLAudioElement | null>(null);
+  const auditionAudioUrlRef = useRef<string | null>(null);
+
+  // P3 FIX: map a clip's timeline start to its ABSOLUTE position — PIP clips
+  // live in PIP-local time; placing derived clips (SFX) at the raw startTime
+  // put them at the wrong main-timeline position.
+  const getClipAbsoluteStart = useCallback((clip: TimelineClip): number => {
+    const state = useEditorStore.getState();
+    const found = findClipDeep(state, clip.id);
+    if (found?.isPip && found.pipId) {
+      const pip = (state.pipWindows || {})[found.pipId];
+      if (pip) {
+        const parentClip = findClipInTracks(state.tracks, pip.parentClipId, state.pipWindows || {});
+        return (parentClip?.startTime ?? 0) + (pip.relativeStartTime || 0) + clip.startTime;
+      }
+    }
+    return clip.startTime;
+  }, []);
+
   const handleOpenSfxGenerator = useCallback(async (clipId: string) => {
     const targetClip = findClipDeep(useEditorStore.getState(), clipId)?.clip || null;
     if (!targetClip) return;
@@ -122,11 +143,28 @@ Return your response ONLY as a JSON object with these two fields:
 }`
         );
 
-        const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed.category) setSfxCategory(parsed.category);
-          if (parsed.name) setSfxName(parsed.name);
+        // P3 FIX: the non-greedy regex grabbed the NEAREST closing brace — prose
+        // or braces inside string fields broke JSON.parse silently (defaults were
+        // then shown as if AI recommended them). Greedy bracket matching from the
+        // first '{' is robust.
+        const jsonStart = responseText.indexOf('{');
+        if (jsonStart !== -1) {
+          let depth = 0;
+          let jsonEnd = -1;
+          for (let i = jsonStart; i < responseText.length; i++) {
+            if (responseText[i] === '{') depth++;
+            else if (responseText[i] === '}') {
+              depth--;
+              if (depth === 0) { jsonEnd = i; break; }
+            }
+          }
+          if (jsonEnd !== -1) {
+            try {
+              const parsed = JSON.parse(responseText.slice(jsonStart, jsonEnd + 1));
+              if (parsed.category) setSfxCategory(parsed.category);
+              if (parsed.name) setSfxName(parsed.name);
+            } catch { /* keep defaults */ }
+          }
         }
       }
     } catch (err) {
@@ -139,14 +177,11 @@ Return your response ONLY as a JSON object with these two fields:
   const handleGenerateSFX = useCallback(async () => {
     if (!sfxModalClipId) return;
 
-    let targetClip: TimelineClip | null = null;
-    for (const track of tracks) {
-      const found = track.clips.find(c => c.id === sfxModalClipId);
-      if (found) {
-        targetClip = found;
-        break;
-      }
-    }
+    // P3 FIX: search PIP windows too — handleOpenSfxGenerator uses findClipDeep
+    // (so the modal opens for PIP clips) but this only searched top-level tracks,
+    // making "Generate & Add" silently no-op for PIP clips.
+    const foundDeep = findClipDeep(useEditorStore.getState(), sfxModalClipId);
+    const targetClip = foundDeep?.clip || null;
     if (!targetClip) return;
 
     setIsSynthesizingSfx(true);
@@ -191,10 +226,11 @@ Return your response ONLY as a JSON object with these two fields:
       }
 
       const newAudioClip = {
-        id: `clip_sfx_${Math.random().toString(36).substr(2, 9)}`,
+        id: mediaId,
         mediaId: mediaId,
         trackId: audioTrack.id,
-        startTime: targetClip.startTime,
+        // P3 FIX: absolute position — PIP clips live in PIP-local time
+        startTime: getClipAbsoluteStart(targetClip),
         duration: sfxDuration,
         trimStart: 0,
         trimEnd: 0,
@@ -218,13 +254,32 @@ Return your response ONLY as a JSON object with these two fields:
     } finally {
       setIsSynthesizingSfx(false);
     }
-  }, [sfxModalClipId, sfxCategory, sfxDuration, sfxName, tracks, addClip, setIsSynthesizingSfx, setSfxModalClipId]);
+  }, [sfxModalClipId, sfxCategory, sfxDuration, sfxName, tracks, addClip, setIsSynthesizingSfx, setSfxModalClipId, getClipAbsoluteStart]);
 
   const handleAuditionSFX = useCallback(async () => {
     try {
+      // P1 FIX: stop + revoke the previous audition first — repeated clicks used
+      // to leak blob URLs and overlap concurrent playback.
+      if (auditionAudioRef.current) {
+        try { auditionAudioRef.current.pause(); } catch { /* already stopped */ }
+        auditionAudioRef.current = null;
+      }
+      if (auditionAudioUrlRef.current) {
+        URL.revokeObjectURL(auditionAudioUrlRef.current);
+        auditionAudioUrlRef.current = null;
+      }
       const blob = await synthesizeProceduralSFX(sfxCategory, sfxDuration);
       const audioUrl = URL.createObjectURL(blob);
       const audio = new Audio(audioUrl);
+      auditionAudioRef.current = audio;
+      auditionAudioUrlRef.current = audioUrl;
+      audio.onended = () => {
+        if (auditionAudioUrlRef.current === audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+          auditionAudioUrlRef.current = null;
+        }
+        if (auditionAudioRef.current === audio) auditionAudioRef.current = null;
+      };
       audio.play().catch(() => {});
     } catch (err) {
       console.error('Failed to audition SFX:', err);
@@ -279,35 +334,51 @@ Return your response ONLY as a JSON object with these two fields:
         let prevFrameData: Uint8ClampedArray | null = null;
         const motionDiffs: { time: number; diff: number }[] = [];
 
-        for (let time = 0; time < clipDur; time += step) {
-          video.currentTime = time;
-          await new Promise((resolve) => {
-            video.onseeked = resolve;
-          });
+        // P3 FIX: wrap the scan loop in try/finally so the analysis video element
+        // is always released (it lives in the shared media pool container).
+        try {
+          for (let time = 0; time < clipDur; time += step) {
+            video.currentTime = time;
+            // P3 FIX: a stalled seek used to await forever — isAnalyzingAutoCue
+            // stayed true, the X/Cancel buttons were disabled, and the user was
+            // trapped (only a reload escaped). Timeout each seek.
+            await new Promise((resolve) => {
+              let done = false;
+              const finish = () => {
+                if (done) return;
+                done = true;
+                video.onseeked = null;
+                clearTimeout(timer);
+                resolve(null);
+              };
+              const timer = setTimeout(finish, 2000);
+              video.onseeked = finish;
+            });
 
-          ctx.drawImage(video, 0, 0, 32, 18);
-          const frameData = ctx.getImageData(0, 0, 32, 18).data;
+            ctx.drawImage(video, 0, 0, 32, 18);
+            const frameData = ctx.getImageData(0, 0, 32, 18).data;
 
-          if (prevFrameData) {
-            let sumDiff = 0;
-            for (let i = 0; i < frameData.length; i += 4) {
-              sumDiff += Math.abs(frameData[i] - prevFrameData[i]) +
-                         Math.abs(frameData[i+1] - prevFrameData[i+1]) +
-                         Math.abs(frameData[i+2] - prevFrameData[i+2]);
+            if (prevFrameData) {
+              let sumDiff = 0;
+              for (let i = 0; i < frameData.length; i += 4) {
+                sumDiff += Math.abs(frameData[i] - prevFrameData[i]) +
+                           Math.abs(frameData[i+1] - prevFrameData[i+1]) +
+                           Math.abs(frameData[i+2] - prevFrameData[i+2]);
+              }
+              const avgDiff = sumDiff / (32 * 18 * 3);
+              motionDiffs.push({ time, diff: avgDiff });
             }
-            const avgDiff = sumDiff / (32 * 18 * 3);
-            motionDiffs.push({ time, diff: avgDiff });
+
+            prevFrameData = frameData;
+            setAutoCueProgress(Math.floor((time / clipDur) * 90));
           }
-
-          prevFrameData = frameData;
-          setAutoCueProgress(Math.floor((time / clipDur) * 90));
+        } finally {
+          // Release the analysis element — it lives in the shared media pool
+          // container, so it must clean itself up when done.
+          video.src = '';
+          video.load();
+          video.remove();
         }
-
-        // Release the analysis element — it lives in the shared media pool
-        // container, so it must clean itself up when done.
-        video.src = '';
-        video.load();
-        video.remove();
 
         if (motionDiffs.length > 0) {
           const diffValues = motionDiffs.map(m => m.diff);
@@ -363,9 +434,13 @@ Return your response ONLY as a JSON array of objects:
         );
         setAutoCueProgress(80);
 
-        const jsonMatch = responseText.match(/\[[\s\S]*?\]/);
-        if (jsonMatch) {
-          cuePoints = JSON.parse(jsonMatch[0]);
+        // P3 FIX: wire in the robust parser (markdown-fence stripping + greedy
+        // bracket matching — already written in timelineUtils, was a dead import).
+        // The non-greedy regex grabbed the nearest ']' and failed on prose with
+        // brackets, surfacing a misleading "No action points detected" error.
+        const parsedCues = parseTransliteratedResponse(String(responseText ?? ''));
+        if (parsedCues && Array.isArray(parsedCues)) {
+          cuePoints = parsedCues;
         }
       }
 
@@ -386,7 +461,9 @@ Return your response ONLY as a JSON array of objects:
           const cue = cuePoints[i];
           const category = cue.category || 'swoosh';
           const duration = Math.max(0.1, Number(cue.duration) || 1.0);
-          const timeOffset = Number(cue.time) || 0;
+          // P3 FIX: clamp AI-returned times to the clip — an AI time beyond the
+          // clip duration placed SFX past the clip end.
+          const timeOffset = Math.min(Math.max(0, Number(cue.time) || 0), Math.max(0, targetClip.duration - duration));
           const name = cue.name || 'AI SFX';
 
           const blob = await synthesizeProceduralSFX(category, duration);
@@ -424,7 +501,8 @@ Return your response ONLY as a JSON array of objects:
             id: `clip_sfx_cue_${Math.random().toString(36).substr(2, 9)}`,
             mediaId: mediaId,
             trackId: audioTrack.id,
-            startTime: targetClip.startTime + timeOffset,
+            // P3 FIX: absolute position — PIP clips live in PIP-local time
+            startTime: getClipAbsoluteStart(targetClip) + timeOffset,
             duration: duration,
             trimStart: 0,
             trimEnd: 0,
@@ -450,7 +528,7 @@ Return your response ONLY as a JSON array of objects:
       setIsAnalyzingAutoCue(false);
       setAutoCueProgress(0);
     }
-  }, [sfxAutoCueClipId, sfxAutoCueMode, sfxUserDescription, tracks, mediaLibrary, addClip, setIsAnalyzingAutoCue, setAutoCueProgress, setSfxAutoCueClipId, setSfxUserDescription]);
+  }, [sfxAutoCueClipId, sfxAutoCueMode, sfxUserDescription, tracks, mediaLibrary, addClip, setIsAnalyzingAutoCue, setAutoCueProgress, setSfxAutoCueClipId, setSfxUserDescription, getClipAbsoluteStart]);
 
   const handleGenerateSubtitles = useCallback(async (clipId: string, mode: 'standard' | 'dynamic') => {
     const targetClip = findClipDeep(useEditorStore.getState(), clipId)?.clip || null;
@@ -469,7 +547,14 @@ Return your response ONLY as a JSON array of objects:
       if (!response.ok) throw new Error('Failed to retrieve clip media blob.');
       const blob = await response.blob();
 
-      const file = new File([blob], 'audio.mp3', { type: blob.type || 'audio/mp3' });
+      // P3 FIX: the file was always named 'audio.mp3' with the RAW blob type —
+      // for a video media item this uploaded the entire video (not extracted
+      // audio) under a misleading name. Keep name/type consistent and honest.
+      const file = new File(
+        [blob],
+        mediaItem.type === 'video' ? 'clip_media_track.webm' : 'clip_audio.webm',
+        { type: blob.type || 'audio/webm' }
+      );
 
       const puter = (window as any).puter;
       if (!puter) {
@@ -500,7 +585,14 @@ Return your response ONLY as a JSON array of objects:
 
       useEditorStore.getState().startTransaction();
       try {
+        // P3 FIX: Whisper timestamps are relative to the FULL media start — the
+        // timeline position maps to clipStart + (t − trimStart) / speed. The old
+        // math (clipStart + t) offset subtitles later by trimStart seconds on any
+        // trimmed clip and ignored speed entirely.
         const clipStart = targetClip.startTime;
+        const trimOffset = targetClip.trimStart || 0;
+        const clipSpeed = Math.max(0.01, targetClip.speed || 1);
+        const toTimeline = (t: number) => clipStart + (t - trimOffset) / clipSpeed;
 
         if (mode === 'standard') {
           const maxCharLimit = 36;
@@ -533,8 +625,9 @@ Return your response ONLY as a JSON array of objects:
             const firstWord = group[0];
             const lastWord = group[group.length - 1];
             const phraseText = group.map((w: any) => w.word).join(' ');
-            const phraseStart = clipStart + firstWord.start;
-            const phraseEnd = clipStart + lastWord.end;
+            // P3 FIX: trimStart/speed-aware mapping (see toTimeline above)
+            const phraseStart = toTimeline(firstWord.start);
+            const phraseEnd = toTimeline(lastWord.end);
 
             return {
               id: `sub_${Math.random().toString(36).substr(2, 9)}`,
@@ -545,7 +638,15 @@ Return your response ONLY as a JSON array of objects:
             };
           });
 
-          useEditorStore.getState().setSubtitles(newSubs);
+          // P3 FIX: generating subs for one clip used to REPLACE ALL project
+          // subtitles (wiping other clips' subs in one undo step). Replace only
+          // the target clip's range and keep the rest.
+          const existingSubs = useEditorStore.getState().subtitles || [];
+          const targetClipEnd = clipStart + targetClip.duration;
+          const keptSubs = existingSubs.filter(
+            (s: any) => s.endTime <= clipStart + 0.001 || s.startTime >= targetClipEnd - 0.001
+          );
+          useEditorStore.getState().setSubtitles([...keptSubs, ...newSubs]);
         } else {
           const colors = ['#ffffff', '#fbbf24', '#22c55e', '#22d3ee', '#f43f5e', '#a855f7'];
           const animations = ['zoom', 'bounce', 'slideUp'];
@@ -555,8 +656,9 @@ Return your response ONLY as a JSON array of objects:
             const wordText = w.word.trim();
             if (!wordText) continue;
 
-            const wordStart = clipStart + w.start;
-            let wordDur = w.end - w.start;
+            // P3 FIX: trimStart/speed-aware mapping (see toTimeline above)
+            const wordStart = toTimeline(w.start);
+            let wordDur = (w.end - w.start) / clipSpeed;
             if (wordDur > 0.45) wordDur = 0.45;
             else wordDur = Math.max(0.1, wordDur * 0.75);
 

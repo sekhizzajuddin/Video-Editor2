@@ -30,6 +30,7 @@ import {
   moveSpeedFrameScrew,
   removeSpeedFrameFromClip,
   calculateSpeedFramesRamp,
+  getRampedTrimStartForLeftResize,
 } from '@/utils/speedRamp';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
@@ -100,6 +101,14 @@ const generateId = () =>
 // Track whether we are inside a transaction (e.g. during drag / resize).
 // When true, saveSnapshot() does not push to history.
 let _inTransaction = false;
+// P1 SAFETY: depth counter for NESTED transactions (e.g. a PiP drag active while a
+// timeline drag starts). The gesture saves exactly ONE snapshot when the outermost
+// endTransaction() runs — instead of resetting the flag mid-gesture.
+let _transactionDepth = 0;
+// P1 SAFETY: a component unmounted mid-gesture never calls endTransaction() — without
+// an expiry the flag wedges forever and saveSnapshot() skips every future snapshot
+// (undo history permanently frozen). The transaction auto-expires after 30s.
+let _transactionTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 // Create empty tracks
 const createEmptyTracks = (): TimelineTrack[] => [];
@@ -686,6 +695,56 @@ export const findClipDeep = (state: EditorState, clipId: string) => {
   const owner = owners.get(clipId)!;
   return { clip, track: owner.track, isPip: owner.isPip, pipId: owner.pipId };
 };
+
+/**
+ * [P2 PERF — GESTURE-PREVIEW CLONE]
+ * Replaces a full `structuredClone` of the ENTIRE timeline at up to 60Hz during
+ * drag gestures. Returns shallow-cloned structures where ONLY the participants
+ * of the gesture are copied:
+ *   - clips in `touchIds` (the moved clips + their linked partners) get cloned
+ *     objects, because they are mutated in place (startTime/trackId);
+ *   - tracks in `targetTrackIds` (or containing a touched clip) get fresh clips
+ *     arrays, because splices/pushes mutate them;
+ *   - every other track/clip keeps object identity → React.memo skips unchanged
+ *     rows and downstream subscribers don't re-render.
+ * Cost per gesture frame: O(totalClips) comparisons + a handful of clones,
+ * instead of a deep clone of every clip's nested transform/animations/speedRamp
+ * arrays — the dominant cost when editing 5-hour timelines on a basic PC.
+ */
+function shallowCloneForGesture(
+  state: EditorState,
+  touchIds: Set<string>,
+  targetTrackIds: Set<string>,
+): { tracks: TimelineTrack[]; pipWindows: Record<string, PipWindow> } {
+  const isTouchedTrack = (t: TimelineTrack) =>
+    targetTrackIds.has(t.id) || (t.clips || []).some((c) => touchIds.has(c.id));
+
+  const newTracks: TimelineTrack[] = state.tracks.map((t) =>
+    isTouchedTrack(t)
+      ? { ...t, clips: (t.clips || []).map((c) => (touchIds.has(c.id) ? { ...c } : c)) }
+      : t
+  );
+
+  const pipWindowsState = state.pipWindows || {};
+  let pipChanged = false;
+  const newPipWindows: Record<string, PipWindow> = { ...pipWindowsState };
+  for (const [pipId, pip] of Object.entries(pipWindowsState)) {
+    if (!pip) continue;
+    if (!(pip.tracks || []).some((t) => isTouchedTrack(t))) continue;
+    newPipWindows[pipId] = {
+      ...pip,
+      tracks: (pip.tracks || []).map((t) =>
+        isTouchedTrack(t)
+          ? { ...t, clips: (t.clips || []).map((c) => (touchIds.has(c.id) ? { ...c } : c)) }
+          : t
+      ),
+    };
+    pipChanged = true;
+  }
+  // When no PIP window participates, hand back the ORIGINAL reference so
+  // pipWindows subscribers skip the re-render entirely.
+  return { tracks: newTracks, pipWindows: pipChanged ? newPipWindows : pipWindowsState };
+}
 
 export const findClipInTracks = (
   tracks: TimelineTrack[],
@@ -1483,10 +1542,23 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           if (track.id !== trackId) {
             return {
               ...track,
-              clips: track.clips.map((c) => ({
-                ...c,
-                startTime: c.startTime >= atTime ? c.startTime + clip.duration : c.startTime,
-              })),
+              clips: track.clips.map((c) => {
+                // P3 FIX: a clip SPANNING the insert point kept its full length —
+                // the inserted clip overlapped its tail with no overlap resolution
+                // after insert (persistent z-order fights). Trim the spanner to end
+                // exactly at the insert point.
+                if (c.startTime < atTime && c.startTime + c.duration > atTime) {
+                  return {
+                    ...c,
+                    duration: atTime - c.startTime,
+                    trimEnd: c.trimEnd + (c.startTime + c.duration - atTime) * c.speed,
+                  };
+                }
+                return {
+                  ...c,
+                  startTime: c.startTime >= atTime ? c.startTime + clip.duration : c.startTime,
+                };
+              }),
             };
           }
           return {
@@ -1574,11 +1646,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           // Clip starts during overwrite, ends after (Trim Start)
           else if (c.startTime >= atTime && c.startTime < clipEnd && cEnd > clipEnd) {
             const cutAmount = clipEnd - c.startTime;
+            // P3 FIX: speedRamp-aware — the linear cutAmount × speed compensation
+            // broke the trim start on ramped clips (non-linear mapping).
+            const isSpannerRamped = c.speedRamp && c.speedRamp.length >= 2;
+            const newTrimStart = isSpannerRamped
+              ? getRampedTrimStartForLeftResize(c as any, cutAmount)
+              : c.trimStart + (cutAmount * c.speed);
             newClips.push({ 
               ...c, 
               startTime: clipEnd, 
               duration: c.duration - cutAmount,
-              trimStart: c.trimStart + (cutAmount * c.speed)
+              trimStart: newTrimStart
             });
           }
           // Clip completely encapsulates the overwrite (Split into two)
@@ -2242,47 +2320,62 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set((state) => {
       const updateMap = new Map(updates.map(u => [u.clipId, u.changes]));
 
-      // Propagate timing changes to linked clips that aren't already in the batch
+      // P2 PERF: resolve linked propagation via the reference-keyed index (O(1)
+      // lookups) instead of scanning ALL tracks × clips per frame during a trim.
+      const { clipsById } = getClipIndex(state);
       const timingKeys = ['startTime', 'trimStart', 'trimEnd', 'duration', 'speed', 'speedRamp'];
       const linkedUpdates = new Map<string, Record<string, any>>();
       for (const u of updates) {
-        // Find the clip to check for linkedClipId
-        for (const track of state.tracks) {
-          const clip = track.clips.find(c => c.id === u.clipId);
-          if (clip?.linkedClipId && !updateMap.has(clip.linkedClipId)) {
-            const timingChanges: Record<string, any> = {};
-            for (const key of timingKeys) {
-              if ((u.changes as any)[key] !== undefined) {
-                timingChanges[key] = (u.changes as any)[key];
-              }
-            }
-            if (Object.keys(timingChanges).length > 0) {
-              linkedUpdates.set(clip.linkedClipId, timingChanges);
+        const clip = clipsById.get(u.clipId);
+        if (clip?.linkedClipId && !updateMap.has(clip.linkedClipId)) {
+          const timingChanges: Record<string, any> = {};
+          for (const key of timingKeys) {
+            if ((u.changes as any)[key] !== undefined) {
+              timingChanges[key] = (u.changes as any)[key];
             }
           }
-          if (clip) break;
+          if (Object.keys(timingChanges).length > 0) {
+            linkedUpdates.set(clip.linkedClipId, timingChanges);
+          }
         }
       }
 
-      const { tracks, pipWindows } = mapTracksDeep(state, (track) => ({
-        ...track,
-        clips: track.clips.map((clip) => {
-          const changes = updateMap.get(clip.id);
-          if (changes) {
-            if ((changes.duration !== undefined && changes.duration !== clip.duration) ||
-                (changes.startTime !== undefined && changes.startTime !== clip.startTime)) {
-              clip.pipWindowIds?.forEach(pid => pipIdsToRecalc.add(pid));
+      // P2 PERF: only map/clone tracks that contain an updated or linked clip —
+      // untouched tracks keep object identity with zero allocation per frame.
+      const touchIds = new Set<string>([...updateMap.keys(), ...linkedUpdates.keys()]);
+      const affectedTracks = new Set<string>();
+      for (const track of state.tracks) {
+        if (track.clips.some(c => touchIds.has(c.id))) affectedTracks.add(`:${track.id}`);
+      }
+      for (const [pipId, pip] of Object.entries(state.pipWindows || {})) {
+        for (const track of pip.tracks || []) {
+          if ((track.clips || []).some(c => touchIds.has(c.id))) affectedTracks.add(`${pipId}:${track.id}`);
+        }
+      }
+
+      const { tracks, pipWindows } = mapTracksDeep(state, (track, pipId) => {
+        // Untouched track — preserve the original reference (zero allocation).
+        if (!affectedTracks.has(`${pipId ?? ''}:${track.id}`)) return track;
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            const changes = updateMap.get(clip.id);
+            if (changes) {
+              if ((changes.duration !== undefined && changes.duration !== clip.duration) ||
+                  (changes.startTime !== undefined && changes.startTime !== clip.startTime)) {
+                clip.pipWindowIds?.forEach(pid => pipIdsToRecalc.add(pid));
+              }
+              return { ...clip, ...changes };
             }
-            return { ...clip, ...changes };
-          }
-          // Apply linked timing propagation
-          const linkedChanges = linkedUpdates.get(clip.id);
-          if (linkedChanges) {
-            return { ...clip, ...linkedChanges };
-          }
-          return clip;
-        }),
-      }));
+            // Apply linked timing propagation
+            const linkedChanges = linkedUpdates.get(clip.id);
+            if (linkedChanges) {
+              return { ...clip, ...linkedChanges };
+            }
+            return clip;
+          }),
+        };
+      });
       return { tracks, pipWindows };
     });
     get().recalcTotalDuration();
@@ -2299,8 +2392,28 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const targetTrack = state.tracks.find((t) => t.id === targetTrackId);
       if (targetTrack && targetTrack.locked) return {};
 
-      const newTracks: TimelineTrack[] = structuredClone(state.tracks);
-      const newPipWindows: Record<string, PipWindow> = structuredClone(state.pipWindows || {});
+      // P2 PERF (gesture-preview): for the common (non-ripple) move, shallow-clone
+      // only the moved clip + its linked partner + their tracks, instead of a
+      // structuredClone of the entire timeline (the mobile drag fires this at 60Hz).
+      // The ripple branch mutates MANY clips across all container tracks, so it
+      // keeps the full clone (unchanged behavior).
+      const { clipsById } = getClipIndex(state);
+      const stateClip = clipsById.get(clipId);
+      const isRippleMove = state.activeTool === 'ripple';
+
+      let newTracks: TimelineTrack[];
+      let newPipWindows: Record<string, PipWindow>;
+      if (!isRippleMove && stateClip) {
+        const linkedId = stateClip.linkedClipId && stateClip.linkedClipId !== clipId ? stateClip.linkedClipId : null;
+        const touchIds = new Set<string>(linkedId ? [clipId, linkedId] : [clipId]);
+        const targetIds = new Set<string>(newTrackId ? [newTrackId] : []);
+        const cloned = shallowCloneForGesture(state, touchIds, targetIds);
+        newTracks = cloned.tracks;
+        newPipWindows = cloned.pipWindows;
+      } else {
+        newTracks = structuredClone(state.tracks);
+        newPipWindows = structuredClone(state.pipWindows || {});
+      }
 
       // Find and remove the clip
       let foundClip: TimelineClip | undefined;
@@ -2458,8 +2571,26 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         if (targetTrack && targetTrack.locked) return {};
       }
 
-      const newTracks: TimelineTrack[] = structuredClone(state.tracks);
-      const newPipWindows: Record<string, PipWindow> = structuredClone(state.pipWindows || {});
+      // P2 PERF (gesture-preview): shallow-clone only what participates in the
+      // move instead of structuredClone of the ENTIRE timeline at up to 60Hz.
+      // Moved clips + linked partners get cloned objects (they are mutated in
+      // place); move-target tracks get fresh arrays (push mutates them).
+      const { clipsById } = getClipIndex(state);
+      const movedIds = new Set(updates.map(u => u.clipId));
+      const touchIds = new Set<string>(movedIds);
+      for (const update of updates) {
+        const srcClip = clipsById.get(update.clipId);
+        if (srcClip?.linkedClipId && !movedIds.has(srcClip.linkedClipId)) {
+          touchIds.add(srcClip.linkedClipId);
+        }
+      }
+      const targetTrackIds = new Set<string>();
+      for (const update of updates) {
+        if (update.newTrackId) targetTrackIds.add(update.newTrackId);
+      }
+      const gestureClone = shallowCloneForGesture(state, touchIds, targetTrackIds);
+      const newTracks: TimelineTrack[] = gestureClone.tracks;
+      const newPipWindows: Record<string, PipWindow> = gestureClone.pipWindows;
 
       const movingClipsMap = new Map<string, TimelineClip>();
       const updatedClipIds = new Set(updates.map(u => u.clipId));
@@ -3422,7 +3553,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   }),
 
   // Timeline View
-  setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
+  // P3 FIX: clamp at the store boundary — this setter was unclamped, so any
+  // zoomLevel of 0/NaN (legacy snapshot, direct call) made every x / zoomLevel
+  // computation Infinity/NaN across the drag/drop engine.
+  setZoomLevel: (zoom) => set({ zoomLevel: Math.min(400, Math.max(0.05, Number.isFinite(zoom) ? zoom : 100)) }),
   setScrollLeft: (scroll) => set({ scrollLeft: scroll }),
   zoomIn: () =>
     set((state) => {
@@ -4060,6 +4194,39 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
+      // Redundant-entry check (references differ but content may be identical,
+      // e.g. an update that rebuilt arrays with the same values). Kept on this
+      // slower path only — the fast path above catches the hot no-op cases.
+      // P2 PERF: (1) this check now runs BEFORE the structuredClone, so a
+      // redundant snapshot no longer pays the clone; (2) only slices whose
+      // reference differs from the last snapshot are serialized (immutability
+      // guarantees same-ref = same-content) — in the common case only `tracks`
+      // differs, replacing two whole-project JSON.stringify calls per snapshot
+      // (which also fired per-pointermove during export-region drags).
+      if (state.historyIndex >= 0 && state.history[state.historyIndex]) {
+        const lastSnap = state.history[state.historyIndex];
+        const pairs: [unknown, unknown][] = [
+          [lastSnap.tracks, state.tracks],
+          [lastSnap.pipWindows, state.pipWindows || {}],
+          [lastSnap.subtitles, state.subtitles || []],
+          [lastSnap.markers, state.markers || []],
+          [lastSnap.beatMarkers, state.beatMarkers || []],
+          [lastSnap.exportRegions, state.exportRegions || []],
+        ];
+        let allIdentical = true;
+        for (const [prev, next] of pairs) {
+          if (prev === next) continue; // same ref → identical content (immutable updates)
+          if (JSON.stringify(prev ?? null) !== JSON.stringify(next ?? null)) {
+            allIdentical = false;
+            break;
+          }
+        }
+        if (allIdentical) {
+          // Nothing meaningful changed, don't create history entry
+          return {};
+        }
+      }
+
       const snapshot: EditorSnapshot = {
         tracks: structuredClone(state.tracks),
         currentTime: state.currentTime,
@@ -4070,21 +4237,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         exportRegions: structuredClone(state.exportRegions || []),
         label: label || defaultLabel,
       };
-
-      // Redundant-entry check (references differ but content may be identical,
-      // e.g. an update that rebuilt arrays with the same values). Kept on this
-      // slower path only — the fast path above catches the hot no-op cases.
-      // Check if anything actually changed (ignoring currentTime and label)
-      // Single stringify comparison instead of 10 separate calls
-      if (state.historyIndex >= 0 && state.history[state.historyIndex]) {
-        const lastSnap = state.history[state.historyIndex];
-        const lastKey = JSON.stringify([lastSnap.tracks, lastSnap.pipWindows, lastSnap.subtitles, lastSnap.markers, lastSnap.beatMarkers, lastSnap.exportRegions]);
-        const newKey = JSON.stringify([snapshot.tracks, snapshot.pipWindows, snapshot.subtitles, snapshot.markers, snapshot.beatMarkers, snapshot.exportRegions]);
-        if (lastKey === newKey) {
-          // Nothing meaningful changed, don't create history entry
-          return {};
-        }
-      }
 
       const newHistory = state.history.slice(0, state.historyIndex + 1);
       newHistory.push(snapshot);
@@ -4099,10 +4251,31 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
   startTransaction: () => {
     _inTransaction = true;
+    _transactionDepth++;
+    // P1 SAFETY: reschedule the expiry each time a transaction opens. If the
+    // owning component never calls endTransaction (unmounted mid-gesture), the
+    // flag auto-expires and undo history recovers instead of freezing forever.
+    if (_transactionTimeoutId !== null) clearTimeout(_transactionTimeoutId);
+    _transactionTimeoutId = setTimeout(() => {
+      _transactionTimeoutId = null;
+      if (_inTransaction) {
+        _inTransaction = false;
+        _transactionDepth = 0;
+        get().saveSnapshot('Edit Timeline');
+      }
+    }, 30000);
   },
   endTransaction: () => {
     if (!_inTransaction) return;
+    _transactionDepth = Math.max(0, _transactionDepth - 1);
+    // Nested transaction still open (e.g. PiP drag inside a timeline drag) —
+    // wait for the outermost endTransaction before saving.
+    if (_transactionDepth > 0) return;
     _inTransaction = false;
+    if (_transactionTimeoutId !== null) {
+      clearTimeout(_transactionTimeoutId);
+      _transactionTimeoutId = null;
+    }
     get().saveSnapshot('Edit Timeline'); // Save one snapshot after the transaction completes
   },
   undo: () => {
@@ -4118,8 +4291,16 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         beatMarkers: structuredClone(snap.beatMarkers || []),
         exportRegions: structuredClone(snap.exportRegions || []),
         historyIndex: state.historyIndex - 1,
+        // P3 FIX: consistency — the restored state may no longer contain the
+        // selected clip, so clear selection (same as jumpToHistoryIndex);
+        // recalcTotalDuration below keeps the derived total in sync (it used to
+        // stay stale after undoing a delete/insert).
+        selectedClipId: null,
+        selectedClipIds: [],
+        selectedTransitionClipId: null,
       };
     });
+    get().recalcTotalDuration();
     debouncedSaveProject(get());
   },
   redo: () => {
@@ -4135,8 +4316,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         beatMarkers: structuredClone(snap.beatMarkers || []),
         exportRegions: structuredClone(snap.exportRegions || []),
         historyIndex: state.historyIndex + 1,
+        // P3 FIX: same consistency as undo
+        selectedClipId: null,
+        selectedClipIds: [],
+        selectedTransitionClipId: null,
       };
     });
+    get().recalcTotalDuration();
     debouncedSaveProject(get());
   },
   jumpToHistoryIndex: (index) => {
@@ -4236,6 +4422,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const markers = (data as any).markers || [];
       const beatMarkers = (data as any).beatMarkers || [];
       const exportRegions = (data as any).exportRegions || [];
+
+      // P1 FIX: revoke the previous project's blob: URLs before swapping the
+      // library — otherwise one blob-URL leak per project load (persists until
+      // page unload, pinning every old media blob in memory).
+      const prevLibrary = get().mediaLibrary || [];
+      for (const m of prevLibrary) {
+        if (m.url && m.url.startsWith('blob:')) {
+          try { URL.revokeObjectURL(m.url); } catch { /* noop */ }
+        }
+      }
+
       set({
         tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
@@ -4510,7 +4707,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       let targetDuration = pip.duration;
       
       if (parentClip) {
-        // Bound the PIP duration to the parent clip's duration if parent shrinks
+        // Bound the PIP duration to the parent clip's duration if parent shrinks.
+        // P3 FIX: maxAllowed goes NEGATIVE when the window starts past the parent's
+        // end — Math.max(0.5, negative) silently collapsed the PiP to 0.5s. Only
+        // apply the bound when it is a positive constraint.
         const maxAllowed = parentClip.duration - (pip.relativeStartTime || 0);
         
         let maxClipEnd = 0;
@@ -4527,7 +4727,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           ? Math.max(pip.manualDuration, maxClipEnd)
           : Math.min(600, Math.max(5, Math.max(maxClipEnd + 0.1, pip.duration)));
           
-        targetDuration = Math.min(computed, Math.max(0.5, maxAllowed));
+        targetDuration = maxAllowed > 0.5 ? Math.min(computed, maxAllowed) : computed;
       }
       
       if (pip.duration === targetDuration) return state;
@@ -4648,10 +4848,18 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     set((state) => {
       const pip = state.pipWindows[pipId];
       if (!pip) return {};
+      // P3 FIX: clamp the window start against the parent clip — previously only
+      // clamped ≥ 0, so the PiP could be dragged arbitrarily far past its
+      // parent's end (and recalcPipDurations then collapsed it to 0.5s).
+      let clamped = Math.max(0, relativeStartTime);
+      const parentClip = findClipInTracks(state.tracks, pip.parentClipId, state.pipWindows || {});
+      if (parentClip) {
+        clamped = Math.min(clamped, Math.max(0, parentClip.duration - Math.min(pip.duration, parentClip.duration)));
+      }
       return {
         pipWindows: {
           ...state.pipWindows,
-          [pipId]: { ...pip, relativeStartTime: Math.max(0, relativeStartTime) }
+          [pipId]: { ...pip, relativeStartTime: clamped }
         }
       };
     });

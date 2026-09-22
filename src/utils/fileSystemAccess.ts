@@ -50,7 +50,11 @@ export function loadProjectData(data: any) {
     isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : false,
     inPoint: typeof data.inPoint === 'number' ? data.inPoint : null,
     outPoint: typeof data.outPoint === 'number' ? data.outPoint : null,
-    zoomLevel: typeof data.zoomLevel === 'number' ? data.zoomLevel : 100,
+    // P3 FIX: validate the zoom range — typeof NaN === 'number' and 0 passed the
+    // old check, making every x / zoomLevel computation Infinity/NaN afterwards.
+    zoomLevel: typeof data.zoomLevel === 'number' && Number.isFinite(data.zoomLevel)
+      ? Math.min(400, Math.max(0.05, data.zoomLevel))
+      : 100,
     ...(data.settings ? { settings: { ...useEditorStore.getState().settings, ...data.settings } } : {}),
     ...(data.pipWindows ? { pipWindows: data.pipWindows } : {}),
     ...(data.timelineStack ? { timelineStack: data.timelineStack } : {}),

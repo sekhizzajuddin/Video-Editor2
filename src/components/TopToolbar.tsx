@@ -182,7 +182,10 @@ export function TopToolbar() {
     const width = container ? container.clientWidth - 150 : 800;
     const totalDuration = useEditorStore.getState().totalDuration;
     if (totalDuration > 0) {
-      const targetZoom = Math.max(20, Math.min(400, width / totalDuration));
+      // P3 FIX: the 20 px/s floor made a 5-hour timeline impossible to fit on
+      // screen (needs ~0.06 px/s). The ruler adapts with hour-scale ticks at
+      // low zoom, so a low floor is now safe.
+      const targetZoom = Math.max(0.05, Math.min(400, width / totalDuration));
       useEditorStore.getState().setZoomLevel(targetZoom);
     }
     setShowViewMenu(false);

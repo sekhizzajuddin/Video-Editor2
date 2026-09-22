@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import type { MediaItem } from '@/types';
-import { generateFallbackWaveform } from '../timelineUtils';
 import type { SpeedFrameSegment } from '@/utils/speedRamp';
 
 interface WaveformOverlayProps {
@@ -74,13 +73,21 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
 
   // ── One sample per CSS pixel — zero gap — solid DaVinci silhouette ─────
   const waveformPeaks = media?.waveformPeaks;
-  const barCount = useMemo(() => Math.max(Math.round(width), 4), [width]);
+  const barCount = useMemo(() => {
+    // P2 PERF (LOD): 1 sample/px up to 4000 bars; for wider clips the peaks are
+    // downsampled and the bars are widened (barW = W / barCount in the painter)
+    // so a 5-hour clip renders without a giant backing store or rect storm.
+    const w = Number.isFinite(width) && width > 0 ? width : 4;
+    return Math.min(Math.max(Math.round(w), 4), 4000);
+  }, [width]);
 
   const peaks = useMemo(() => {
-    const src =
-      waveformPeaks && waveformPeaks.length > 0
-        ? waveformPeaks
-        : generateFallbackWaveform(clipId, barCount);
+    const src = waveformPeaks && waveformPeaks.length > 0
+      ? waveformPeaks
+      // P4 FIX: the fake fallback waveform (plausible speech cadence) was
+      // visually indistinguishable from real audio — actively misleading.
+      // Honest flatline instead; the probe-failure toast tells the user why.
+      : new Array(Math.max(4, barCount)).fill(0);
         
     // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
     if (speedFrameSegments && speedFrameSegments.length > 0) {
@@ -130,7 +137,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     }
     
     return resamplePeaksWindowed(finalSrc, barCount);
-  }, [waveformPeaks, clipId, barCount, trimStart, clipDuration, speed, media?.duration, speedFrameSegments]);
+  }, [waveformPeaks, barCount, trimStart, clipDuration, speed, media?.duration, speedFrameSegments]);
 
   const [r, g, b] = useMemo(() => parseRGB(color ?? 'rgba(255,255,255,1)'), [color]);
 
@@ -143,8 +150,13 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     const dpr = window.devicePixelRatio || 1;
     const W = Math.max(1, Math.round(width));
     const H = Math.max(1, Math.round(height));
-    const physW = W * dpr;
-    const physH = H * dpr;
+    // P2 FIX: clamp the backing store — a 5-hour clip at zoom 2 produced a
+    // 72,000px canvas (blank in Firefox beyond 32,767px; ~28MB backing in
+    // Chrome per clip). The CSS width still spans the full clip; only the
+    // bitmap resolution is capped and the bars scale accordingly.
+    const MAX_PHYS = 16384; // safe under every browser's canvas limit
+    const physW = Math.min(W * dpr, MAX_PHYS);
+    const physH = Math.min(H * dpr, MAX_PHYS);
 
     // Resize canvas only when dimensions change
     if (canvas.width !== physW || canvas.height !== physH) {
@@ -153,12 +165,21 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       canvas.style.width = `${W}px`;
       canvas.style.height = `${H}px`;
     }
+    // P4 FIX: if the browser rejected the resize (over its limits), don't draw
+    // into a broken bitmap — skip silently rather than paint garbage.
+    if (canvas.width !== physW || canvas.height !== physH) return;
 
     // Reset transform cleanly — prevents DPR scale accumulation
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const scaleX = physW / W;
+    ctx.setTransform(scaleX, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
     if (peaks.length === 0) return;
+
+    // P2 PERF (LOD): bar width in logical px — 1px at normal zoom (identical to
+    // the previous 1px-column rendering), wider bars when downsampled so the
+    // silhouette stays solid with zero gaps.
+    const barW = W / peaks.length;
 
     if (small) {
       // ──────────────────────────────────────────────────────────────────────
@@ -167,11 +188,10 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       // ──────────────────────────────────────────────────────────────────────
       ctx.fillStyle = `rgba(${r},${g},${b},0.55)`;
       for (let i = 0; i < peaks.length; i++) {
-        if (i >= W) break;
         const peak = peaks[i];
         const barH = peak * H;
         if (barH < 0.5) continue; // true silence = nothing
-        ctx.fillRect(i, H - barH, 1, barH);
+        ctx.fillRect(i * barW, H - barH, Math.max(barW, 0.75), barH);
       }
       return;
     }
@@ -193,11 +213,10 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
 
     for (let i = 0; i < peaks.length; i++) {
-      if (i >= W) break;
       const peak = peaks[i];
       const halfH = peak * maxHalf;
       if (halfH < 0.5) continue; // true silence = skip (center line shows through)
-      ctx.fillRect(i, cy - halfH, 1, halfH * 2);
+      ctx.fillRect(i * barW, cy - halfH, Math.max(barW, 0.75), halfH * 2);
     }
 
     // Center line — thin baseline so you can spot exactly where dialogue

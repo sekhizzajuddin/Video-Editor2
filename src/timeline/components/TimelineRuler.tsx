@@ -2,7 +2,9 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineMarker } from '@/types';
 import { RULER_HEIGHT } from '../timelineConstants';
+import { formatCentisecondTime } from '../timelineUtils';
 import { RulerPlayhead } from './PlayheadComponents';
+import { useWindowDragCleanup } from '../useWindowDragCleanup';
 
 const MARKER_ICONS: Record<string, { color: string; symbol: string; label: string }> = {
   chapter:   { color: '#06b6d4', symbol: '◆', label: 'Chapter' },
@@ -32,7 +34,7 @@ interface TimelineRulerProps {
   outPoint: number | null;
   sortedMarkers: TimelineMarker[];
   beatMarkers: BeatMarker[];
-  rulerData: RulerMarker[];
+  rulerData?: RulerMarker[];
   seek: (time: number) => void;
   setMarkerContextMenu: (menu: { x: number; y: number; markerId: string } | null) => void;
   handleRulerPointerDown: (e: React.PointerEvent) => void;
@@ -66,7 +68,10 @@ export const TimelineGridLines = React.memo(function TimelineGridLines({
     if (zoomLevel >= 15) return 2; // 2 whole seconds per line
     if (zoomLevel >= 6) return 5;  // 5 whole seconds per line
     if (zoomLevel >= 3) return 10; // 10 whole seconds per line
-    return 30;                     // 30 whole seconds per line
+    if (zoomLevel >= 0.5) return 30; // 30 whole seconds per line
+    // P3 FIX: hour-scale steps for very low zoom (5-hour timeline zoomed to fit)
+    if (zoomLevel >= 0.1) return 120;
+    return 300;
   }, [zoomLevel]);
 
   const visibleSecondLines = useMemo(() => {
@@ -106,7 +111,6 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   outPoint,
   sortedMarkers,
   beatMarkers,
-  rulerData,
   seek,
   setMarkerContextMenu,
   handleRulerPointerDown,
@@ -151,10 +155,98 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   }, []);
 
   const visibleRulerData = useMemo(() => {
-    const left = scrollLeft / zoomLevel;
-    const right = (scrollLeft + viewportWidth) / zoomLevel;
-    return rulerData.filter((m) => m.time >= left - 1 && m.time <= right + 1);
-  }, [rulerData, scrollLeft, zoomLevel, viewportWidth]);
+    // P2 PERF: windowed tick generation — build ticks ONLY for the visible
+    // window instead of filtering a full whole-timeline array (which was 180k–
+    // 361k objects for a 5-hour timeline, rebuilt per zoom step and re-scanned
+    // ~10×/sec during playback). Interval table identical to the previous
+    // Timeline.tsx rulerData memo; rendered output unchanged.
+    let majorInterval = 1.0;
+    let mediumInterval = 0.5;
+    let minorInterval = 0.1;
+
+    if (zoomLevel >= 300) {
+      majorInterval = 1.0;
+      mediumInterval = 0.5;
+      minorInterval = 0.05; // 50ms sub-bars when zoomed in
+    } else if (zoomLevel >= 150) {
+      majorInterval = 1.0;
+      mediumInterval = 0.5;
+      minorInterval = 0.1; // 100ms sub-bars
+    } else if (zoomLevel >= 60) {
+      majorInterval = 1.0;
+      mediumInterval = 0.5;
+      minorInterval = 0.1; // 100ms sub-bars
+    } else if (zoomLevel >= 30) {
+      majorInterval = 2.0;
+      mediumInterval = 1.0;
+      minorInterval = 0.5;
+    } else if (zoomLevel >= 14) {
+      majorInterval = 5.0;
+      mediumInterval = 2.5;
+      minorInterval = 1.0;
+    } else if (zoomLevel >= 6) {
+      majorInterval = 10.0;
+      mediumInterval = 5.0;
+      minorInterval = 2.0;
+    } else if (zoomLevel >= 3) {
+      majorInterval = 30.0;
+      mediumInterval = 15.0;
+      minorInterval = 5.0;
+    } else if (zoomLevel >= 1.5) {
+      // P3 FIX: hour-scale ticks for very low zoom — a 5-hour timeline zoomed to
+      // fit (~0.06 px/s) used to overlap every label (lowest branch was 30s
+      // majors = ~2px apart at that zoom). Spacing keeps labels ≥ ~50px apart.
+      majorInterval = 60.0;
+      mediumInterval = 30.0;
+      minorInterval = 10.0;
+    } else if (zoomLevel >= 0.5) {
+      majorInterval = 120.0;
+      mediumInterval = 60.0;
+      minorInterval = 15.0;
+    } else if (zoomLevel >= 0.2) {
+      majorInterval = 300.0;
+      mediumInterval = 150.0;
+      minorInterval = 30.0;
+    } else if (zoomLevel >= 0.1) {
+      majorInterval = 600.0;
+      mediumInterval = 300.0;
+      minorInterval = 60.0;
+    } else {
+      majorInterval = 1200.0;
+      mediumInterval = 600.0;
+      minorInterval = 120.0;
+    }
+
+    // Window: visible range ± 2s margin
+    const leftTime = Math.max(0, scrollLeft / zoomLevel - 2);
+    const rightTime = (scrollLeft + viewportWidth) / zoomLevel + 2;
+
+    const minorCentis = Math.max(1, Math.round(minorInterval * 100));
+    const mediumCentis = Math.max(1, Math.round(mediumInterval * 100));
+    const majorCentis = Math.max(1, Math.round(majorInterval * 100));
+
+    // Align the start to the minor grid in integer centiseconds (same alignment
+    // as the previous whole-timeline loop, so tick positions are identical).
+    const startCentis = Math.max(0, Math.floor((leftTime * 100) / minorCentis) * minorCentis);
+    const endCentis = Math.ceil((rightTime * 100) / minorCentis) * minorCentis;
+
+    const ticks: RulerMarker[] = [];
+    for (let c = startCentis; c <= endCentis; c += minorCentis) {
+      const time = c / 100;
+      let type: 'major' | 'medium' | 'minor' = 'minor';
+      let label = '';
+
+      if (c % majorCentis === 0) {
+        type = 'major';
+        label = formatCentisecondTime(time);
+      } else if (c % mediumCentis === 0) {
+        type = 'medium';
+      }
+
+      ticks.push({ time, label, type });
+    }
+    return ticks;
+  }, [scrollLeft, viewportWidth, zoomLevel]);
 
   return (
     <div
@@ -245,8 +337,12 @@ export const TimelineRuler = React.memo(function TimelineRuler({
                 if (wasPlaying) {
                   requestAnimationFrame(() => {
                     setTimeout(() => {
-                      if (!useEditorStore.getState().isPlaying) {
-                        useEditorStore.getState().play();
+                      const st2 = useEditorStore.getState();
+                      // P4 FIX: don't auto-resume over a deliberate user action —
+                      // the old check (!isPlaying) fired play() INTO a pause taken
+                      // during the 100ms window, and resumed while scrubbing.
+                      if (!st2.isPlaying && !st2.isScrubbing && st2.currentTime === marker.time) {
+                        st2.play();
                       }
                     }, 100);
                   });
@@ -310,6 +406,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
 });
 
 function RulerExportRegions({ zoomLevel, seek }: { zoomLevel: number; seek: (t: number) => void }) {
+  const windowDragCleanupRef = useWindowDragCleanup();
   const exportRegions = useEditorStore((s) => s.exportRegions || []);
   const selectedExportRegionId = useEditorStore((s) => s.selectedExportRegionId);
   const selectExportRegion = useEditorStore((s) => s.selectExportRegion);
@@ -337,10 +434,13 @@ function RulerExportRegions({ zoomLevel, seek }: { zoomLevel: number; seek: (t: 
             const newStart = Math.max(0, Math.min(region.endTime - 0.2, initialStart + deltaSec));
             updateExportRegion(region.id, { startTime: newStart });
           };
-          const onPointerUp = () => {
+          const cleanupListeners = () => {
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('pointerup', onPointerUp);
+            windowDragCleanupRef.current = null;
           };
+          const onPointerUp = cleanupListeners;
+          windowDragCleanupRef.current = cleanupListeners;
           window.addEventListener('pointermove', onPointerMove);
           window.addEventListener('pointerup', onPointerUp);
         };
@@ -356,10 +456,13 @@ function RulerExportRegions({ zoomLevel, seek }: { zoomLevel: number; seek: (t: 
             const newEnd = Math.max(region.startTime + 0.2, initialEnd + deltaSec);
             updateExportRegion(region.id, { endTime: newEnd });
           };
-          const onPointerUp = () => {
+          const cleanupListeners = () => {
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('pointerup', onPointerUp);
+            windowDragCleanupRef.current = null;
           };
+          const onPointerUp = cleanupListeners;
+          windowDragCleanupRef.current = cleanupListeners;
           window.addEventListener('pointermove', onPointerMove);
           window.addEventListener('pointerup', onPointerUp);
         };
@@ -377,10 +480,13 @@ function RulerExportRegions({ zoomLevel, seek }: { zoomLevel: number; seek: (t: 
             const newStart = Math.max(0, initialStart + deltaSec);
             updateExportRegion(region.id, { startTime: newStart, endTime: newStart + dur });
           };
-          const onPointerUp = () => {
+          const cleanupListeners = () => {
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('pointerup', onPointerUp);
+            windowDragCleanupRef.current = null;
           };
+          const onPointerUp = cleanupListeners;
+          windowDragCleanupRef.current = cleanupListeners;
           window.addEventListener('pointermove', onPointerMove);
           window.addEventListener('pointerup', onPointerUp);
         };

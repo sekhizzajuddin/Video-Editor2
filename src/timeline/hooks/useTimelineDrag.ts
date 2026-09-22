@@ -96,6 +96,11 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
   const dragRafIdRef = useRef<number | null>(null);
   const resizeRafIdRef = useRef<number | null>(null);
+  // P1 SAFETY: When setPointerCapture fails (unsupported element / invalid pointerId),
+  // the gesture dies the moment the pointer leaves the browser window — pointerup
+  // never fires on `window` and a zombie auto-scroll interval + open transaction leak.
+  // We remember the failure so a document mouseleave can force-finish the drag.
+  const pointerCaptureFailedRef = useRef(false);
   // P0 FIX: Universal mutable batch buffer to avoid GC pressure from fresh
   // array allocations at 60Hz across ALL drag/resize/ripple/slip operations.
   const batchBufferRef = useRef<Array<{clipId: string; changes: Partial<TimelineClip>}>>([]); 
@@ -159,22 +164,34 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   }, []);
 
   const getTrackFromMouseY = useCallback((clientY: number, clipId: string | null = null): TimelineTrack | null => {
-    // Check if mouse is over any PIP window first
-    const pipWindows = Array.from(document.querySelectorAll('[data-pip-window="true"]'));
-    for (const pipEl of pipWindows) {
-      const rect = pipEl.getBoundingClientRect();
-      if (clientY >= rect.top && clientY <= rect.bottom) {
-        const pipId = pipEl.getAttribute('data-pip-id');
-        if (pipId) {
-          const pip = useEditorStore.getState().pipWindows[pipId];
-          if (pip) {
-            // Found a PIP window. Calculate track index within it.
-            // Adjust relY to be relative to the PIP tracks container (roughly after the title bar).
-            // The title bar is 24px tall, plus some padding, so let's say 30px offset.
-            const pipRelY = clientY - rect.top - 30; 
-            const idx = getTrackAtY(pip.tracks, pipRelY);
-            if (idx >= 0 && idx < pip.tracks.length) {
-              return pip.tracks[idx];
+    // P3 FIX: only hit-test PIP windows when the DRAGGED clip lives inside a PIP —
+    // a main-timeline clip dragged over a floating PIP window used to get its
+    // targetTrackId set to a PIP track and be placed in PIP-local coordinates
+    // (far outside its parent).
+    let draggedIsPip = false;
+    if (clipId) {
+      draggedIsPip = !!(findClipDeep(useEditorStore.getState(), clipId)?.isPip);
+    }
+    if (draggedIsPip) {
+      // Check if mouse is over any PIP window first
+      const pipWindows = Array.from(document.querySelectorAll('[data-pip-window="true"]'));
+      for (const pipEl of pipWindows) {
+        const rect = pipEl.getBoundingClientRect();
+        if (clientY >= rect.top && clientY <= rect.bottom) {
+          const pipId = pipEl.getAttribute('data-pip-id');
+          if (pipId) {
+            // P3 FIX: guard pipWindows — undefined (legacy snapshot) threw a
+            // TypeError mid-mousemove, killing the drag.
+            const pip = (useEditorStore.getState().pipWindows || {})[pipId];
+            if (pip) {
+              // Found a PIP window. Calculate track index within it.
+              // Adjust relY to be relative to the PIP tracks container (roughly after the title bar).
+              // The title bar is 24px tall, plus some padding, so let's say 30px offset.
+              const pipRelY = clientY - rect.top - 30; 
+              const idx = getTrackAtY(pip.tracks, pipRelY);
+              if (idx >= 0 && idx < pip.tracks.length) {
+                return pip.tracks[idx];
+              }
             }
           }
         }
@@ -191,31 +208,73 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   }, [trackContainerRef]);
 
 
+  // P2 PERF: snap targets (all other clip edges) are collected once per gesture
+  // instead of O(all clips) with a fresh array allocation per mousemove frame.
+  // Other clips don't move during a plain drag/trim, so the cache is valid for
+  // the whole gesture. Ripple/rateStretch shift downstream clips every frame —
+  // the cache is bypassed for those tools.
+  const snapTargetsCacheRef = useRef<{ clipId: string; targets: number[]; pipAnchor: number } | null>(null);
+  useEffect(() => {
+    snapTargetsCacheRef.current = null;
+  }, [dragState, resizeState, slipState, slideState]);
+
   const computeSnap = useCallback((rawTime: number, movingClipId: string, movingDuration: number) => {
     if (!settings.snapEnabled) {
       return { snappedTime: rawTime, snapPos: null };
     }
-    const threshold = SNAP_THRESHOLD_PX / zoomLevel;
-    const latestTracks = getLatestTracks(movingClipId);
-
-    // Collect snap targets: all other clip edges + the playhead
-    const targets: number[] = [useEditorStore.getState().currentTime]; // snap to playhead
+    // P4 FIX: clamp the time threshold — SNAP_THRESHOLD_PX / zoomLevel was
+    // unbounded at low zoom (8 SECONDS at zoom 1), making snapping unusably
+    // aggressive. 0.5s is the professional ceiling.
+    const threshold = Math.min(SNAP_THRESHOLD_PX / zoomLevel, 0.5);
     const state = useEditorStore.getState();
-    const pipAnchor = (() => {
-      const f = findClipDeep(state, movingClipId);
-      if (f && f.isPip) {
-        const pip = state.pipWindows[f.pipId!];
-        const parent = findClipInTracks(state.tracks, pip?.parentClipId, state.pipWindows || {});
-        return (parent?.startTime ?? 0) + (pip?.relativeStartTime ?? 0);
-      }
-      return 0;
-    })();
 
-    for (const track of latestTracks) {
-      for (const clip of track.clips) {
-        if (clip.id === movingClipId) continue;
-        targets.push(clip.startTime + pipAnchor);
-        targets.push(clip.startTime + clip.duration + pipAnchor);
+    // Snap to playhead — fresh per call (cheap, always exact)
+    const targets: number[] = [state.currentTime];
+
+    let pipAnchor = 0;
+    const cacheable = activeTool !== 'ripple' && activeTool !== 'rateStretch';
+    const cached = cacheable ? snapTargetsCacheRef.current : null;
+
+    if (cached && cached.clipId === movingClipId) {
+      targets.push(...cached.targets);
+      pipAnchor = cached.pipAnchor;
+    } else {
+      const latestTracks = getLatestTracks(movingClipId);
+      pipAnchor = (() => {
+        const f = findClipDeep(state, movingClipId);
+        if (f && f.isPip) {
+          // P3 FIX: guard pipWindows (undefined threw mid-mousemove)
+          const pip = (state.pipWindows || {})[f.pipId!];
+          const parent = findClipInTracks(state.tracks, pip?.parentClipId, state.pipWindows || {});
+          return (parent?.startTime ?? 0) + (pip?.relativeStartTime ?? 0);
+        }
+        return 0;
+      })();
+
+      for (const track of latestTracks) {
+        for (const clip of track.clips) {
+          if (clip.id === movingClipId) continue;
+          targets.push(clip.startTime + pipAnchor);
+          targets.push(clip.startTime + clip.duration + pipAnchor);
+        }
+      }
+
+      // P4 FIX: markers + beat markers as snap targets (professional editors
+      // snap to them; they were never targets here). Beat markers are capped —
+      // a 5-hour song's beat grid (36k+ beats) would bloat the per-frame search.
+      const markers = state.markers || [];
+      for (const m of markers) {
+        targets.push(m.time + pipAnchor);
+      }
+      const beats = state.beatMarkers || [];
+      if (beats.length > 0 && beats.length <= 2000) {
+        for (const bm of beats) {
+          targets.push(bm.time + pipAnchor);
+        }
+      }
+
+      if (cacheable) {
+        snapTargetsCacheRef.current = { clipId: movingClipId, targets, pipAnchor };
       }
     }
 
@@ -240,7 +299,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     }
 
     return { snappedTime: Math.max(0, snappedTime), snapPos };
-  }, [zoomLevel, settings.snapEnabled]);
+  }, [zoomLevel, settings.snapEnabled, activeTool]);
 
   const updateDragPosition = useCallback((clientX: number, clientY: number, currScrollLeft: number) => {
     if (!dragState || !dragState.draggedClips || dragState.draggedClips.length === 0) return;
@@ -281,6 +340,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
     const { snappedTime, snapPos } = computeSnap(newAbsoluteTime, dragState.clipId, movingDuration);
     let newTime = snappedTime - absoluteParentStart;
+    // P3 FIX: snapping could pull the PIP clip past its parent's bounds —
+    // re-apply the parent-window clamp after snapping (the pre-snap clamp at the
+    // top was bypassed by any snap target within threshold).
+    if (isPip) {
+      const maxLocal = Math.max(0, absoluteParentEnd - absoluteParentStart - movingDuration);
+      newTime = Math.min(maxLocal, Math.max(0, newTime));
+    }
     setSnapLine(snapPos);
 
     const minOriginalStart = Math.min(...dragState.draggedClips.map(c => c.originalStartTime));
@@ -518,7 +584,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       if (e.isPrimary === false) return;
       try {
         (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-      } catch { /* pointer capture unsupported */ }
+        pointerCaptureFailedRef.current = false;
+      } catch {
+        pointerCaptureFailedRef.current = true;
+      }
       let track = tracks.find((t) => t.id === clip.trackId);
       if (!track) {
         const pipWindows = useEditorStore.getState().pipWindows || {};
@@ -1105,8 +1174,12 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
               const localTimelineStart = engine.sourceToTimeline(clip.trimStart);
               maxDuration = engine.sourceToTimeline(sourceDuration) - localTimelineStart;
             } else {
-              maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+              maxDuration = (sourceDuration - clip.trimStart) / Math.max(0.01, clip.speed);
             }
+            // P3 FIX: never bound below the clip's current duration — missing/zero
+            // media metadata (fabricated 30s source) used to silently shrink the
+            // clip on the first mousemove. Also guards ÷0 speed → Infinity.
+            maxDuration = Math.max(resizeState.originalDuration, maxDuration);
             let clamped = Math.min(newDuration, maxDuration);
 
             const rawEdgeTime = resizeState.originalStartTime + clamped;
@@ -1145,14 +1218,20 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             let clampedDuration = Math.min(newDuration, maxDuration);
             let deltaDuration = clampedDuration - resizeState.originalDuration; // positive if expand, negative if shrink
 
-            let rawStartTime = resizeState.originalStartTime + deltaDuration;
+            // P3 FIX (ripple left-edge trim was fully inverted): the START moves
+            // OPPOSITE to the duration growth (expand → start moves left), and the
+            // snapped edge is the new START — so deltaDuration = S − snappedEdge.
+            // The old math (S + deltaDuration, then D − deltaDuration) mirrored the
+            // duration around D: an intended expansion became a shrink, opened a
+            // gap, and shifted downstream the wrong way.
+            let rawStartTime = resizeState.originalStartTime - deltaDuration;
             const { snappedTime: snappedEdge, snapPos } = computeSnap(rawStartTime, resizeState.clipId, 0);
-            deltaDuration = snappedEdge - resizeState.originalStartTime;
-            clampedDuration = resizeState.originalDuration - deltaDuration;
-            
+            deltaDuration = resizeState.originalStartTime - snappedEdge;
+            clampedDuration = resizeState.originalDuration + deltaDuration;
+
             if (clampedDuration > maxDuration) {
                 clampedDuration = maxDuration;
-                deltaDuration = resizeState.originalDuration - clampedDuration;
+                deltaDuration = clampedDuration - resizeState.originalDuration;
                 setSnapLine(null);
             } else {
                 setSnapLine(snapPos);
@@ -1168,11 +1247,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
             batchBufferRef.current.length = 0;
             batchBufferRef.current.push({ clipId: resizeState.clipId, changes: { duration: clampedDuration, trimStart: Math.max(0, newTrimStart) } });
-            if (resizeState.rippleClips) {
-              for (const c of resizeState.rippleClips) {
-                batchBufferRef.current.push({ clipId: c.id, changes: { startTime: c.originalStartTime + deltaDuration } });
-              }
-            }
+            // P3 FIX: for a LEFT-edge ripple trim the clip's OUT point is pinned
+            // (start −/+ delta, duration +/− delta → end never moves), so downstream
+            // clips must NOT shift — shifting them opened a gap that resolveOverlaps
+            // then "repaired" by shunting clips to other tracks.
             batchUpdateClips(batchBufferRef.current);
           }
           return;
@@ -1188,8 +1266,11 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             const localTimelineStart = engine.sourceToTimeline(clip.trimStart);
             maxDuration = engine.sourceToTimeline(sourceDuration) - localTimelineStart;
           } else {
-            maxDuration = (sourceDuration - clip.trimStart) / clip.speed;
+            maxDuration = (sourceDuration - clip.trimStart) / Math.max(0.01, clip.speed);
           }
+          // P3 FIX: never bound below the clip's current duration (missing/zero
+          // media metadata used to silently shrink it on the first mousemove).
+          maxDuration = Math.max(resizeState.originalDuration, maxDuration);
           let clamped = Math.min(newDuration, maxDuration);
 
           if (resizeState.siblingClip) {
@@ -1400,8 +1481,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           const engine = getSpeedRampEngine(clip.id, clip.speedRamp);
           // Use the ORIGINAL trimStart: `dt` is cumulative from the drag start,
           // so the live (already-slipped) trimStart would double-count the slip.
+          // P3 FIX: drag-right must show LATER frames (Premiere/CapCut slip
+          // convention) — the old `- dt` slid the window the wrong way.
           const originalLocalTimelineStart = engine.sourceToTimeline(slipState.originalTrimStart);
-          let newLocalTimelineStart = originalLocalTimelineStart - dt;
+          let newLocalTimelineStart = originalLocalTimelineStart + dt;
           
           const minTimelineStart = 0;
           const maxTimelineEnd = engine.sourceToTimeline(sourceDuration);
@@ -1411,15 +1494,22 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           newTrimStart = engine.timelineToSource(newLocalTimelineStart);
           newTrimEnd = sourceDuration - engine.timelineToSource(newLocalTimelineStart + clip.duration);
         } else {
-          newTrimStart = slipState.originalTrimStart - (dt * clip.speed);
-          newTrimEnd = slipState.originalTrimEnd + (dt * clip.speed);
+          // P3 FIX: slip direction — dragging RIGHT slides the content window
+          // LATER (trimStart increases, trimEnd decreases; the window length is
+          // preserved). The old `- dt`/`+ dt` pair inverted the direction AND
+          // grew the window by 2×dt (not a slip).
+          const totalTrim = slipState.originalTrimStart + slipState.originalTrimEnd;
+          newTrimStart = slipState.originalTrimStart + (dt * clip.speed);
+          newTrimEnd = slipState.originalTrimEnd - (dt * clip.speed);
           if (newTrimStart < 0) {
             newTrimStart = 0;
-            newTrimEnd = sourceDuration - clip.duration * clip.speed;
+            newTrimEnd = Math.max(0, totalTrim);
           }
           if (newTrimStart + (clip.duration * clip.speed) > sourceDuration) {
-            newTrimStart = sourceDuration - (clip.duration * clip.speed);
-            newTrimEnd = 0;
+            // P3 FIX: Math.max(0, …) — a clip longer than its media made this
+            // produce a NEGATIVE trimStart (garbage placement).
+            newTrimStart = Math.max(0, sourceDuration - (clip.duration * clip.speed));
+            newTrimEnd = Math.max(0, totalTrim - newTrimStart);
           }
         }
         
@@ -1544,9 +1634,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         if (!useEditorStore.getState().isPlaying) {
           // RAF lets Zustand subscribers + React commit; the 100ms timeout then
           // gives the video decoder a window to produce the first frame.
+          // P4 FIX: also require !isScrubbing and an unchanged playhead — a second
+          // ruler tap mid-scrub used to have its scrub overridden by this
+          // deferred play().
           requestAnimationFrame(() => {
             setTimeout(() => {
-              if (!useEditorStore.getState().isPlaying) {
+              const st = useEditorStore.getState();
+              if (!st.isPlaying && !st.isScrubbing) {
                 useEditorStore.getState().play();
               }
             }, 100);
@@ -1635,10 +1729,36 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
+
+    // ── P1 SAFETY: LOST-POINTERUP RECOVERY ─────────────────────────────
+    // If the pointer is released outside the browser window, pointerup never
+    // reaches us: the auto-scroll interval keeps running, dragState stays set,
+    // and the store transaction stays open (breaking undo) forever.
+    // 1) window blur / tab hide  → gesture is definitively dead → force-finish.
+    // 2) pointer leaves the document WHILE pointer capture failed → dead → force-finish.
+    // (With successful capture, drags outside the window still work — untouched.)
+    const forceFinishGesture = () => {
+      handleMouseUpRef.current?.();
+    };
+    const onBlur = () => forceFinishGesture();
+    const onVisibilityChange = () => {
+      if (document.hidden) forceFinishGesture();
+    };
+    const onMouseLeaveDoc = () => {
+      if (pointerCaptureFailedRef.current) forceFinishGesture();
+    };
+
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    document.documentElement.addEventListener('mouseleave', onMouseLeaveDoc);
+
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.documentElement.removeEventListener('mouseleave', onMouseLeaveDoc);
     };
   }, [isDragging, handleMouseMoveRef, handleMouseUpRef]);
 

@@ -41,6 +41,10 @@ export function useVoiceoverRecording() {
 
     if (!isRecordingVoiceover) {
       try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          toast.error('Microphone access is unavailable in this context (requires a secure HTTPS context).');
+          return;
+        }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioStreamRef.current = stream;
         audioChunksRef.current = [];
@@ -61,6 +65,21 @@ export function useVoiceoverRecording() {
           if (e.data && e.data.size > 0) {
             audioChunksRef.current.push(e.data);
           }
+        };
+
+        // P1 FIX: A mid-recording recorder error silently flips state to 'inactive',
+        // which skips the onstop path — the mic stays hot and the red recording
+        // banner stays stuck forever. Recover fully here instead.
+        recorder.onerror = () => {
+          if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+          if (audioStreamRef.current) {
+            audioStreamRef.current.getTracks().forEach((t) => t.stop());
+            audioStreamRef.current = null;
+          }
+          mediaRecorderRef.current = null;
+          audioChunksRef.current = [];
+          stopVoiceoverRecordingState();
+          toast.error('Voiceover recording failed. Recording stopped.');
         };
 
         recorder.onstop = async () => {
@@ -164,6 +183,19 @@ export function useVoiceoverRecording() {
         play();
       } catch (err) {
         console.error('Microphone access denied or voiceover recording failed:', err);
+        // P1 FIX: If the mic was acquired but MediaRecorder construction/start threw,
+        // stop the stream tracks here — otherwise the microphone stays hot until
+        // unmount and the recording timer keeps ticking.
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach((t) => t.stop());
+          audioStreamRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
         toast.error('Failed to access microphone. Please check your system/browser permissions.');
       }
     } else {

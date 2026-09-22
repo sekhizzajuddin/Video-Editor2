@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowLeftToLine, ArrowRightToLine } from 'lucide-react';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
+import { generateId } from '../timelineUtils';
 
 export const InsertOverwriteButtons = React.memo(function InsertOverwriteButtons() {
   const { insertClip, overwriteClip, selectedClipId } = useEditorStore(useShallow(s => ({ insertClip: s.insertClip, overwriteClip: s.overwriteClip, selectedClipId: s.selectedClipId })));
@@ -13,8 +14,11 @@ export const InsertOverwriteButtons = React.memo(function InsertOverwriteButtons
     const clip = findClipDeep(state, selectedClipId)?.clip;
     if (!clip) return;
     
-    // Create a copy of the clip to insert
-    insertClip({ ...clip, id: crypto.randomUUID() }, state.currentTime, clip.trackId);
+    // P3 FIX: the copy used crypto.randomUUID (undefined on non-secure contexts →
+    // TypeError, button silently failed) and kept linkedClipId/splitGroupId — the
+    // duplicate claimed membership of the original's split group and stayed linked
+    // to its partner (timing changes propagated to it). Clear both.
+    insertClip({ ...clip, id: generateId(), linkedClipId: undefined, splitGroupId: undefined }, state.currentTime, clip.trackId);
   };
   
   const handleOverwrite = () => {
@@ -24,8 +28,8 @@ export const InsertOverwriteButtons = React.memo(function InsertOverwriteButtons
     const clip = findClipDeep(state, selectedClipId)?.clip;
     if (!clip) return;
     
-    // Create a copy of the clip to overwrite
-    overwriteClip({ ...clip, id: crypto.randomUUID() }, state.currentTime, clip.trackId);
+    // P3 FIX: same as handleInsert — safe id + clear link/split identity
+    overwriteClip({ ...clip, id: generateId(), linkedClipId: undefined, splitGroupId: undefined }, state.currentTime, clip.trackId);
   };
   
   return (

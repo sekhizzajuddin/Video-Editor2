@@ -100,7 +100,17 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
     enterCompoundClip: s.enterCompoundClip,
     toggleKeyframeLineSelection: s.toggleKeyframeLineSelection,
   })));
-  const currentTime = usePlaybackTime(10);
+  // P2 PERF: the whole PiP window (all its TimelineClipRow rows) used to
+  // re-render at 10Hz during playback via usePlaybackTime(). The body only
+  // needs currentTime for scrub auto-scroll — mirror it into a ref via the
+  // store subscription and drive the auto-scroll from an interval instead.
+  // (PipPlayhead keeps its own throttled subscription — it renders one node.)
+  const currentTimeRef = useRef(useEditorStore.getState().currentTime);
+  useEffect(() => {
+    return useEditorStore.subscribe((state) => {
+      currentTimeRef.current = state.currentTime;
+    });
+  }, []);
 
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -126,15 +136,19 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // T-14: Auto-scroll PIP container
+  // T-14: Auto-scroll PIP container (ref-driven — no per-tick body re-render)
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el || !isScrubbing) return;
-    const playheadX = (currentTime - pipAbsoluteStart) * zoomLevel;
-    if (playheadX < el.scrollLeft || playheadX > el.scrollLeft + el.clientWidth) {
-      el.scrollLeft = playheadX - el.clientWidth / 2;
-    }
-  }, [currentTime, pipAbsoluteStart, zoomLevel, isScrubbing]);
+    if (!isScrubbing) return;
+    const id = setInterval(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const playheadX = (currentTimeRef.current - pipAbsoluteStart) * zoomLevel;
+      if (playheadX < el.scrollLeft || playheadX > el.scrollLeft + el.clientWidth) {
+        el.scrollLeft = playheadX - el.clientWidth / 2;
+      }
+    }, 100);
+    return () => clearInterval(id);
+  }, [isScrubbing, pipAbsoluteStart, zoomLevel]);
 
   const startXRef = useRef(0);
   const startDurationRef = useRef(0);
@@ -178,7 +192,14 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
           const dt = dx / zoomLevel;
           const initialAbsoluteStart = parentClip.startTime + startRelTimeRef.current;
           let newAbsoluteStart = initialAbsoluteStart + dt;
-          newAbsoluteStart = Math.max(parentClip.startTime, newAbsoluteStart); // Can't go before parent start, but can go beyond end
+          // P3 FIX: clamp the window within the parent clip — previously it could
+          // go arbitrarily far past the parent's end (recalcPipDurations then
+          // collapsed it to 0.5s).
+          const maxAbsStart = Math.max(
+            parentClip.startTime,
+            parentClip.startTime + Math.max(0, parentClip.duration - Math.min(pipWindow.duration, parentClip.duration))
+          );
+          newAbsoluteStart = Math.max(parentClip.startTime, Math.min(maxAbsStart, newAbsoluteStart));
           const newRelativeStart = newAbsoluteStart - parentClip.startTime;
 
           if (pipContainerRef.current) {

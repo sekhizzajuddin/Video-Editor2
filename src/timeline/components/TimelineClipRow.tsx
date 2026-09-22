@@ -119,8 +119,13 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   toggleKeyframeLineSelection,
 }: TimelineClipItemProps) {
   const colors = trackType === 'audio' ? CLIP_COLORS.audio : (CLIP_COLORS[media.type] || CLIP_COLORS.video);
-  const width = Math.max(clip.duration * zoomLevel, MIN_CLIP_WIDTH);
-  const left = clip.startTime * zoomLevel;
+  // P3 FIX: NaN guards — Math.max(NaN, 16) === NaN made the width style invalid
+  // (element collapses) and NaN left positions render broken.
+  const width = Math.max(
+    Number.isFinite(clip.duration) && Number.isFinite(zoomLevel) ? clip.duration * zoomLevel : MIN_CLIP_WIDTH,
+    MIN_CLIP_WIDTH
+  );
+  const left = Number.isFinite(clip.startTime) && Number.isFinite(zoomLevel) ? clip.startTime * zoomLevel : 0;
   const clipHeight = (trackType === 'text' || trackType === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8;
   const isVideoWithAudio =
     media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
@@ -147,6 +152,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   const handleLineMouseDown = (e: React.PointerEvent, frameId: string, currentOffset: number) => {
     e.stopPropagation();
     e.preventDefault();
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* capture unsupported */ }
     selectSpeedFrame(clip.id, frameId);
 
     const startX = e.clientX;
@@ -173,6 +179,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   const handleScrewMouseDown = (e: React.PointerEvent, frameId: string, currentOffset: number) => {
     e.stopPropagation();
     e.preventDefault();
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* capture unsupported */ }
     selectSpeedFrame(clip.id, frameId);
 
     const startX = e.clientX;
@@ -203,6 +210,11 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       if (h) {
         window.removeEventListener('pointermove', h.move);
         window.removeEventListener('pointerup', h.up);
+        // P1 FIX: keyframe drags attach MOUSE events (mousemove/mouseup) while
+        // speed-frame drags attach POINTER events — remove both, otherwise the
+        // unmount cleanup removed nothing for keyframes (listeners leaked).
+        window.removeEventListener('mousemove', h.move);
+        window.removeEventListener('mouseup', h.up);
       }
     };
   }, []);
@@ -405,6 +417,13 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
             return (
               <div
                 key={t}
+                onPointerDown={(e) => {
+                  // P3 FIX: keyframe diamonds use onMouseDown, but pointerdown fires
+                  // FIRST and bubbles up to the clip's onPointerDown — starting a clip
+                  // move/trim drag while the user drags a keyframe. Stop the bubbling
+                  // pointerdown here (the mouse drag below is unaffected).
+                  e.stopPropagation();
+                }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   useEditorStore.getState().startTransaction();
@@ -660,6 +679,14 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
     [track.clips]
   );
 
+  // P3 PERF: O(1) Set lookup instead of O(N) .includes per clip per render
+  // (500 clips → 250k string comparisons per row render). Component scope so
+  // both the clips map and the transitions layer can use it.
+  const selectedSet = useMemo(
+    () => (selectedClipIds instanceof Set ? selectedClipIds : new Set(selectedClipIds)),
+    [selectedClipIds]
+  );
+
   // ── PERF: stable per-clip media descriptors for text/kinetic clips ──────
   // Previously `defaultMedia` (with a fresh `createdAt: Date.now()`) was
   // recreated per render and every text clip's `media` prop was a brand-new
@@ -775,6 +802,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             }
           }
         }
+        // P3 PERF: O(1) Set lookup (see selectedSet in component scope)
         return (clips).map((clip) => {
         // P0 FIX: O(1) map lookup instead of O(N) .find() per clip per render
         // Kinetic-typography clips use synthetic `generator:*` mediaIds that are
@@ -783,7 +811,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
         // to a text-typed descriptor named after their actual content instead.
         const resolvedMedia = mediaMap.get(clip.mediaId);
         const media = resolvedMedia ?? textMediaById.get(clip.id) ?? defaultMedia;
-        const isSelected = selectedClipIds.includes(clip.id);
+        const isSelected = selectedSet.has(clip.id);
         // Trimming is only offered on the single selected clip — neighbouring
         // clips (and multi-selections) never get trim handles or trim cursors.
         const showTrimHandles = isSelected && selectedClipIds.length === 1;
@@ -836,7 +864,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
           const isEligibleForTransition = gap > -0.034 && gap < 0.034;
           if (isEligibleForTransition) {
             // Hide transition targets if either adjacent clip is selected to allow easier trimming
-            if (selectedClipIds.includes(clip.id) || selectedClipIds.includes(prevClip.id)) return null;
+            if (selectedSet.has(clip.id) || selectedSet.has(prevClip.id)) return null;
 
             const intersectionTime = clip.startTime;
           const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;

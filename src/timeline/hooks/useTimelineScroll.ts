@@ -121,8 +121,10 @@ export function useTimelineScroll({
         // Remove decimal glitching
         newZoom = Math.round(newZoom);
         
-        // Clamp between 5 and 200 as requested
-        newZoom = Math.min(Math.max(newZoom, 5), 200);
+        // P3 FIX: unify the clamp with the store boundary (0.05–400). The old
+        // 5–200 wheel range conflicted with the button range (20–400) and made
+        // long (5-hour) timelines impossible to zoom out to fit.
+        newZoom = Math.min(Math.max(newZoom, 0.05), 400);
 
         const rect = el.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;

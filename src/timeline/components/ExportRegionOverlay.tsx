@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { formatCentisecondTime } from '../timelineUtils';
 import { Bookmark, X, Repeat } from 'lucide-react';
 import type { ExportRegion } from '@/types';
+import { useWindowDragCleanup } from '../useWindowDragCleanup';
 
 interface ExportRegionOverlayProps {
   zoomLevel: number;
@@ -55,6 +56,7 @@ function SingleExportRegionItem({
   onUpdate,
   onDelete,
 }: SingleExportRegionItemProps) {
+  const windowDragCleanupRef = useWindowDragCleanup();
   const startX = region.startTime * zoomLevel;
   const endX = region.endTime * zoomLevel;
   const width = Math.max(2, endX - startX);
@@ -74,14 +76,17 @@ function SingleExportRegionItem({
       onUpdate({ startTime: newStart });
     };
 
-    const onPointerUp = () => {
+    const cleanupListeners = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      windowDragCleanupRef.current = null;
     };
+    const onPointerUp = cleanupListeners;
+    windowDragCleanupRef.current = cleanupListeners;
 
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-  }, [region.startTime, region.endTime, zoomLevel, onSelect, onUpdate]);
+  }, [region.startTime, region.endTime, zoomLevel, onSelect, onUpdate, windowDragCleanupRef]);
 
   // Handle Dragging End Handle
   const handleEndPointerDown = useCallback((e: React.PointerEvent) => {
@@ -97,14 +102,17 @@ function SingleExportRegionItem({
       onUpdate({ endTime: newEnd });
     };
 
-    const onPointerUp = () => {
+    const cleanupListeners = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      windowDragCleanupRef.current = null;
     };
+    const onPointerUp = cleanupListeners;
+    windowDragCleanupRef.current = cleanupListeners;
 
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-  }, [region.startTime, region.endTime, zoomLevel, onSelect, onUpdate]);
+  }, [region.startTime, region.endTime, zoomLevel, onSelect, onUpdate, windowDragCleanupRef]);
 
   // Handle Dragging Body to Slide Region
   const handleBodyPointerDown = useCallback((e: React.PointerEvent) => {
@@ -123,14 +131,17 @@ function SingleExportRegionItem({
       onUpdate({ startTime: newStart, endTime: newStart + duration });
     };
 
-    const onPointerUp = () => {
+    const cleanupListeners = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      windowDragCleanupRef.current = null;
     };
+    const onPointerUp = cleanupListeners;
+    windowDragCleanupRef.current = cleanupListeners;
 
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-  }, [region.startTime, region.endTime, zoomLevel, onSelect, onUpdate]);
+  }, [region.startTime, region.endTime, zoomLevel, onSelect, onUpdate, windowDragCleanupRef]);
 
   const durationSec = region.endTime - region.startTime;
 
