@@ -302,12 +302,23 @@ export function mediaSrcFor(url: string, clipId: string): string {
   return url.includes('#') ? `${url}&clip=${clipId}` : `${url}#clip=${clipId}`;
 }
 
-type TaggedMediaElement = HTMLMediaElement & { _procutClipSrcTag?: string | null };
+type TaggedMediaElement = HTMLMediaElement & {
+  _procutClipSrcTag?: string | null;
+  _procutClipSrcBaseUrl?: string | null;
+};
 
 /**
  * Assign `el.src` for a clip only when it actually changed (tracked via an
  * element-level tag, NOT by comparing against the resolved `el.src` string).
  * Returns true when a new src was assigned — the caller should el.load().
+ *
+ * POST-SPLIT DECODER FIX: the tag embeds the clip's shareKey, which CHANGES the
+ * moment a clip is first split (mediaId::clip:<id> → mediaId::<groupId>). Comparing
+ * the full tag forced el.src reassignment + el.load() — a full decoder teardown,
+ * reload and re-seek on every first split of a clip (paused preview went stale
+ * until re-decode; playing preview froze via the buffering detector). When the
+ * element is already decoding the SAME source URL, keep the live src and just
+ * re-stamp the tag — the split boundary then costs a cheap seek at most.
  */
 export function assignClipMediaSrc(
   el: TaggedMediaElement,
@@ -317,7 +328,15 @@ export function assignClipMediaSrc(
   const src = mediaSrcFor(url, clipId);
   const tag = `${clipId}|${src}`;
   if (el._procutClipSrcTag === tag) return false;
+  // Same source file already decoding (split shareKey change): don't restart
+  // the decoder — only the tag is updated. (`el.src` keeps its old fragment,
+  // which for remote URLs is cache-busting noise only.)
+  if (el._procutClipSrcBaseUrl === url && el.getAttribute('src')) {
+    el._procutClipSrcTag = tag;
+    return false;
+  }
   el._procutClipSrcTag = tag;
+  el._procutClipSrcBaseUrl = url;
   el.src = src;
   return true;
 }
@@ -325,6 +344,7 @@ export function assignClipMediaSrc(
 /** Fully clears a pooled element's source AND its dedupe tag. */
 export function clearClipMediaSrc(el: TaggedMediaElement): void {
   el._procutClipSrcTag = null;
+  el._procutClipSrcBaseUrl = null;
   el.removeAttribute('src');
   try { el.load(); } catch { /* already detached */ }
 }
