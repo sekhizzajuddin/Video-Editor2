@@ -230,6 +230,11 @@ export function PreviewCanvasContainer() {
 
   const isPanning = useRef(false);
   const lastPanPos = useRef({ x: 0, y: 0 });
+  // CT-6: pan used to write setViewport per raw pointer event. Coalesce to one
+  // setState per animation frame — deltas accumulate naturally because
+  // lastPanPos only advances when a frame is processed.
+  const panRafIdRef = useRef<number | null>(null);
+  const latestPanPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const [imageRevision, setImageRevision] = useState(0);
   const requestRedraw = useCallback(() => setImageRevision((r) => r + 1), []);
@@ -661,9 +666,13 @@ export function PreviewCanvasContainer() {
       if (Math.abs(currentTimeRef.current - lastRenderedTimeRef.current) > 0.001) {
       framePendingRef.current = true;
     }
-    if (tabVisible && framePendingRef.current) {
+      if (tabVisible && framePendingRef.current) {
         const freshState = useEditorStore.getState();
-        const currentlyScrubbing = freshState.isScrubbing;
+        // CT-2: treat an active canvas transform drag like a scrub for RENDER
+        // quality only — cheap path (skip heavy FX, concurrent renders) removes
+        // the mutex frame-drops that made resizing/rotating feel like the canvas
+        // was fighting the pointer. Audio is unaffected (isScrubbing untouched).
+        const currentlyScrubbing = freshState.isScrubbing || freshState.isEditingTransform;
         const currentlyPlaying = freshState.isPlaying;
 
         // BUG FIX: Restore split mutex strategy.
@@ -836,23 +845,45 @@ export function PreviewCanvasContainer() {
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (isPanning.current && (activeTool === 'hand' || isSpacePressed)) {
-      const rect = containerRef.current!.getBoundingClientRect();
-      // Uniform mapping — the canvas is object-contain, so panning must use one
-      // scale for both axes or the view drifts diagonally on non-16:9 panes.
-      const { scale: overlayScale } = getOverlayMapping(rect);
-      const scaleX = overlayScale;
-      const scaleY = overlayScale;
+      // CT-6: coalesce to one viewport write per frame.
+      latestPanPosRef.current = { x: e.clientX, y: e.clientY };
+      if (panRafIdRef.current !== null) return;
+      panRafIdRef.current = requestAnimationFrame(() => {
+        panRafIdRef.current = null;
+        const p = latestPanPosRef.current;
+        latestPanPosRef.current = null;
+        if (!p || !containerRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        // Uniform mapping — the canvas is object-contain, so panning must use one
+        // scale for both axes or the view drifts diagonally on non-16:9 panes.
+        const { scale: overlayScale } = getOverlayMapping(rect);
 
-      const dx = (e.clientX - lastPanPos.current.x) * scaleX;
-      const dy = (e.clientY - lastPanPos.current.y) * scaleY;
+        const dx = (p.x - lastPanPos.current.x) * overlayScale;
+        const dy = (p.y - lastPanPos.current.y) * overlayScale;
 
-      setViewport((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-      lastPanPos.current = { x: e.clientX, y: e.clientY };
+        setViewport((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+        lastPanPos.current = { x: p.x, y: p.y };
+      });
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
     isPanning.current = false;
+    // CT-6: flush any coalesced pan frame so the view lands exactly.
+    if (panRafIdRef.current !== null) {
+      cancelAnimationFrame(panRafIdRef.current);
+      panRafIdRef.current = null;
+      const p = latestPanPosRef.current;
+      latestPanPosRef.current = null;
+      if (p && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const { scale: overlayScale } = getOverlayMapping(rect);
+        const dx = (p.x - lastPanPos.current.x) * overlayScale;
+        const dy = (p.y - lastPanPos.current.y) * overlayScale;
+        setViewport((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+        lastPanPos.current = { x: p.x, y: p.y };
+      }
+    }
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 

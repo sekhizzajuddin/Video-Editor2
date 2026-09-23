@@ -195,6 +195,14 @@ export function PreviewCanvasOverlay({
   let activeClip: any = null;
   let mediaItem: any = null;
 
+  // CT-1/CT-3/CT-4: LATEST clip + viewport in refs. The drag effect must NOT
+  // re-subscribe its window listeners per frame (the old dep list kept
+  // `activeClip` — a new identity on every updateClip — so every mousemove tore
+  // down and re-registered move/up listeners and reset the snap state). Reads
+  // inside the drag go through these refs instead.
+  const activeClipRef = useRef<any>(activeClip);
+  const viewportRef = useRef(viewport);
+
   if (selectedClipId) {
     let found = false;
     for (const track of tracks) {
@@ -269,6 +277,11 @@ export function PreviewCanvasOverlay({
     return activeClip.startTime;
   }, [activeClip, tracks, pipWindows]);
 
+  // CT-1: refresh refs every render (cheap) so the drag effect can depend only
+  // on dragState and never tears down its listeners mid-gesture.
+  useEffect(() => { activeClipRef.current = activeClip; });
+  useEffect(() => { viewportRef.current = viewport; });
+
   let aX = activeClip ? getAnimatedValue(activeClip.transform.x, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.x']) : 0;
   let aY = activeClip ? getAnimatedValue(activeClip.transform.y, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.y']) : 0;
   let aScale = activeClip ? getAnimatedValue(activeClip.transform.scale, currentTime, activeClipAbsStartTime, activeClip.animations?.['transform.scale']) : 100;
@@ -317,17 +330,60 @@ export function PreviewCanvasOverlay({
 
   useEffect(() => {
     if (!dragState || !activeClip) return;
-    const handleMove = (e: MouseEvent | TouchEvent) => {
+
+    // CT-2: cheap canvas render path while a transform drag is in flight
+    // (skip heavy FX + concurrent renders). Unlike isScrubbing, this does NOT
+    // silence audio, so dragging during playback stays audible.
+    useEditorStore.getState().setIsEditingTransform(true);
+
+    // CT-3: read the dragged clip LIVE from the store on every processed event —
+    // the render-closure copy goes stale after the first store write, so two
+    // queued events in one React batch used to drop each other's keyframes.
+    const gestureClipId = activeClip.id;
+    const getLiveClip = (s: ReturnType<typeof useEditorStore.getState>) => {
+      return findClipDeep(s, gestureClipId)?.clip || activeClipRef.current || activeClip;
+    };
+
+    // CT-1: coalesce pointer events to ONE store write per animation frame —
+    // a 120 Hz+ mouse used to run the whole updateClip pipeline per raw event
+    // (2-4× the needed work, every event doing a full canvas render too).
+    let moveRafId: number | null = null;
+    let latestMoveEvent: MouseEvent | TouchEvent | null = null;
+
+    // CT-4: per-axis snap latches (engage/release hysteresis) + per-event
+    // velocity, so the "moving toward the line" test tracks actual motion rather
+    // than the whole drag's net displacement from mousedown.
+    let latchX: { pos: number; guide: number } | null = null;
+    let latchY: { pos: number; guide: number } | null = null;
+    let prevDx: number | null = null;
+    let prevDy: number | null = null;
+
+    const processMove = (e: MouseEvent | TouchEvent) => {
       const container = document.getElementById('preview-canvas-wrapper');
       if (!container) return;
       const rect = container.getBoundingClientRect();
       const { scale: overlayScale } = getOverlayMapping(rect);
+      const vp = viewportRef.current;
 
       const clientX = 'touches' in e && e.touches[0] ? e.touches[0].clientX : (e as MouseEvent).clientX;
       const clientY = 'touches' in e && e.touches[0] ? e.touches[0].clientY : (e as MouseEvent).clientY;
 
-      const dx = ((clientX - dragState.startX) * overlayScale) / viewport.zoom;
-      const dy = ((clientY - dragState.startY) * overlayScale) / viewport.zoom;
+      const dx = ((clientX - dragState.startX) * overlayScale) / vp.zoom;
+      const dy = ((clientY - dragState.startY) * overlayScale) / vp.zoom;
+
+      // CT-4: per-event velocity — the snap "moving toward the line" test used
+      // the since-mousedown displacement sign, which broke mid-gesture when the
+      // pointer reversed direction.
+      const dxVel = prevDx === null ? 0 : dx - prevDx;
+      const dyVel = prevDy === null ? 0 : dy - prevDy;
+      prevDx = dx;
+      prevDy = dy;
+
+      // CT-3: fresh store state for this event — the clip's animations AND the
+      // exact playhead (the `currentTime` prop is 15 Hz-throttled, so keyframes
+      // written from it landed slightly off-time).
+      const eventState = useEditorStore.getState();
+      const liveClip = getLiveClip(eventState);
 
       let x = 0, y = 0, scale = 100, rotation = 0;
       if (dragState.initTransform) {
@@ -341,7 +397,7 @@ export function PreviewCanvasOverlay({
       const baseW = dragState.baseW || 854;
       const baseH = dragState.baseH || 480;
 
-      let animations = activeClip.animations || {};
+      let animations = liveClip.animations || {};
       const getActiveClipAbsoluteStartTime = (clipId: string): number => {
         const state = useEditorStore.getState();
         const found = findClipDeep(state, clipId);
@@ -361,7 +417,7 @@ export function PreviewCanvasOverlay({
         return found?.clip.startTime ?? 0;
       };
       const activeClipAbsStart = getActiveClipAbsoluteStartTime(activeClip.id);
-      const localTime = currentTime - activeClipAbsStart;
+      const localTime = eventState.currentTime - activeClipAbsStart;
 
       const getNewAnimations = (prop: string, val: number) => {
         if (animations[prop]) {
@@ -401,7 +457,7 @@ export function PreviewCanvasOverlay({
         let deltaX = dx;
         let deltaY = dy;
         
-        if (activeClip.transform.perspectivePin) {
+        if (liveClip.transform.perspectivePin) {
           const invScale = 100 / aScale;
           deltaX *= invScale;
           deltaY *= invScale;
@@ -441,17 +497,17 @@ export function PreviewCanvasOverlay({
             newAnimations[kx] = addOrUpdateKeyframe(animations[kx] || [], localTime, valX);
             newAnimations[ky] = addOrUpdateKeyframe(animations[ky] || [], localTime, valY);
           }
-          updateClip(activeClip.id, {
+          updateClip(gestureClipId, {
             transform: {
-              ...activeClip.transform,
+              ...liveClip.transform,
               perspectiveCorners: updatedCorners
             },
             animations: newAnimations
           });
         } else {
-          updateClip(activeClip.id, {
+          updateClip(gestureClipId, {
             transform: {
-              ...activeClip.transform,
+              ...liveClip.transform,
               perspectiveCorners: updatedCorners
             }
           });
@@ -486,7 +542,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, vp);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -510,7 +566,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, vp);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -534,7 +590,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, vp);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -558,7 +614,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, vp);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -585,7 +641,7 @@ export function PreviewCanvasOverlay({
           const container = document.getElementById('preview-canvas-wrapper');
           if (container) {
             const rect = container.getBoundingClientRect();
-            const ptr = clientToViewportSpace(clientX, clientY, rect, viewport);
+            const ptr = clientToViewportSpace(clientX, clientY, rect, vp);
             const clientXLocal = ptr.x - (offsetX + W / 2 + aX);
             const clientYLocal = ptr.y - (offsetY + H / 2 + aY);
             
@@ -609,9 +665,9 @@ export function PreviewCanvasOverlay({
           }
         }
 
-        updateClip(activeClip.id, {
+        updateClip(gestureClipId, {
           mask: {
-            ...activeClip.mask,
+            ...liveClip.mask,
             x: mx,
             y: my,
             width: mw,
@@ -626,11 +682,14 @@ export function PreviewCanvasOverlay({
       }
       
       if (dragState.type === 'virtualCamera') {
-        const dx = (clientX - dragState.startX) / (viewport.zoom * 854);
-        const dy = (clientY - dragState.startY) / (viewport.zoom * 480);
+        // CT-5: same unit mapping as the move drag — the hard-coded 854×480 (old
+        // preview space) plus the missing overlayScale made the camera drag speed
+        // wrong under any zoom/letterboxing (worst on 9:16 projects).
+        const dx = (clientX - dragState.startX) * overlayScale / (vp.zoom * W);
+        const dy = (clientY - dragState.startY) * overlayScale / (vp.zoom * H);
         const newX = dragState.initVirtualCamera!.x + dx;
         const newY = dragState.initVirtualCamera!.y + dy;
-        addOrUpdateVirtualCameraKeyframe(currentTime, newX, newY);
+        addOrUpdateVirtualCameraKeyframe(eventState.currentTime, newX, newY);
         return;
       }
 
@@ -653,18 +712,18 @@ export function PreviewCanvasOverlay({
         // width, and it did not shrink as the user zoomed in — so on vertical
         // projects the centre line grabbed the clip over a wide band and fine
         // positioning became a fight.
-        const snapThreshold = Math.max(2, (Math.min(W, H) * 0.02) / (viewport.zoom || 1));
+        const snapThreshold = Math.max(2, (Math.min(W, H) * 0.02) / (vp.zoom || 1));
 
         const draggedWidth = (dragState.baseW || 854) * (scale / 100);
         const draggedHeight = (dragState.baseH || 480) * (scale / 100);
 
-        const state = useEditorStore.getState();
+        const state = eventState;
         const otherActiveClips: any[] = [];
         state.tracks.forEach((track) => {
           if (track.hidden) return;
           track.clips.forEach((clip) => {
-            if (clip.id === activeClip.id) return;
-            if (currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration) {
+            if (clip.id === gestureClipId) return;
+            if (eventState.currentTime >= clip.startTime && eventState.currentTime < clip.startTime + clip.duration) {
               otherActiveClips.push(clip);
             }
           });
@@ -679,17 +738,17 @@ export function PreviewCanvasOverlay({
             }
             if (!parentClip) return;
             const pipAbsStart = parentClip.startTime + (pip.relativeStartTime || 0);
-            if (currentTime >= pipAbsStart && currentTime < pipAbsStart + pip.duration) {
+            if (eventState.currentTime >= pipAbsStart && eventState.currentTime < pipAbsStart + pip.duration) {
               // Add the parent clip itself as a snap reference for PIP children
               // so PIP layers can align to their container's position
-              if (parentClip.id !== activeClip.id) {
+              if (parentClip.id !== gestureClipId) {
                 otherActiveClips.push(parentClip);
               }
               pip.tracks.forEach((track: any) => {
                 track.clips.forEach((clip: any) => {
-                  if (clip.id === activeClip.id) return;
+                  if (clip.id === gestureClipId) return;
                   const ptAbsStart = pipAbsStart + clip.startTime;
-                  if (currentTime >= ptAbsStart && currentTime < ptAbsStart + clip.duration) {
+                  if (eventState.currentTime >= ptAbsStart && eventState.currentTime < ptAbsStart + clip.duration) {
                     otherActiveClips.push(clip);
                   }
                 });
@@ -733,7 +792,7 @@ export function PreviewCanvasOverlay({
         ];
 
         otherActiveClips.forEach((other) => {
-          const dims = getClipDimensions(other, mediaLibrary, snapW, snapH);
+          const dims = getClipDimensions(other, eventState.mediaLibrary, snapW, snapH);
           const oX = other.transform?.x ?? 0;
           targetsX.push(oX - dims.width / 2);
           targetsX.push(oX);
@@ -746,31 +805,48 @@ export function PreviewCanvasOverlay({
           { val: newX + draggedWidth / 2, type: 'right' }
         ];
 
-        draggedAnchorsX.forEach((anchor) => {
-          targetsX.forEach((targetVal) => {
-            const diff = Math.abs(anchor.val - targetVal);
-            if (diff >= snapThreshold || diff >= minDiffX) return;
-            const candidate =
-              anchor.type === 'left'
-                ? targetVal + draggedWidth / 2
-                : anchor.type === 'center'
-                  ? targetVal
-                  : targetVal - draggedWidth / 2;
-            // Reject a snap whose CORRECTION would push the clip against the drag
-            // direction. Otherwise a guide just behind the pointer drags the clip
-            // backwards, which reads as "it moves the wrong way".
-            const correction = candidate - newX;
-            if (correction !== 0 && Math.sign(correction) === -Math.sign(dx)) return;
-            minDiffX = diff;
-            bestSnapX = candidate;
-            snapXVal = targetVal;
-          });
-        });
+        // CT-4: latch/release hysteresis. Once latched onto a guide, the position
+        // stays snapped until the raw position is pulled well past the engage
+        // band — the clip no longer needs yanking off the line and cannot bounce
+        // in/out of a snap while hovering the boundary.
+        if (latchX) {
+          if (Math.abs(newX - latchX.pos) > snapThreshold * 1.75) {
+            latchX = null; // pulled away strongly — release the latch
+          } else {
+            newX = latchX.pos;
+            newGuides.push({ axis: 'x', position: latchX.guide });
+          }
+        }
 
-        if (snapArmedX && bestSnapX !== null) {
-          newX = bestSnapX;
-          if (snapXVal !== null) {
-            newGuides.push({ axis: 'x', position: snapXVal });
+        if (!latchX) {
+          draggedAnchorsX.forEach((anchor) => {
+            targetsX.forEach((targetVal) => {
+              const diff = Math.abs(anchor.val - targetVal);
+              if (diff >= snapThreshold || diff >= minDiffX) return;
+              const candidate =
+                anchor.type === 'left'
+                  ? targetVal + draggedWidth / 2
+                  : anchor.type === 'center'
+                    ? targetVal
+                    : targetVal - draggedWidth / 2;
+              // Reject a snap whose CORRECTION would push the clip against the
+              // pointer's CURRENT motion (per-event velocity). The old test used
+              // the whole drag's net displacement from mousedown, so reversing
+              // direction mid-gesture made snaps spuriously reject.
+              const correction = candidate - newX;
+              if (correction !== 0 && dxVel !== 0 && Math.sign(correction) === -Math.sign(dxVel)) return;
+              minDiffX = diff;
+              bestSnapX = candidate;
+              snapXVal = targetVal;
+            });
+          });
+
+          if (snapArmedX && bestSnapX !== null) {
+            newX = bestSnapX;
+            latchX = { pos: bestSnapX, guide: snapXVal! };
+            if (snapXVal !== null) {
+              newGuides.push({ axis: 'x', position: snapXVal });
+            }
           }
         }
 
@@ -785,7 +861,7 @@ export function PreviewCanvasOverlay({
         ];
 
         otherActiveClips.forEach((other) => {
-          const dims = getClipDimensions(other, mediaLibrary, snapW, snapH);
+          const dims = getClipDimensions(other, eventState.mediaLibrary, snapW, snapH);
           const oY = other.transform?.y ?? 0;
           targetsY.push(oY - dims.height / 2);
           targetsY.push(oY);
@@ -798,28 +874,40 @@ export function PreviewCanvasOverlay({
           { val: newY + draggedHeight / 2, type: 'bottom' }
         ];
 
-        draggedAnchorsY.forEach((anchor) => {
-          targetsY.forEach((targetVal) => {
-            const diff = Math.abs(anchor.val - targetVal);
-            if (diff >= snapThreshold || diff >= minDiffY) return;
-            const candidate =
-              anchor.type === 'top'
-                ? targetVal + draggedHeight / 2
-                : anchor.type === 'center'
-                  ? targetVal
-                  : targetVal - draggedHeight / 2;
-            const correction = candidate - newY;
-            if (correction !== 0 && Math.sign(correction) === -Math.sign(dy)) return;
-            minDiffY = diff;
-            bestSnapY = candidate;
-            snapYVal = targetVal;
-          });
-        });
+        if (latchY) {
+          if (Math.abs(newY - latchY.pos) > snapThreshold * 1.75) {
+            latchY = null;
+          } else {
+            newY = latchY.pos;
+            newGuides.push({ axis: 'y', position: latchY.guide });
+          }
+        }
 
-        if (snapArmedY && bestSnapY !== null) {
-          newY = bestSnapY;
-          if (snapYVal !== null) {
-            newGuides.push({ axis: 'y', position: snapYVal });
+        if (!latchY) {
+          draggedAnchorsY.forEach((anchor) => {
+            targetsY.forEach((targetVal) => {
+              const diff = Math.abs(anchor.val - targetVal);
+              if (diff >= snapThreshold || diff >= minDiffY) return;
+              const candidate =
+                anchor.type === 'top'
+                  ? targetVal + draggedHeight / 2
+                  : anchor.type === 'center'
+                    ? targetVal
+                    : targetVal - draggedHeight / 2;
+              const correction = candidate - newY;
+              if (correction !== 0 && dyVel !== 0 && Math.sign(correction) === -Math.sign(dyVel)) return;
+              minDiffY = diff;
+              bestSnapY = candidate;
+              snapYVal = targetVal;
+            });
+          });
+
+          if (snapArmedY && bestSnapY !== null) {
+            newY = bestSnapY;
+            latchY = { pos: bestSnapY, guide: snapYVal! };
+            if (snapYVal !== null) {
+              newGuides.push({ axis: 'y', position: snapYVal });
+            }
           }
         }
 
@@ -861,7 +949,7 @@ export function PreviewCanvasOverlay({
         const cy = offsetY + H / 2 + y;
         // Undo the viewport zoom/pan too, or the angle is measured in the wrong
         // space and the clip snaps the moment the handle is grabbed.
-        const ptrAbs = clientToViewportSpace(clientX, clientY, rect, viewport);
+        const ptrAbs = clientToViewportSpace(clientX, clientY, rect, vp);
         const mx = ptrAbs.x;
         const my = ptrAbs.y;
         // Rotate by the CHANGE in pointer angle since mousedown, applied to the
@@ -942,7 +1030,7 @@ export function PreviewCanvasOverlay({
         // the pointer had really moved.
         const cx = offsetX + W / 2 + x;
         const cy = offsetY + H / 2 + y;
-        const ptrAbs = clientToViewportSpace(clientX, clientY, rect, viewport);
+        const ptrAbs = clientToViewportSpace(clientX, clientY, rect, vp);
         const mx = ptrAbs.x;
         const my = ptrAbs.y;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
@@ -996,13 +1084,39 @@ export function PreviewCanvasOverlay({
         scaleAnimationTrack('transform.scale', scale / (initScaleCorner || 100));
       }
 
-      updateClip(activeClip.id, { transform: { ...activeClip.transform, x, y, scale, rotation }, crop, animations });
+      updateClip(gestureClipId, { transform: { ...liveClip.transform, x, y, scale, rotation }, crop, animations });
+    };
+
+    // CT-1: coalesced event entry — keep the newest event, run once per frame.
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      latestMoveEvent = e;
+      if (moveRafId !== null) return;
+      moveRafId = requestAnimationFrame(() => {
+        moveRafId = null;
+        const ev = latestMoveEvent;
+        latestMoveEvent = null;
+        if (ev) processMove(ev);
+      });
     };
 
     const handleUp = () => {
+      // Land the FINAL pointer position exactly: flush the coalesced event
+      // synchronously before committing, so a flick-fast release never loses
+      // the last few pixels.
+      if (moveRafId !== null) {
+        cancelAnimationFrame(moveRafId);
+        moveRafId = null;
+      }
+      if (latestMoveEvent) {
+        processMove(latestMoveEvent);
+        latestMoveEvent = null;
+      }
       setDragState(null);
       setSnapGuides([]);
+      useEditorStore.getState().setIsEditingTransform(false);
       useEditorStore.getState().saveSnapshot();
+      // One full-quality redraw now that the cheap render path is over.
+      window.dispatchEvent(new CustomEvent('procut-scrub-finalize'));
     };
 
     window.addEventListener('mousemove', handleMove);
@@ -1016,8 +1130,16 @@ export function PreviewCanvasOverlay({
       window.removeEventListener('touchmove', handleMove);
       window.removeEventListener('touchend', handleUp);
       window.removeEventListener('touchcancel', handleUp);
+      // CT-1/CT-2: purge a pending frame and always release the cheap-render
+      // flag, even if the gesture dies without a pointerup.
+      if (moveRafId !== null) cancelAnimationFrame(moveRafId);
+      useEditorStore.getState().setIsEditingTransform(false);
     };
-  }, [dragState, activeClip, updateClip, mediaItem, videoElements, viewport, currentTime, aspectRatio]);
+    // CT-1: depend on the gesture only. Reads inside go through the live refs
+    // (activeClipRef/viewportRef) + fresh store state, so per-frame identity
+    // churn no longer re-subscribes listeners or resets the snap latches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dragState, updateClip]);
 
   // ── Motion-tracked region editing (FX tab) ────────────────────────────────
   //
@@ -1223,7 +1345,12 @@ export function PreviewCanvasOverlay({
   useEffect(() => {
     if (!regionDrag || !activeClip) return;
 
-    const onMove = (e: MouseEvent) => {
+    // CT-6: same one-store-write-per-frame coalescing as the transform drag —
+    // region box drags used to run updateClip per raw pointer event.
+    let regionRafId: number | null = null;
+    let latestRegionEvent: MouseEvent | null = null;
+
+    const processMove = (e: MouseEvent) => {
       const container = document.getElementById('preview-canvas-wrapper');
       if (!container) return;
       const rect = container.getBoundingClientRect();
@@ -1258,7 +1385,27 @@ export function PreviewCanvasOverlay({
       writeRegion(regionDrag.index, nx, ny, nw, nh);
     };
 
+    const onMove = (e: MouseEvent) => {
+      latestRegionEvent = e;
+      if (regionRafId !== null) return;
+      regionRafId = requestAnimationFrame(() => {
+        regionRafId = null;
+        const ev = latestRegionEvent;
+        latestRegionEvent = null;
+        if (ev) processMove(ev);
+      });
+    };
+
     const onUp = () => {
+      // Flush the coalesced event so the final position lands exactly.
+      if (regionRafId !== null) {
+        cancelAnimationFrame(regionRafId);
+        regionRafId = null;
+      }
+      if (latestRegionEvent) {
+        processMove(latestRegionEvent);
+        latestRegionEvent = null;
+      }
       setRegionDrag(null);
       useEditorStore.getState().saveSnapshot('Adjust Motion Region');
     };
@@ -1268,6 +1415,7 @@ export function PreviewCanvasOverlay({
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (regionRafId !== null) cancelAnimationFrame(regionRafId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regionDrag, activeClip, viewport, motionEffects]);

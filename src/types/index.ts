@@ -962,6 +962,14 @@ export interface EditorState {
   isPlaying: boolean;
   isBuffering: boolean;
   isScrubbing: boolean;
+  /**
+   * CT-2: set while a canvas transform gesture (move/resize/rotate/crop/mask/
+   * perspective) is in flight. Unlike isScrubbing (which also silences audio),
+   * this ONLY tells the renderer to take the cheap path (skip heavy async FX,
+   * allow concurrent renders) — a transform drag during playback must not cut
+   * the audio.
+   */
+  isEditingTransform: boolean;
   perfDowngraded: boolean;
   totalDuration: number;
   playbackSpeed: number;

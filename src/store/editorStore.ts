@@ -259,6 +259,7 @@ interface EditorActions {
   setInPoint: (time: number | null) => void;
   setOutPoint: (time: number | null) => void;
   setIsScrubbing: (scrubbing: boolean) => void;
+  setIsEditingTransform: (editing: boolean) => void;
   setPerfDowngraded: (downgraded: boolean) => void;
 
   // Tools
@@ -457,6 +458,7 @@ const initialState: EditorState = {
   isPlaying: false,
   isBuffering: false,
   isScrubbing: false,
+  isEditingTransform: false,
   perfDowngraded: false,
   totalDuration: 0,
   playbackSpeed: 1,
@@ -3527,6 +3529,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
   },
   setIsScrubbing: (scrubbing) => set({ isScrubbing: scrubbing }),
+  setIsEditingTransform: (editing) => set({ isEditingTransform: editing }),
   setIsBuffering: (isBuffering) => set({ isBuffering }),
   setPerfDowngraded: (downgraded) => set({ perfDowngraded: downgraded }),
   setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
