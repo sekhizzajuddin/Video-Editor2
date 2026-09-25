@@ -44,9 +44,9 @@ if (typeof window !== 'undefined') {
 /** Check if waveform peaks contain any audible (non-zero) data. */
 function hasAudiblePeaks(peaks: number[] | undefined): boolean {
   if (!peaks || peaks.length === 0) return false;
-  // Quick scan: at least one peak must exceed the render threshold
+  // Quick scan: at least one peak must exceed a minimal threshold (0.005)
   for (let i = 0; i < peaks.length; i++) {
-    if (peaks[i] > 0.02) return true;
+    if (peaks[i] > 0.005) return true;
   }
   return false;
 }
@@ -170,7 +170,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     import('@/utils/mediaProbe')
       .then(({ extractWaveformFromUrl }) => extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration }))
       .then((peaks) => {
-        if (peaks && peaks.length > 0 && peaks.some((p) => p > 0.02)) {
+        if (peaks && peaks.length > 0 && peaks.some((p) => p > 0.005)) {
           (useEditorStore.getState() as any).setMediaWaveformPeaks?.(media.id, peaks);
         } else {
           // Video has no audible audio — don't retry
@@ -402,7 +402,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
                   width={width}
                   height={VIDEO_WAVEFORM_HEIGHT}
                   small
-                  color="rgba(191, 219, 254, 0.85)"
+                  color="rgba(219, 234, 254, 0.95)"
                   trimStart={clip.trimStart}
                   clipDuration={clip.duration}
                   speed={clip.speed}

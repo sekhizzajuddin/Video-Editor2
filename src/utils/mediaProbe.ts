@@ -167,14 +167,32 @@ export async function extractWaveformFromUrl(
 ): Promise<number[]> {
   const hint = opts?.hintDuration ?? 0;
   const decodeRate = hint > 1800 ? 8000 : 16000;
-  const tmpCtx = new OfflineAudioContext(1, 1, decodeRate);
-  let audioBuffer: AudioBuffer;
+  let audioBuffer: AudioBuffer | null = null;
+  const arrayBuffer = await blobUrlToArrayBuffer(url);
+
+  // Attempt 1: Low-memory OfflineAudioContext (16kHz or 8kHz PCM)
   try {
-    const arrayBuffer = await blobUrlToArrayBuffer(url);
-    audioBuffer = await tmpCtx.decodeAudioData(arrayBuffer);
-  } finally {
-    await (tmpCtx as any).close?.();
+    const tmpCtx = new OfflineAudioContext(1, 1, decodeRate);
+    audioBuffer = await tmpCtx.decodeAudioData(arrayBuffer.slice(0));
+  } catch (_offlineErr) {
+    // Attempt 2: Standard AudioContext fallback (handles video containers OfflineAudioContext might reject)
+    try {
+      const AudioCtxCtor =
+        (typeof window !== 'undefined' && ((window as any).AudioContext || (window as any).webkitAudioContext)) || null;
+      if (AudioCtxCtor) {
+        const fallbackCtx = new AudioCtxCtor();
+        try {
+          audioBuffer = await fallbackCtx.decodeAudioData(arrayBuffer.slice(0));
+        } finally {
+          fallbackCtx.close().catch(() => {});
+        }
+      }
+    } catch (_fallbackErr) {
+      return [];
+    }
   }
+
+  if (!audioBuffer) return [];
 
   const rawData = audioBuffer.getChannelData(0);
   const duration = audioBuffer.duration || 1;

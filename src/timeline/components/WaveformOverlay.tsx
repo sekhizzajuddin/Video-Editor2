@@ -166,8 +166,8 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     // Chrome per clip). The CSS width still spans the full clip; only the
     // bitmap resolution is capped and the bars scale accordingly.
     const MAX_PHYS = 16384; // safe under every browser's canvas limit
-    const physW = Math.min(W * dpr, MAX_PHYS);
-    const physH = Math.min(H * dpr, MAX_PHYS);
+    const physW = Math.max(1, Math.min(Math.round(W * dpr), MAX_PHYS));
+    const physH = Math.max(1, Math.min(Math.round(H * dpr), MAX_PHYS));
 
     // Resize canvas only when dimensions change
     if (canvas.width !== physW || canvas.height !== physH) {
@@ -176,13 +176,13 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       canvas.style.width = `${W}px`;
       canvas.style.height = `${H}px`;
     }
-    // P4 FIX: if the browser rejected the resize (over its limits), don't draw
-    // into a broken bitmap — skip silently rather than paint garbage.
-    if (canvas.width !== physW || canvas.height !== physH) return;
+    // Guard against browser failure to create context or 0-dimension canvas
+    if (canvas.width === 0 || canvas.height === 0) return;
 
     // Reset transform cleanly — prevents DPR scale accumulation
     const scaleX = physW / W;
-    ctx.setTransform(scaleX, 0, 0, dpr, 0, 0);
+    const scaleY = physH / H;
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
     if (peaks.length === 0) return;
@@ -201,7 +201,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     const maxHalf = cy * (small ? 0.88 : 0.92);
 
     ctx.fillStyle = small
-      ? `rgba(${r},${g},${b},0.80)`
+      ? `rgba(${r},${g},${b},0.90)`
       : `rgba(${r},${g},${b},0.85)`;
 
     for (let i = 0; i < peaks.length; i++) {
@@ -209,14 +209,14 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       const halfH = peak * maxHalf;
       // For small (video) waveforms, lower the min bar threshold so even
       // quiet audio is visible in the 18px strip.
-      const minBar = small ? 0.3 : 0.5;
+      const minBar = small ? 0.25 : 0.5;
       if (halfH < minBar) continue;
       ctx.fillRect(i * barW, cy - halfH, Math.max(barW, 0.75), halfH * 2);
     }
 
     // Center line — thin baseline so dialogue start/end is immediately visible
     ctx.fillStyle = small
-      ? `rgba(${r},${g},${b},0.35)`
+      ? `rgba(${r},${g},${b},0.45)`
       : `rgba(${r},${g},${b},0.15)`;
     ctx.fillRect(0, cy - 0.5, W, 1);
   }, [peaks, width, height, small, r, g, b]);
@@ -224,7 +224,7 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
   return (
     <canvas
       ref={canvasRef}
-      className="absolute inset-0 pointer-events-none"
+      className="absolute inset-0 pointer-events-none w-full h-full"
       style={{ display: 'block' }}
     />
   );
