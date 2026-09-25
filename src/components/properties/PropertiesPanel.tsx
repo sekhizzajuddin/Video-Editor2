@@ -36,6 +36,8 @@ import {
   Layers,
   Check,
   Repeat,
+  Play,
+  Plus,
 } from 'lucide-react';
 import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
@@ -52,7 +54,13 @@ import {
   getMaxTransitionDuration,
   TRANSITION_KIND_INFO,
   TRANSITION_EASINGS,
+  TRANSITION_SOUND_OPTIONS,
+  type TransitionSoundOption,
 } from '@/utils/transitionEngine';
+import {
+  playTransitionSoundPreview,
+  synthesizeTransitionSoundWav,
+} from '@/timeline/sfxSynth';
 import { trackMotion } from '@/utils/motionTracker';
 import { compileStoryboard } from '@/utils/storyboardCompiler';
 import { analyzeStoryboardWithGemini, refineAudioQueryWithGroq, analyzeMotionGraphicsWithGemini, AIMotionGraphicSuggestion } from '@/utils/aiClient';
@@ -519,6 +527,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   const [motionGraphicsSuggestions, setMotionGraphicsSuggestions] = useState<AIMotionGraphicSuggestion[] | null>(null);
   const [showMotionGraphicsDesigner, setShowMotionGraphicsDesigner] = useState(false);
+
+  const [isPlayingTransSound, setIsPlayingTransSound] = useState(false);
+  const [isAddingTransSound, setIsAddingTransSound] = useState(false);
 
   const handleAudioDucking = async () => {
     if (!selectedClip || !selectedClip.mediaId) return;
@@ -1320,7 +1331,126 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       { v: 'down', label: 'Down' },
     ];
 
-    // Longest transition that still fits between the two neighbouring clips.
+    const handlePreviewSound = async () => {
+      if (!norm.soundEffect || norm.soundEffect === 'none') return;
+      setIsPlayingTransSound(true);
+      try {
+        let customUrl: string | undefined;
+        if (norm.soundEffect.startsWith('media:')) {
+          const mediaId = norm.soundEffect.replace(/^media:/, '');
+          const item = mediaLibrary?.find((m: any) => m.id === mediaId);
+          if (item?.url) customUrl = item.url;
+        }
+        await playTransitionSoundPreview(norm.soundEffect, norm.soundVolume, customUrl);
+      } catch (err) {
+        console.error('Failed to preview transition sound:', err);
+      } finally {
+        setIsPlayingTransSound(false);
+      }
+    };
+
+    const handleAddToTimeline = async () => {
+      if (!norm.soundEffect || norm.soundEffect === 'none') {
+        toast.warning('Please select a sound effect first');
+        return;
+      }
+      setIsAddingTransSound(true);
+      try {
+        const transDuration = selectedTransition?.duration ?? 0.5;
+        const isTransitionIn = Boolean(
+          selectedTransitionClip.transitionIn &&
+          (selectedTransitionClip.transitionIn === selectedTransition ||
+           selectedTransitionClip.transitionIn.id === selectedTransition.id)
+        );
+        const cutTime = isTransitionIn
+          ? selectedTransitionClip.startTime
+          : selectedTransitionClip.startTime + selectedTransitionClip.duration;
+
+        let transStartTime = cutTime - transDuration / 2;
+        if (alignment === 'left') {
+          transStartTime = cutTime;
+        } else if (alignment === 'right') {
+          transStartTime = cutTime - transDuration;
+        }
+        transStartTime = Math.max(0, transStartTime);
+
+        let audioTrack = tracks.find((t: any) => t.type === 'audio');
+        if (!audioTrack) {
+          addTrack('audio');
+          const updatedTracks = useEditorStore.getState().tracks;
+          audioTrack = updatedTracks.find((t: any) => t.type === 'audio') || updatedTracks[updatedTracks.length - 1];
+        }
+
+        if (norm.soundEffect.startsWith('media:')) {
+          const mediaId = norm.soundEffect.replace(/^media:/, '');
+          const mediaItem = mediaLibrary?.find((m: any) => m.id === mediaId);
+          if (!mediaItem) {
+            toast.error('Selected audio media item not found');
+            return;
+          }
+          const clipId = `trans_sfx_${Date.now()}`;
+          const clipDuration = Math.min(mediaItem.duration || transDuration, transDuration);
+          const newAudioClip = {
+            id: clipId,
+            mediaId: mediaItem.id,
+            trackId: audioTrack.id,
+            startTime: transStartTime,
+            duration: clipDuration,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            volume: Math.round(norm.soundVolume * 100),
+            muted: false,
+          };
+          addClip(newAudioClip);
+          toast.success(`Added "${mediaItem.name}" to audio track`);
+        } else {
+          const soundOpt = TRANSITION_SOUND_OPTIONS.find((s) => s.id === norm.soundEffect);
+          const soundLabel = soundOpt?.label || 'Transition SFX';
+          const blob = await synthesizeTransitionSoundWav(norm.soundEffect, transDuration);
+          const audioUrl = URL.createObjectURL(blob);
+          const mediaId = `trans_sfx_${Date.now()}`;
+          const newMediaItem = {
+            id: mediaId,
+            name: `${soundLabel} (Transition)`,
+            type: 'audio' as const,
+            duration: transDuration,
+            url: audioUrl,
+            createdAt: Date.now(),
+          };
+          try {
+            await addMedia(newMediaItem, new File([blob], `${mediaId}.wav`, { type: 'audio/wav' }));
+          } catch {
+            addMedia(newMediaItem);
+          }
+          const newAudioClip = {
+            id: mediaId,
+            mediaId: mediaId,
+            trackId: audioTrack.id,
+            startTime: transStartTime,
+            duration: transDuration,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            volume: Math.round(norm.soundVolume * 100),
+            muted: false,
+          };
+          addClip(newAudioClip);
+          toast.success(`Added "${soundLabel}" to audio track`);
+        }
+      } catch (err: any) {
+        console.error('Failed to add transition sound to timeline:', err);
+        toast.error('Failed to add transition sound to timeline');
+      } finally {
+        setIsAddingTransSound(false);
+      }
+    };
 
 
     return (
@@ -1516,6 +1646,137 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               />
             </div>
           )}
+
+          {/* Sound Effect (SFX) */}
+          <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-3">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-1.5">
+                <Volume2 className="w-3.5 h-3.5 text-purple-400" />
+                <label className="text-xs text-[var(--theme-text-primary)] font-semibold">Sound Effect</label>
+              </div>
+              {norm.soundEffect && norm.soundEffect !== 'none' && (
+                <span className="text-[10px] text-purple-300 font-mono">
+                  {Math.round(norm.soundVolume * 100)}%
+                </span>
+              )}
+            </div>
+
+            {/* Sound Selector Dropdown */}
+            <div className="relative">
+              <select
+                value={norm.soundEffect}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  updateTransition(selectedTransitionClip.id, {
+                    soundEffect: val,
+                    params: { ...(selectedTransition.params || {}), soundEffect: val },
+                  } as any);
+                }}
+                className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-[var(--theme-text-primary)] rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer pr-8"
+              >
+                <optgroup label="Preset Sounds">
+                  {TRANSITION_SOUND_OPTIONS.map((opt) => {
+                    const isRec = opt.recommendedFor?.includes(norm.kind);
+                    return (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label}{isRec ? ' ★ (Recommended)' : ''}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+                {mediaLibrary?.some((m: any) => m.type === 'audio') && (
+                  <optgroup label="Project Audio Media">
+                    {mediaLibrary
+                      .filter((m: any) => m.type === 'audio')
+                      .map((m: any) => (
+                        <option key={`media:${m.id}`} value={`media:${m.id}`}>
+                          🎵 {m.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)] absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+
+            {/* Description / recommendation note */}
+            {norm.soundEffect && norm.soundEffect !== 'none' && (
+              <div className="space-y-2">
+                {(() => {
+                  const selectedOpt = TRANSITION_SOUND_OPTIONS.find((s) => s.id === norm.soundEffect);
+                  if (selectedOpt) {
+                    const isRec = selectedOpt.recommendedFor?.includes(norm.kind);
+                    return (
+                      <div className="flex items-center justify-between text-[11px] text-[var(--theme-text-muted)]">
+                        <span className="truncate max-w-[200px]">{selectedOpt.description}</span>
+                        {isRec && (
+                          <span className="text-[10px] bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded border border-purple-500/30 shrink-0">
+                            Recommended
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Volume slider */}
+                <div className="space-y-1 pt-1">
+                  <div className="flex justify-between items-center text-[11px] text-[var(--theme-text-muted)]">
+                    <span>Volume</span>
+                    <span className="font-mono text-purple-300">{Math.round(norm.soundVolume * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={norm.soundVolume}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      updateTransition(selectedTransitionClip.id, {
+                        soundVolume: val,
+                        params: { ...(selectedTransition.params || {}), soundVolume: val },
+                      } as any);
+                    }}
+                    className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
+                  />
+                </div>
+
+                {/* Action buttons: Audition / Preview + Add to Timeline */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handlePreviewSound}
+                    disabled={isPlayingTransSound}
+                    className="flex-1 py-1.5 px-2 bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/30 hover:border-purple-500 text-purple-300 hover:text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    title="Audition sound preview"
+                  >
+                    {isPlayingTransSound ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                    )}
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddToTimeline}
+                    disabled={isAddingTransSound}
+                    className="flex-1 py-1.5 px-2 bg-[var(--theme-bg-subpanel)] hover:bg-[var(--theme-bg-card)] border border-[var(--theme-border)] hover:border-purple-500/50 text-[var(--theme-text-primary)] hover:text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    title="Add this sound effect to an audio track on the timeline"
+                  >
+                    {isAddingTransSound ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Plus className="w-3.5 h-3.5" />
+                    )}
+                    Add to Track
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Delete */}
           <button

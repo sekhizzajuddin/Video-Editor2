@@ -31,7 +31,8 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime, setIsPlayingClock } from '@/utils/playbackClock';
-import { findActiveTransition, getTransitionAudioGains, getTransitionWindow } from '@/utils/transitionEngine';
+import { findActiveTransition, getTransitionAudioGains, getTransitionWindow, normalizeTransition } from '@/utils/transitionEngine';
+import { playTransitionSoundPreview } from '@/timeline/sfxSynth';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 import { isPreviewSuspendedForExport, subscribePreviewSuspension } from '@/utils/previewSuspension';
 
@@ -968,6 +969,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // PERF (multi-split fix): the last boundary we pre-rolled a decoder for, so
   // the warm-up seek runs once per split crossing instead of every sync tick.
   const preRolledBoundaryRef = useRef<number | null>(null);
+  const triggeredTransitionsRef = useRef<Set<string>>(new Set());
 
   // Worker export uses independent decoders. A paused <video> still owns a
   // decoder and decoded surfaces, so pause() alone is not sufficient after a
@@ -1777,6 +1779,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // Clear lastActiveClipIds so ALL clips at the new position are treated as freshly activated,
           // which forces hard seeks to their exact target frame and resets accumulated drift
           lastActiveClipIdsRef.current = new Set();
+          triggeredTransitionsRef.current.clear();
         }
         cachedActiveClipsRef.current = getActiveClips();
         lastCachedStoreTracksRef.current = storeTracks;
@@ -2233,6 +2236,36 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           if (!playingEls.has(entry.el) && !entry.el.paused) entry.el.pause();
           pendingSeeksRef.current.delete(clipId);
         }
+      }
+
+      // ── Transition Sound Playback ──────────────────────────────────────────
+      if (playing && !scrubbing && !globalMuted) {
+        for (const track of sortedTracksRef.current) {
+          if (track.type === 'video' && !track.muted) {
+            const active = findActiveTransition(track.clips, ct);
+            if (active && active.transition) {
+              const trans = active.transition;
+              const norm = normalizeTransition(trans);
+              if (norm.soundEffect && norm.soundEffect !== 'none') {
+                const transKey = `${active.from?.id}_${active.to?.id}_${active.windowStart.toFixed(2)}`;
+                if (!triggeredTransitionsRef.current.has(transKey)) {
+                  if (ct >= active.windowStart && ct < active.windowEnd) {
+                    triggeredTransitionsRef.current.add(transKey);
+                    let customUrl: string | undefined;
+                    if (norm.soundEffect.startsWith('media:')) {
+                      const mId = norm.soundEffect.replace(/^media:/, '');
+                      const mItem = mediaMap.get(mId);
+                      if (mItem?.url) customUrl = mItem.url;
+                    }
+                    playTransitionSoundPreview(norm.soundEffect, norm.soundVolume, customUrl);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if (!playing) {
+        triggeredTransitionsRef.current.clear();
       }
 
       lastActiveClipIdsRef.current = playingIds;

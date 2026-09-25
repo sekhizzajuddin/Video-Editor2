@@ -45,6 +45,8 @@ export interface TransitionLike {
   duration: number;
   easing?: string;
   params?: Record<string, any>;
+  soundEffect?: string;
+  soundVolume?: number;
 }
 
 /** A resolved transition occurring between two specific clips. */
@@ -166,7 +168,33 @@ export interface NormalizedTransition {
   /** Generic intensity 0..1 (shake amplitude, glitch strength…). */
   intensity: number;
   easing: string;
+  /** Sound effect ID (preset key or 'media:<id>' or 'none'). */
+  soundEffect: string;
+  /** Sound volume 0..1. */
+  soundVolume: number;
 }
+
+export interface TransitionSoundOption {
+  id: string;
+  label: string;
+  category: string;
+  description: string;
+  recommendedFor?: TransitionKind[];
+}
+
+export const TRANSITION_SOUND_OPTIONS: TransitionSoundOption[] = [
+  { id: 'none', label: 'No Sound', category: 'None', description: 'Silent transition' },
+  { id: 'swoosh', label: 'Air Swoosh', category: 'Whoosh', description: 'Smooth, natural air whoosh', recommendedFor: ['dissolve', 'wipe', 'slide', 'fadeToBlack', 'fadeToWhite'] },
+  { id: 'fast_whoosh', label: 'Fast Whip Whoosh', category: 'Whoosh', description: 'High-speed snappy motion whoosh', recommendedFor: ['push', 'whipPan', 'slide', 'zoom'] },
+  { id: 'deep_whoosh', label: 'Deep Cinematic Swell', category: 'Cinematic', description: 'Low-frequency sub-bass swell', recommendedFor: ['fadeToBlack', 'fadeToWhite', 'dissolve'] },
+  { id: 'whip', label: 'Whip Pan Snap', category: 'Whoosh', description: 'Snappy whip pan camera motion', recommendedFor: ['whipPan', 'push'] },
+  { id: 'glitch', label: 'Digital Glitch', category: 'Sci-Fi', description: 'Cyberpunk digital bitcrush & buzz', recommendedFor: ['glitch', 'pixelate'] },
+  { id: 'impact', label: 'Cinematic Hit', category: 'Impact', description: 'Heavy impact with resonant tail', recommendedFor: ['shake', 'flash'] },
+  { id: 'flash', label: 'Flash Riser', category: 'Light', description: 'Bright white flash resonant riser', recommendedFor: ['flash', 'lightLeak'] },
+  { id: 'shutter', label: 'Camera Shutter', category: 'Mechanical', description: 'Mechanical camera aperture click', recommendedFor: ['flash', 'dissolve'] },
+  { id: 'page_turn', label: 'Paper Page Turn', category: 'Organic', description: 'Crisp paper swish', recommendedFor: ['wipe', 'slide'] },
+  { id: 'pop', label: 'Bubble Pop', category: 'Playful', description: 'Crisp playful pop', recommendedFor: ['zoom', 'zoomSpin'] },
+];
 
 /**
  * Map a stored transition (which may only carry a display `name` such as
@@ -224,7 +252,19 @@ export function normalizeTransition(t: TransitionLike): NormalizedTransition {
       ? p.easing
       : 'smoothstep';
 
-  return { kind, direction, zoomDirection, softness, intensity, easing };
+  const soundEffect = typeof t.soundEffect === 'string'
+    ? t.soundEffect
+    : typeof p.soundEffect === 'string'
+      ? p.soundEffect
+      : 'none';
+
+  const soundVolume = typeof t.soundVolume === 'number'
+    ? clampRange(t.soundVolume, 0, 1)
+    : typeof p.soundVolume === 'number'
+      ? clampRange(p.soundVolume, 0, 1)
+      : 0.8;
+
+  return { kind, direction, zoomDirection, softness, intensity, easing, soundEffect, soundVolume };
 }
 
 const VALID_KINDS: readonly string[] = [

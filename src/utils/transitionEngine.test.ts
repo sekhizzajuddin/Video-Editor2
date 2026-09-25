@@ -7,6 +7,7 @@ import {
   getTransitionWindow,
   getMaxTransitionDuration,
   normalizeTransition,
+  TRANSITION_SOUND_OPTIONS,
   type ActiveTransition,
 } from './transitionEngine';
 
@@ -346,3 +347,61 @@ describe('applyEasing', () => {
     }
   });
 });
+
+describe('transition sound effects', () => {
+  it('defaults soundEffect to none and soundVolume to 0.8', () => {
+    const norm = normalizeTransition({ type: 'dissolve', duration: 1 });
+    expect(norm.soundEffect).toBe('none');
+    expect(norm.soundVolume).toBe(0.8);
+  });
+
+  it('reads soundEffect and soundVolume from top-level transition properties', () => {
+    const norm = normalizeTransition({
+      type: 'slide',
+      duration: 1,
+      soundEffect: 'fast_whoosh',
+      soundVolume: 0.65,
+    });
+    expect(norm.soundEffect).toBe('fast_whoosh');
+    expect(norm.soundVolume).toBe(0.65);
+  });
+
+  it('reads soundEffect and soundVolume from params when top-level is omitted', () => {
+    const norm = normalizeTransition({
+      type: 'wipe',
+      duration: 1,
+      params: {
+        soundEffect: 'glitch',
+        soundVolume: 0.5,
+      },
+    });
+    expect(norm.soundEffect).toBe('glitch');
+    expect(norm.soundVolume).toBe(0.5);
+  });
+
+  it('supports custom media item sound IDs', () => {
+    const norm = normalizeTransition({
+      type: 'dissolve',
+      duration: 1,
+      soundEffect: 'media:custom_audio_123',
+      soundVolume: 1.0,
+    });
+    expect(norm.soundEffect).toBe('media:custom_audio_123');
+    expect(norm.soundVolume).toBe(1.0);
+  });
+
+  it('exposes TRANSITION_SOUND_OPTIONS with presets and recommended transition types', () => {
+    expect(TRANSITION_SOUND_OPTIONS.length).toBeGreaterThanOrEqual(10);
+    const noneOpt = TRANSITION_SOUND_OPTIONS.find((s) => s.id === 'none');
+    expect(noneOpt).toBeDefined();
+
+    const whoosh = TRANSITION_SOUND_OPTIONS.find((s) => s.id === 'fast_whoosh');
+    expect(whoosh).toBeDefined();
+    expect(whoosh?.recommendedFor).toContain('push');
+
+    const glitch = TRANSITION_SOUND_OPTIONS.find((s) => s.id === 'glitch');
+    expect(glitch).toBeDefined();
+    expect(glitch?.recommendedFor).toContain('glitch');
+  });
+});
+

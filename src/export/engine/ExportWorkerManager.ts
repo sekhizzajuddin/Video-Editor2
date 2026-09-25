@@ -320,16 +320,29 @@ export class ExportWorkerManager {
     const mediaMap = new Map<string, any>();
     for (const track of (serializedTimeline.tracks || [])) {
       for (const clip of (track.clips || [])) {
-        if (!clip.mediaId || mediaMap.has(clip.mediaId)) continue;
-        mediaMap.set(
-          clip.mediaId,
-          libraryMap.get(clip.mediaId) || {
-            id: clip.mediaId,
-            url: clip.url,
-            name: clip.name,
-            type: clip.type || (track.type === 'audio' ? 'audio' : 'video'),
-          },
-        );
+        if (clip.mediaId && !mediaMap.has(clip.mediaId)) {
+          mediaMap.set(
+            clip.mediaId,
+            libraryMap.get(clip.mediaId) || {
+              id: clip.mediaId,
+              url: clip.url,
+              name: clip.name,
+              type: clip.type || (track.type === 'audio' ? 'audio' : 'video'),
+            },
+          );
+        }
+
+        // Also prepare custom media referenced by transition sound effects
+        const trans = clip.transitionIn || clip.transitionOut;
+        if (trans && typeof trans.soundEffect === 'string' && trans.soundEffect.startsWith('media:')) {
+          const transMediaId = trans.soundEffect.replace(/^media:/, '');
+          if (transMediaId && !mediaMap.has(transMediaId)) {
+            const transMediaItem = libraryMap.get(transMediaId);
+            if (transMediaItem) {
+              mediaMap.set(transMediaId, transMediaItem);
+            }
+          }
+        }
       }
     }
 

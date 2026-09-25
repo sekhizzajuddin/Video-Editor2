@@ -2,6 +2,9 @@ import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone'
 import { getRampedClipSourceSpan, getSpeedFrameSegments } from '@/utils/speedRamp';
 import { pitchShiftBufferRegion } from '@/utils/audio/phaseVocoder';
 import { timeStretchAudioBuffer } from '@/utils/audio/wsola';
+import { normalizeTransition, getTransitionWindow, type TransitionAlignment } from '@/utils/transitionEngine';
+import { synthesizeTransitionSoundWav } from '@/timeline/sfxSynth';
+import { getFileFromDB } from '@/utils/projectPersistence';
 
 export class AudioMixer {
   private sampleRate = 48000;
@@ -26,21 +29,142 @@ export class AudioMixer {
 
       // Iterate through all clips to find ones with audio
       const audioClips: any[] = [];
+      const addClipWithAudio = (clip: any, track: any, trackVolume: number, absStartTime: number) => {
+        const media = mediaMap.get(clip.mediaId);
+        if ((media?.url || media?._fileBlob) && !clip.audioSettings?.muted) {
+          audioClips.push({
+            ...clip,
+            startTime: absStartTime,
+            _url: media.url,
+            _blob: media._audioBlob || media._fileBlob,
+            _trackVolume: trackVolume,
+          });
+        }
+      };
+
       for (const track of timeline.tracks) {
-        if (track.muted || track.isMuted) continue; // Skip muted tracks
-        
+        if (track.muted || track.isMuted) continue;
         if (track.type === 'video' || track.type === 'audio') {
-          for (const clip of track.clips) {
-            const media = mediaMap.get(clip.mediaId);
-            if ((media?.url || media?._fileBlob) && !clip.audioSettings?.muted) {
-              // Store track volume on the clip temporarily for mixing
-              audioClips.push({ ...clip, _url: media.url, _blob: media._audioBlob || media._fileBlob, _trackVolume: track.volume });
+          for (const clip of track.clips || []) {
+            addClipWithAudio(clip, track, track.volume ?? 1, clip.startTime);
+          }
+        }
+      }
+
+      // Check PiP tracks if present
+      if (timeline.pipWindows) {
+        for (const pip of Object.values(timeline.pipWindows) as any[]) {
+          const parentClip = (timeline.tracks || []).flatMap((t: any) => t.clips || []).find((c: any) => c.id === pip.parentClipId);
+          const parentStart = parentClip ? parentClip.startTime : 0;
+          for (const pipTrack of pip.tracks || []) {
+            if (pipTrack.muted || pipTrack.hidden) continue;
+            for (const pipClip of pipTrack.clips || []) {
+              const absStart = parentStart + (pip.relativeStartTime || 0) + pipClip.startTime;
+              addClipWithAudio(pipClip, pipTrack, pipTrack.volume ?? 1, absStart);
             }
           }
         }
       }
 
-      if (audioClips.length === 0) {
+      // Collect transitions with sound effects on video tracks
+      const transitionSounds: Array<{
+        soundEffect: string;
+        soundVolume: number;
+        startTime: number;
+        duration: number;
+        customUrl?: string;
+        customBlob?: Blob;
+      }> = [];
+      const processedTransitionCuts = new Set<string>();
+
+      for (const track of timeline.tracks) {
+        if (track.muted || track.isMuted || track.type !== 'video' || !track.clips || track.clips.length === 0) continue;
+        const ordered = [...track.clips].sort((a: any, b: any) => a.startTime - b.startTime);
+
+        for (let i = 0; i < ordered.length; i++) {
+          const clip = ordered[i];
+          if (clip.disabled) continue;
+
+          // 1. Transition In
+          if (clip.transitionIn && (clip.transitionIn.duration || 0) > 0) {
+            const trans = clip.transitionIn;
+            const norm = normalizeTransition(trans);
+            if (norm.soundEffect && norm.soundEffect !== 'none') {
+              const prev = i > 0 ? ordered[i - 1] : null;
+              const alignment = (trans.params?.alignment || 'center') as TransitionAlignment;
+              const win = getTransitionWindow(clip.startTime, trans.duration ?? 0.5, alignment, prev, clip);
+              const cutKey = `${track.id || track.name}_${clip.startTime.toFixed(2)}`;
+
+              if (win.duration > 0 && !processedTransitionCuts.has(cutKey)) {
+                processedTransitionCuts.add(cutKey);
+
+                let customUrl: string | undefined;
+                let customBlob: Blob | undefined;
+                if (norm.soundEffect.startsWith('media:')) {
+                  const mediaId = norm.soundEffect.replace(/^media:/, '');
+                  const mItem = mediaMap.get(mediaId);
+                  if (mItem) {
+                    customUrl = mItem.url;
+                    customBlob = mItem._audioBlob || mItem._fileBlob;
+                  }
+                }
+
+                transitionSounds.push({
+                  soundEffect: norm.soundEffect,
+                  soundVolume: norm.soundVolume,
+                  startTime: win.start,
+                  duration: win.duration,
+                  customUrl,
+                  customBlob,
+                });
+              }
+            }
+          }
+
+          // 2. Transition Out (if cut is not already handled by adjacent clip's transitionIn)
+          if (clip.transitionOut && (clip.transitionOut.duration || 0) > 0) {
+            const trans = clip.transitionOut;
+            const cutTime = clip.startTime + clip.duration;
+            const cutKey = `${track.id || track.name}_${cutTime.toFixed(2)}`;
+            const next = i + 1 < ordered.length ? ordered[i + 1] : null;
+            const nextHasTransIn = next && Math.abs(next.startTime - cutTime) < 0.1 && next.transitionIn;
+
+            if (!nextHasTransIn && !processedTransitionCuts.has(cutKey)) {
+              const norm = normalizeTransition(trans);
+              if (norm.soundEffect && norm.soundEffect !== 'none') {
+                const alignment = (trans.params?.alignment || 'center') as TransitionAlignment;
+                const win = getTransitionWindow(cutTime, trans.duration ?? 0.5, alignment, clip, next);
+
+                if (win.duration > 0) {
+                  processedTransitionCuts.add(cutKey);
+
+                  let customUrl: string | undefined;
+                  let customBlob: Blob | undefined;
+                  if (norm.soundEffect.startsWith('media:')) {
+                    const mediaId = norm.soundEffect.replace(/^media:/, '');
+                    const mItem = mediaMap.get(mediaId);
+                    if (mItem) {
+                      customUrl = mItem.url;
+                      customBlob = mItem._audioBlob || mItem._fileBlob;
+                    }
+                  }
+
+                  transitionSounds.push({
+                    soundEffect: norm.soundEffect,
+                    soundVolume: norm.soundVolume,
+                    startTime: win.start,
+                    duration: win.duration,
+                    customUrl,
+                    customBlob,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (audioClips.length === 0 && transitionSounds.length === 0) {
         return null; // No audio to mix
       }
 
@@ -241,6 +365,51 @@ export class AudioMixer {
           }
         } catch (err) {
           console.error(`Failed to mix audio for clip ${clip.id}`, err);
+        }
+      }
+
+      // Mix transition sound effects into the audio graph
+      for (const ts of transitionSounds) {
+        // Skip transition sounds outside the current export range
+        if (ts.startTime + ts.duration <= startAt || ts.startTime >= totalMixSeconds) continue;
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        try {
+          let audioBuffer: AudioBuffer | null = null;
+          if (ts.soundEffect.startsWith('media:')) {
+            const mediaId = ts.soundEffect.replace(/^media:/, '');
+            let blob = ts.customBlob;
+            if (!blob) {
+              try {
+                blob = (await getFileFromDB(mediaId)) || undefined;
+              } catch {}
+            }
+            if (blob) {
+              const arrayBuffer = await blob.arrayBuffer();
+              audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+            } else if (ts.customUrl) {
+              const resp = await fetch(ts.customUrl);
+              const arrayBuffer = await resp.arrayBuffer();
+              audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+            }
+          } else {
+            const blob = await synthesizeTransitionSoundWav(ts.soundEffect, ts.duration);
+            const arrayBuffer = await blob.arrayBuffer();
+            audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+          }
+
+          if (audioBuffer) {
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            const gainNode = ctx.createGain();
+            const gain = Math.max(0, Math.min(1, ts.soundVolume));
+            gainNode.gain.setValueAtTime(gain, ts.startTime);
+            source.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            source.start(ts.startTime, 0, Math.min(audioBuffer.duration, ts.duration));
+          }
+        } catch (err) {
+          console.error(`Failed to mix transition sound ${ts.soundEffect}:`, err);
         }
       }
 

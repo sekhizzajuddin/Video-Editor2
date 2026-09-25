@@ -1099,6 +1099,8 @@ export interface Transition {
   duration: number;
   easing?: string;
   params?: Record<string, any>;
+  soundEffect?: string;
+  soundVolume?: number;
 }
 
 // ─── OpenRouter ───────────────────────────────────────────────────────────

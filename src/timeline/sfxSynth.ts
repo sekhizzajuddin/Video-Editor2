@@ -439,10 +439,209 @@ export function synthesizeProceduralSFX(category: string, duration: number): Pro
           osc.start(crackleTime);
           osc.stop(crackleTime + 0.02);
         }
+      } else if (category === 'fast_whoosh') {
+        const bufferSize = sampleRate * duration;
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.Q.setValueAtTime(6, 0);
+        filter.frequency.setValueAtTime(250, 0);
+        filter.frequency.exponentialRampToValueAtTime(3400, duration * 0.35);
+        filter.frequency.exponentialRampToValueAtTime(150, duration);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, 0);
+        gain.gain.linearRampToValueAtTime(0.85, duration * 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        noiseSource.connect(filter);
+        filter.connect(gain);
+        gain.connect(offlineCtx.destination);
+        noiseSource.start(0);
+      } else if (category === 'deep_whoosh') {
+        const bufferSize = sampleRate * duration;
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(80, 0);
+        filter.frequency.exponentialRampToValueAtTime(550, duration * 0.45);
+        filter.frequency.exponentialRampToValueAtTime(60, duration);
+
+        const noiseGain = offlineCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.001, 0);
+        noiseGain.gain.linearRampToValueAtTime(0.5, duration * 0.45);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        const subOsc = offlineCtx.createOscillator();
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(55, 0);
+        subOsc.frequency.linearRampToValueAtTime(95, duration * 0.45);
+        subOsc.frequency.exponentialRampToValueAtTime(40, duration);
+
+        const subGain = offlineCtx.createGain();
+        subGain.gain.setValueAtTime(0.001, 0);
+        subGain.gain.linearRampToValueAtTime(0.65, duration * 0.45);
+        subGain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        noiseSource.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(offlineCtx.destination);
+        subOsc.connect(subGain);
+        subGain.connect(offlineCtx.destination);
+
+        noiseSource.start(0);
+        subOsc.start(0);
+      } else if (category === 'whip') {
+        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.Q.setValueAtTime(8, 0);
+        filter.frequency.setValueAtTime(2400, 0);
+        filter.frequency.exponentialRampToValueAtTime(150, duration);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.9, 0);
+        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        noiseSource.connect(filter);
+        filter.connect(gain);
+        gain.connect(offlineCtx.destination);
+        noiseSource.start(0);
+      } else if (category === 'glitch') {
+        const burstCount = Math.max(4, Math.floor(duration * 18));
+        for (let i = 0; i < burstCount; i++) {
+          const bTime = (duration / burstCount) * i;
+          const bDur = (duration / burstCount) * 0.8;
+          const osc = offlineCtx.createOscillator();
+          osc.type = i % 2 === 0 ? 'square' : 'sawtooth';
+          const f = 200 + Math.random() * 1800;
+          osc.frequency.setValueAtTime(f, bTime);
+
+          const gain = offlineCtx.createGain();
+          gain.gain.setValueAtTime(0.35, bTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, bTime + bDur);
+
+          osc.connect(gain);
+          gain.connect(offlineCtx.destination);
+          osc.start(bTime);
+          osc.stop(bTime + bDur);
+        }
+      } else if (category === 'shutter') {
+        const clicks = [0, 0.045];
+        for (const cTime of clicks) {
+          const osc = offlineCtx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(3200, cTime);
+          osc.frequency.exponentialRampToValueAtTime(280, cTime + 0.025);
+
+          const g = offlineCtx.createGain();
+          g.gain.setValueAtTime(0.7, cTime);
+          g.gain.exponentialRampToValueAtTime(0.001, cTime + 0.035);
+
+          osc.connect(g);
+          g.connect(offlineCtx.destination);
+          osc.start(cTime);
+          osc.stop(cTime + 0.04);
+        }
+      } else if (category === 'impact') {
+        const osc = offlineCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, 0);
+        osc.frequency.exponentialRampToValueAtTime(36, 0.12);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.85, 0);
+        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        const bufferSize = Math.max(1, Math.floor(sampleRate * 0.08));
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+        const noiseFilter = offlineCtx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.setValueAtTime(800, 0);
+        const noiseGain = offlineCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.4, 0);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, 0.08);
+
+        noiseSource.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(offlineCtx.destination);
+        noiseSource.start(0);
+
+        osc.connect(gain);
+        gain.connect(offlineCtx.destination);
+        osc.start(0);
+      } else if (category === 'flash') {
+        const osc = offlineCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(300, 0);
+        osc.frequency.exponentialRampToValueAtTime(2400, duration * 0.4);
+        osc.frequency.exponentialRampToValueAtTime(400, duration);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, 0);
+        gain.gain.linearRampToValueAtTime(0.7, duration * 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        osc.connect(gain);
+        gain.connect(offlineCtx.destination);
+        osc.start(0);
+      } else if (category === 'page_turn') {
+        const bufferSize = sampleRate * duration;
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'highpass';
+        filter.frequency.setValueAtTime(1200, 0);
+        filter.frequency.linearRampToValueAtTime(2600, duration * 0.5);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, 0);
+        gain.gain.linearRampToValueAtTime(0.4, duration * 0.3);
+        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        noiseSource.connect(filter);
+        filter.connect(gain);
+        gain.connect(offlineCtx.destination);
+        noiseSource.start(0);
+      } else if (category === 'pop') {
+        const osc = offlineCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, 0);
+        osc.frequency.exponentialRampToValueAtTime(100, Math.min(0.06, duration));
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.75, 0);
+        gain.gain.exponentialRampToValueAtTime(0.001, Math.min(0.08, duration));
+
+        osc.connect(gain);
+        gain.connect(offlineCtx.destination);
+        osc.start(0);
       } else {
-        // P4 FIX: unknown category fell through every branch → a SILENT empty
-        // buffer was rendered and placed on the timeline with no warning.
-        // Fall back to a generic swoosh so the SFX is at least audible.
+        // Fall back to a generic swoosh
         const bufferSize = Math.max(1, sampleRate * duration);
         const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
         const output = noiseBuffer.getChannelData(0);
@@ -473,4 +672,63 @@ export function synthesizeProceduralSFX(category: string, duration: number): Pro
       resolve(wavBlob);
     })().catch(reject);
   });
+}
+
+/**
+ * Play a transition sound preview directly through Web Audio.
+ * Supports procedural SFX categories as well as custom media URLs.
+ */
+export async function playTransitionSoundPreview(
+  soundId: string,
+  volume: number = 0.8,
+  customAudioUrl?: string
+): Promise<void> {
+  if (!soundId || soundId === 'none') return;
+
+  const AudioContextClass = typeof window !== 'undefined'
+    ? ((window as any).AudioContext || (window as any).webkitAudioContext)
+    : null;
+  if (!AudioContextClass) return;
+
+  if (customAudioUrl || soundId.startsWith('media:')) {
+    const url = customAudioUrl || soundId.replace(/^media:/, '');
+    const audio = new Audio(url);
+    audio.volume = Math.max(0, Math.min(1, volume));
+    await audio.play().catch(() => {});
+    return;
+  }
+
+  const ctx = new AudioContextClass();
+  if (ctx.state === 'suspended') {
+    await ctx.resume().catch(() => {});
+  }
+
+  const duration = 0.5;
+  const blob = await synthesizeProceduralSFX(soundId, duration);
+  const arrayBuffer = await blob.arrayBuffer();
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(Math.max(0, Math.min(1, volume)), ctx.currentTime);
+
+  source.connect(gain);
+  gain.connect(ctx.destination);
+
+  source.start(0);
+  source.onended = () => {
+    ctx.close().catch(() => {});
+  };
+}
+
+/**
+ * Synthesizes a transition sound as a WAV Blob (e.g. for creating timeline audio clips).
+ */
+export async function synthesizeTransitionSoundWav(
+  soundId: string,
+  duration: number = 0.5
+): Promise<Blob> {
+  return synthesizeProceduralSFX(soundId, duration);
 }
