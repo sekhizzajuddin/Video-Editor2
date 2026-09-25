@@ -2,7 +2,7 @@ import React from 'react';
 import {
   Scissors, Bookmark, Copy, Trash2, Trash, Volume2, VolumeX,
   Replace, ArrowRight,
-  Repeat, ArrowLeftRight, Sparkles
+  Repeat, ArrowLeftRight, Sparkles, RefreshCw
 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
@@ -32,6 +32,7 @@ export function ClipContextMenu({ x, y, clipId, onClose }: ClipContextMenuProps)
   const updateClip = state.updateClip;
   const addMarker = state.addMarker;
   const replaceClipMedia = state.replaceClipMedia;
+  const refreshClipPreviews = state.refreshClipPreviews;
 
   const items: ContextMenuItem[] = [
     {
@@ -40,6 +41,12 @@ export function ClipContextMenu({ x, y, clipId, onClose }: ClipContextMenuProps)
       shortcut: 'Ctrl+K',
       icon: <Scissors className="w-3.5 h-3.5" />,
       onClick: () => splitClip(clipId, state.currentTime),
+    },
+    {
+      id: 'refresh-preview',
+      label: 'Refresh Waveform & Frame Preview',
+      icon: <RefreshCw className="w-3.5 h-3.5 text-blue-400" />,
+      onClick: () => refreshClipPreviews(clipId),
     },
     {
       id: 'marker',

@@ -38,6 +38,7 @@ import {
   Repeat,
   Play,
   Plus,
+  RefreshCw,
 } from 'lucide-react';
 import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
@@ -396,6 +397,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     updatePipWindowStyle,
     updatePipWindowEnterExit,
     updateClipEnterExitAnimation,
+    refreshClipPreviews,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     selectedClipId: s.selectedClipId,
@@ -434,6 +436,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     updatePipWindowStyle: s.updatePipWindowStyle,
     updatePipWindowEnterExit: s.updatePipWindowEnterExit,
     updateClipEnterExitAnimation: s.updateClipEnterExitAnimation,
+    refreshClipPreviews: s.refreshClipPreviews,
   })));
 
   const [mobileSubTab, setMobileSubTab] = useState<string>('');
@@ -6071,6 +6074,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
         {currentTab === 'audio' && (
           <div className="space-y-3">
+            {/* Waveform & Frame Preview Refresh */}
+            {selectedClip && selectedClip.mediaId && (
+              <div className="bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded p-2.5 flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <span className="text-[11px] font-semibold text-[var(--theme-text-primary)]">Audio Waveform & Preview</span>
+                  <p className="text-[10px] text-[var(--theme-text-muted)]">Re-extract audio peaks and regenerate frame thumbnails</p>
+                </div>
+                <button
+                  onClick={() => refreshClipPreviews(selectedClip.id)}
+                  className="px-2.5 py-1 bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40 rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 shrink-0"
+                  title="Refresh Waveform & Frame Preview"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Refresh
+                </button>
+              </div>
+            )}
+
             {/* AI Auto Audio Ducking */}
             {!isMobileView && selectedClip && selectedClip.mediaId !== 'text-placeholder' && !selectedClip.textSettings && (
               <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-3 space-y-3">

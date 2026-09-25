@@ -31,7 +31,9 @@ import {
   removeSpeedFrameFromClip,
   calculateSpeedFramesRamp,
   getRampedTrimStartForLeftResize,
+  invalidateSpeedSegmentsCache,
 } from '@/utils/speedRamp';
+import { invalidateFrameStripCache } from '@/timeline/components/FrameStripOverlay';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
@@ -185,6 +187,8 @@ interface EditorActions {
   addMedia: (item: MediaItem, file?: File) => void;
   removeMedia: (id: string) => void;
   updateMediaMetadata: (id: string, updates: Partial<MediaItem>) => void;
+  setMediaWaveformPeaks: (mediaId: string, peaks: number[]) => void;
+  refreshClipPreviews: (clipId: string) => Promise<boolean>;
   createFolder: (name: string, parentId?: string | null) => void;
   deleteFolder: (id: string) => void;
   moveMediaToFolder: (mediaId: string, folderId: string | null) => void;
@@ -1323,6 +1327,90 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         m.id === id ? { ...m, ...updates } : m
       ),
     }));
+  },
+
+  setMediaWaveformPeaks: (mediaId, peaks) => {
+    set((state) => ({
+      mediaLibrary: state.mediaLibrary.map((m) =>
+        m.id === mediaId ? { ...m, waveformPeaks: peaks } : m
+      ),
+    }));
+  },
+
+  refreshClipPreviews: async (clipId) => {
+    const state = get();
+    const found = findClipDeep(state, clipId);
+    if (!found) return false;
+    const clip = found.clip;
+    const media = state.mediaLibrary.find((m) => m.id === clip.mediaId);
+    if (!media || !media.url || media.url === 'PENDING_RESTORE') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: { message: 'Cannot refresh: media source file is not available.', type: 'warning' }
+        }));
+      }
+      return false;
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: { message: `Refreshing waveform & frame preview for "${media.name}"...`, type: 'info' }
+      }));
+    }
+
+    // Invalidate frame strip cache and speed segment cache
+    invalidateFrameStripCache(media.id);
+    invalidateSpeedSegmentsCache(clip.id);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('procut-evict-media-cache', { detail: { id: media.id } }));
+      window.dispatchEvent(new CustomEvent('procut-invalidate-speed-cache', { detail: { clipId: clip.id } }));
+    }
+
+    try {
+      const { extractWaveformFromUrl, generateFrameStripOnDemand } = await import('@/utils/mediaProbe');
+
+      let waveformPeaks = media.waveformPeaks;
+      let frameStrip = media.frameStrip;
+
+      // Re-extract frame strip for video
+      if (media.type === 'video') {
+        try {
+          frameStrip = await generateFrameStripOnDemand(media.url, media.duration || 10, 8, 120);
+        } catch (e) {
+          console.warn('Frame strip generation failed:', e);
+        }
+      }
+
+      // Re-extract audio waveform for video or audio
+      if (media.type === 'audio' || media.type === 'video') {
+        try {
+          waveformPeaks = await extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration });
+        } catch (e) {
+          console.warn('Waveform extraction failed:', e);
+        }
+      }
+
+      set((s) => ({
+        mediaLibrary: s.mediaLibrary.map((m) =>
+          m.id === media.id ? { ...m, waveformPeaks, frameStrip } : m
+        ),
+      }));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: { message: 'Waveform & frame preview refreshed!', type: 'success' }
+        }));
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Failed to refresh clip previews:', err);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: { message: 'Failed to refresh previews: ' + (err.message || 'Unknown error'), type: 'error' }
+        }));
+      }
+      return false;
+    }
   },
 
   createFolder: (name, parentId = null) => {
@@ -3125,6 +3213,34 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             newLinkedRightId = splitMap[clip.linkedClipId].right;
           }
 
+          // Remap speedFrames for each half so neither half holds invalid or out-of-range offsets
+          let leftSpeedFrames: any = undefined;
+          let rightSpeedFrames: any = undefined;
+
+          if (clip.speedFrames && clip.speedFrames.length > 0) {
+            const leftFiltered = clip.speedFrames.filter(
+              (f) => f.timelineOffset > 0.05 && f.timelineOffset < relativeSplitTime - 0.05
+            );
+            if (leftFiltered.length > 0) {
+              leftSpeedFrames = leftFiltered;
+            }
+
+            const rightFiltered = clip.speedFrames
+              .filter((f) => f.timelineOffset > relativeSplitTime + 0.05)
+              .map((f) => ({
+                ...f,
+                id: generateId(),
+                timelineOffset: f.timelineOffset - relativeSplitTime,
+              }));
+            if (rightFiltered.length > 0) {
+              rightSpeedFrames = rightFiltered;
+            }
+          }
+
+          invalidateSpeedSegmentsCache(clip.id);
+          invalidateSpeedSegmentsCache(leftId);
+          invalidateSpeedSegmentsCache(rightId);
+
           const leftClip: TimelineClip = {
             ...structuredClone(clip),
             id: leftId,
@@ -3134,6 +3250,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             trimEnd: splitHalves.leftTrimEnd,
             transitionOut: undefined, // Clear transition on the first half of the split
             speedRamp: leftSpeedRamp,
+            speedFrames: leftSpeedFrames,
             animations: leftAnimations,
             linkedClipId: newLinkedLeftId
           };
@@ -3148,6 +3265,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             trimEnd: splitHalves.rightTrimEnd,
             transitionIn: undefined, // Clear transition on the second half of the split
             speedRamp: rightSpeedRamp,
+            speedFrames: rightSpeedFrames,
             animations: rightAnimations,
             linkedClipId: newLinkedRightId
           };

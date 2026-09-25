@@ -28,6 +28,9 @@ const defaultMedia: MediaItem = {
   createdAt: 0,
 };
 
+const VIDEO_WAVEFORM_HEIGHT = 18;
+const inFlightWaveformProbes = new Set<string>();
+
 interface TimelineClipRowProps {
   track: TimelineTrack;
   tracks: TimelineTrack[];
@@ -129,7 +132,33 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   const clipHeight = (trackType === 'text' || trackType === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8;
   const isVideoWithAudio =
     media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
-  const mainVisualHeight = isVideoWithAudio ? clipHeight - 12 : clipHeight;
+  const mainVisualHeight = isVideoWithAudio ? Math.max(16, clipHeight - VIDEO_WAVEFORM_HEIGHT) : clipHeight;
+
+  // Auto-probe waveform for video clips that have not yet extracted waveform peaks
+  useEffect(() => {
+    if (
+      media.type === 'video' &&
+      !media.waveformPeaks &&
+      media.url &&
+      !media.url.startsWith('PENDING_') &&
+      !inFlightWaveformProbes.has(media.id)
+    ) {
+      inFlightWaveformProbes.add(media.id);
+      import('@/utils/mediaProbe')
+        .then(({ extractWaveformFromUrl }) => extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration }))
+        .then((peaks) => {
+          if (peaks && peaks.length > 0) {
+            (useEditorStore.getState() as any).setMediaWaveformPeaks?.(media.id, peaks);
+          }
+        })
+        .catch(() => {
+          // Video may not have audio track — ignore
+        })
+        .finally(() => {
+          inFlightWaveformProbes.delete(media.id);
+        });
+    }
+  }, [media.id, media.type, media.url, media.duration, media.waveformPeaks]);
 
   const clipAnims = clip.animations?.['transform.x'] || [];
   const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
@@ -338,16 +367,16 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
             {isVideoWithAudio && (
               <div
-                className="relative overflow-hidden border-t border-blue-400/20"
-                style={{ height: 12 }}
+                className="relative overflow-hidden border-t border-white/10 bg-black/40 shadow-inner"
+                style={{ height: VIDEO_WAVEFORM_HEIGHT }}
               >
                 <WaveformOverlay
                   media={media}
                   clipId={clip.id}
                   width={width}
-                  height={12}
+                  height={VIDEO_WAVEFORM_HEIGHT}
                   small
-                  color="rgba(255,255,255,0.5)"
+                  color="rgba(191, 219, 254, 0.85)"
                   trimStart={clip.trimStart}
                   clipDuration={clip.duration}
                   speed={clip.speed}

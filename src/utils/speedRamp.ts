@@ -771,6 +771,21 @@ interface IdCachedSegments {
 const segmentsCacheById = new Map<string, IdCachedSegments>();
 const SEGMENTS_CACHE_BY_ID_MAX = 100;
 
+export function invalidateSpeedSegmentsCache(clipId?: string) {
+  if (clipId) {
+    segmentsCacheById.delete(clipId);
+  } else {
+    segmentsCacheById.clear();
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('procut-invalidate-speed-cache', ((e: CustomEvent) => {
+    if (e.detail?.clipId) segmentsCacheById.delete(e.detail.clipId);
+    else segmentsCacheById.clear();
+  }) as EventListener);
+}
+
 function getSegmentCacheFingerprint(
   clip: { duration: number; trimStart: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
   sourceDuration?: number
@@ -828,30 +843,45 @@ function computeSpeedFrameSegments(
   clip: { duration: number; trimStart: number; trimEnd?: number; speed?: number; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number },
   sourceDuration?: number
 ): SpeedFrameSegment[] {
-  const sortedFrames = [...clip.speedFrames!]
-    .filter((f) => f && Number.isFinite(f.timelineOffset) && Number.isFinite(f.sourceTime))
-    .sort((a, b) => a.timelineOffset - b.timelineOffset);
+  const d = Math.max(0.05, Number.isFinite(clip.duration) ? clip.duration : 1);
   const s0 = Number.isFinite(clip.trimStart) ? clip.trimStart : 0;
   const rawSEnd = getClipSourceEnd(clip, sourceDuration);
-  const d = Math.max(0.05, Number.isFinite(clip.duration) ? clip.duration : 1);
-  const sEnd = Number.isFinite(rawSEnd) ? rawSEnd : s0 + d;
+  const sEnd = Number.isFinite(rawSEnd) ? Math.max(s0 + 0.01, rawSEnd) : s0 + d;
+
+  // Filter frames strictly within (0.01, d - 0.01) to prevent inverted segments after split/trim
+  const sortedFrames = [...clip.speedFrames!]
+    .filter((f) => f && Number.isFinite(f.timelineOffset) && Number.isFinite(f.sourceTime) && f.timelineOffset > 0.01 && f.timelineOffset < d - 0.01)
+    .sort((a, b) => a.timelineOffset - b.timelineOffset);
 
   // Boundaries:
   // Boundary 0: clip start edge (offset 0, source s0)
   // Boundary 1..n: sorted speed frames (offset t_k, source s_k)
   // Boundary n+1: clip end edge (offset d, source sEnd)
-  const points: { timelineOffset: number; sourceTime: number }[] = [
+  const rawPoints: { timelineOffset: number; sourceTime: number }[] = [
     { timelineOffset: 0, sourceTime: s0 },
-    ...sortedFrames.map((f) => ({ timelineOffset: f.timelineOffset, sourceTime: f.sourceTime })),
+    ...sortedFrames.map((f) => ({ timelineOffset: f.timelineOffset, sourceTime: Math.max(s0, f.sourceTime) })),
     { timelineOffset: d, sourceTime: sEnd }
   ];
+
+  // Guarantee strictly increasing timelineOffset
+  const points: { timelineOffset: number; sourceTime: number }[] = [rawPoints[0]];
+  for (let i = 1; i < rawPoints.length; i++) {
+    const prev = points[points.length - 1];
+    const curr = rawPoints[i];
+    if (curr.timelineOffset >= prev.timelineOffset + 0.005) {
+      points.push(curr);
+    }
+  }
+  if (points.length < 2) {
+    points.push({ timelineOffset: d, sourceTime: sEnd });
+  }
 
   const segments: SpeedFrameSegment[] = [];
   for (let i = 0; i < points.length - 1; i++) {
     const p1 = points[i];
     const p2 = points[i + 1];
     const deltaT = Math.max(0.01, p2.timelineOffset - p1.timelineOffset);
-    const deltaS = Math.max(0.001, p2.sourceTime - p1.sourceTime);
+    const deltaS = Math.max(0.001, Math.abs(p2.sourceTime - p1.sourceTime));
     const rawSpeed = deltaS / deltaT;
     const speed = Number.isFinite(rawSpeed) ? Math.min(50, Math.max(0.05, rawSpeed)) : 1.0;
 
@@ -860,8 +890,8 @@ function computeSpeedFrameSegments(
       startOffset: p1.timelineOffset,
       endOffset: p2.timelineOffset,
       speed,
-      sourceStart: p1.sourceTime,
-      sourceEnd: p2.sourceTime,
+      sourceStart: Math.min(p1.sourceTime, p2.sourceTime),
+      sourceEnd: Math.max(p1.sourceTime, p2.sourceTime),
     });
   }
 

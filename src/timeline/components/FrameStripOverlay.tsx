@@ -19,9 +19,19 @@ interface FrameStripOverlayProps {
 // on removeMedia — previously these JPEG data-URL arrays accumulated for the
 // whole session with no eviction).
 const stripCache = new Map<string, string[]>();
+
+export function invalidateFrameStripCache(mediaId?: string) {
+  if (mediaId) {
+    stripCache.delete(mediaId);
+  } else {
+    stripCache.clear();
+  }
+}
+
 if (typeof window !== 'undefined') {
   window.addEventListener('procut-evict-media-cache', ((e: CustomEvent) => {
     if (e.detail?.id) stripCache.delete(e.detail.id);
+    else stripCache.clear();
   }) as EventListener);
 }
 
@@ -34,6 +44,19 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
 }: FrameStripOverlayProps) {
   const cachedStrip = media ? stripCache.get(media.id) : undefined;
   const [lazyStrip, setLazyStrip] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    const onEvict = (e: Event) => {
+      const custom = e as CustomEvent;
+      if (!custom.detail?.id || custom.detail.id === media?.id) {
+        setLazyStrip(null);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('procut-evict-media-cache', onEvict);
+      return () => window.removeEventListener('procut-evict-media-cache', onEvict);
+    }
+  }, [media?.id]);
 
   useEffect(() => {
     if (!media) return;
@@ -60,11 +83,14 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
     : cachedStrip ?? lazyStrip ?? undefined;
 
   if (frameStrip && frameStrip.length > 0 && media) {
-    const totalDuration = media.duration && media.duration > 0
-      ? media.duration
-      : (speedFrameSegments && speedFrameSegments.length > 0
-          ? Math.max(...speedFrameSegments.map((s) => s.sourceEnd), 1)
-          : 1);
+    const totalDuration = Math.max(
+      0.01,
+      media.duration && media.duration > 0
+        ? media.duration
+        : (speedFrameSegments && speedFrameSegments.length > 0
+            ? Math.max(...speedFrameSegments.map((s) => Math.max(s.sourceStart, s.sourceEnd)), 1)
+            : 1)
+    );
 
     // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
     if (speedFrameSegments && speedFrameSegments.length > 0) {
@@ -72,7 +98,7 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
       const allThumbs: { src: string; w: number }[] = [];
 
       for (const seg of speedFrameSegments) {
-        const segTimelineDur = seg.endOffset - seg.startOffset;
+        const segTimelineDur = Math.max(0.001, seg.endOffset - seg.startOffset);
         // P1 FIX: guard the clip.duration denominator — a zero-duration clip with
         // speedFrames made segPx = Infinity → segThumbs = Infinity → infinite loop
         // (tab freeze). Also cap per-segment thumbs as a hard safety bound.
@@ -82,16 +108,19 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
         const segThumbW = segPx / segThumbs;
 
         // Source range → frame strip indices
-        const srcStartRatio = Math.max(0, seg.sourceStart / totalDuration);
-        const srcEndRatio = Math.min(1, seg.sourceEnd / totalDuration);
-        const startIdx = Math.max(0, Math.floor(srcStartRatio * frameStrip.length));
-        const endIdx = Math.min(frameStrip.length, Math.ceil(srcEndRatio * frameStrip.length));
-        const segFrames = frameStrip.slice(startIdx, Math.max(startIdx + 1, endIdx));
+        const rawStart = Math.min(seg.sourceStart, seg.sourceEnd);
+        const rawEnd = Math.max(seg.sourceStart, seg.sourceEnd);
+        const srcStartRatio = Math.max(0, Math.min(0.999, rawStart / totalDuration));
+        const srcEndRatio = Math.max(srcStartRatio + 0.001, Math.min(1, rawEnd / totalDuration));
+        const startIdx = Math.max(0, Math.min(frameStrip.length - 1, Math.floor(srcStartRatio * frameStrip.length)));
+        const endIdx = Math.max(startIdx + 1, Math.min(frameStrip.length, Math.ceil(srcEndRatio * frameStrip.length)));
+        const segFrames = frameStrip.slice(startIdx, endIdx);
+        const safeSegFrames = segFrames.length > 0 ? segFrames : [frameStrip[0]];
 
         for (let i = 0; i < segThumbs; i++) {
-          const frameIdx = Math.floor((i / segThumbs) * segFrames.length);
+          const frameIdx = Math.floor((i / segThumbs) * safeSegFrames.length);
           allThumbs.push({
-            src: segFrames[Math.min(frameIdx, segFrames.length - 1)],
+            src: safeSegFrames[Math.min(frameIdx, safeSegFrames.length - 1)],
             w: segThumbW,
           });
         }
@@ -114,14 +143,15 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
     }
 
     // ── Standard flat-speed rendering ──
-    const trimStartRatio = Math.max(0, clip.trimStart / totalDuration);
-    const visibleDuration = clip.duration * (clip.speed || 1);
-    const trimEndRatio = Math.min(1, (clip.trimStart + visibleDuration) / totalDuration);
+    const safeTrimStart = Math.max(0, Math.min(totalDuration - 0.01, clip.trimStart || 0));
+    const trimStartRatio = Math.max(0, Math.min(0.999, safeTrimStart / totalDuration));
+    const visibleDuration = (clip.duration || 1) * (clip.speed || 1);
+    const trimEndRatio = Math.max(trimStartRatio + 0.001, Math.min(1, (safeTrimStart + visibleDuration) / totalDuration));
 
-    const startIndex = Math.max(0, Math.floor(trimStartRatio * frameStrip.length));
-    const endIndex = Math.min(frameStrip.length, Math.ceil(trimEndRatio * frameStrip.length));
+    const startIndex = Math.max(0, Math.min(frameStrip.length - 1, Math.floor(trimStartRatio * frameStrip.length)));
+    const endIndex = Math.max(startIndex + 1, Math.min(frameStrip.length, Math.ceil(trimEndRatio * frameStrip.length)));
 
-    const visibleFrames = frameStrip.slice(startIndex, Math.max(startIndex + 1, endIndex));
+    const visibleFrames = frameStrip.slice(startIndex, endIndex);
     const renderFrames = visibleFrames.length > 0 ? visibleFrames : [frameStrip[0]];
     
     // Dynamically calculate how many thumbnails fit into clip width without stretching

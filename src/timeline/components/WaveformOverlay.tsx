@@ -91,25 +91,33 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
         
     // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
     if (speedFrameSegments && speedFrameSegments.length > 0) {
-      const mediaDuration = media?.duration && media.duration > 0
-        ? media.duration
-        : Math.max(...speedFrameSegments.map((s) => s.sourceEnd), 1);
+      const mediaDuration = Math.max(
+        0.01,
+        (media?.duration && media.duration > 0)
+          ? media.duration
+          : Math.max(...speedFrameSegments.map((s) => Math.max(s.sourceStart, s.sourceEnd)), 1)
+      );
       const totalLen = src.length;
-      const totalTimelineDur = clipDuration || 1;
+      const totalTimelineDur = Math.max(0.01, clipDuration || 1);
       const result: number[] = [];
 
       for (const seg of speedFrameSegments) {
         // How many timeline pixels this segment occupies
-        const segTimelineDur = seg.endOffset - seg.startOffset;
+        const segTimelineDur = Math.max(0.001, seg.endOffset - seg.startOffset);
         const segPixels = Math.max(1, Math.round((segTimelineDur / totalTimelineDur) * barCount));
 
         // Source range for this segment
-        const srcStartRatio = Math.max(0, seg.sourceStart / mediaDuration);
-        const srcEndRatio = Math.min(1, seg.sourceEnd / mediaDuration);
-        const srcStartIdx = Math.max(0, Math.floor(srcStartRatio * totalLen));
+        const rawStart = Math.min(seg.sourceStart, seg.sourceEnd);
+        const rawEnd = Math.max(seg.sourceStart, seg.sourceEnd);
+        const srcStartRatio = Math.max(0, Math.min(0.999, rawStart / mediaDuration));
+        const srcEndRatio = Math.max(srcStartRatio + 0.001, Math.min(1, rawEnd / mediaDuration));
+        const srcStartIdx = Math.max(0, Math.min(totalLen - 1, Math.floor(srcStartRatio * totalLen)));
         const srcEndIdx = Math.max(srcStartIdx + 1, Math.min(totalLen, Math.ceil(srcEndRatio * totalLen)));
 
-        const segSrc = src.slice(srcStartIdx, srcEndIdx);
+        let segSrc = src.slice(srcStartIdx, srcEndIdx);
+        if (segSrc.length === 0) {
+          segSrc = src.slice(0, Math.max(1, Math.floor(totalLen / 10)));
+        }
         const segPeaks = resamplePeaksWindowed(segSrc, segPixels);
         result.push(...segPeaks);
       }
@@ -122,18 +130,21 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
 
     let finalSrc = src;
     if (trimStart !== undefined && clipDuration !== undefined) {
-      const mediaDuration = media?.duration || 1;
-      const effectiveSpeed = speed || 1;
+      const mediaDuration = Math.max(0.01, media?.duration || clipDuration || 1);
+      const effectiveSpeed = Math.max(0.01, speed || 1);
       
-      const startRatio = trimStart / mediaDuration;
+      const safeTrimStart = Math.max(0, Math.min(mediaDuration - 0.01, trimStart));
       const consumedMedia = clipDuration * effectiveSpeed;
-      const endRatio = Math.min(1, (trimStart + consumedMedia) / mediaDuration);
+      
+      const startRatio = Math.max(0, Math.min(0.999, safeTrimStart / mediaDuration));
+      const endRatio = Math.max(startRatio + 0.001, Math.min(1, (safeTrimStart + consumedMedia) / mediaDuration));
       
       const totalLen = src.length;
-      const startIdx = Math.max(0, Math.floor(startRatio * totalLen));
+      const startIdx = Math.max(0, Math.min(totalLen - 1, Math.floor(startRatio * totalLen)));
       const endIdx = Math.max(startIdx + 1, Math.min(totalLen, Math.ceil(endRatio * totalLen)));
       
-      finalSrc = src.slice(startIdx, endIdx);
+      const sliced = src.slice(startIdx, endIdx);
+      finalSrc = sliced.length > 0 ? sliced : src;
     }
     
     return resamplePeaksWindowed(finalSrc, barCount);
@@ -181,36 +192,17 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     // silhouette stays solid with zero gaps.
     const barW = W / peaks.length;
 
-    if (small) {
-      // ──────────────────────────────────────────────────────────────────────
-      // SMALL: thin bottom waveform strip inside video clips
-      // 1px columns, no gap, solid fill
-      // ──────────────────────────────────────────────────────────────────────
-      ctx.fillStyle = `rgba(${r},${g},${b},0.55)`;
-      for (let i = 0; i < peaks.length; i++) {
-        const peak = peaks[i];
-        const barH = peak * H;
-        if (barH < 0.5) continue; // true silence = nothing
-        ctx.fillRect(i * barW, H - barH, Math.max(barW, 0.75), barH);
-      }
-      return;
-    }
-
     // ────────────────────────────────────────────────────────────────────────
-    // FULL: DaVinci Resolve style centered waveform
-    //
-    // How DaVinci does it:
-    //   - 1px-wide columns, ZERO gap → solid continuous mountain silhouette
-    //   - Mirrored symmetrically around the vertical center
-    //   - Single solid color (slightly translucent white on colored track bg)
-    //   - Silence = waveform collapses to nothing (just center line visible)
-    //   - No gradient fade, no "core spine" — just a solid filled shape
+    // CENTERED WAVEFORM (DaVinci Resolve style)
+    // Both full audio clips and video clip audio strips render vertically
+    // centered around cy = H / 2 with a clean baseline across the center.
     // ────────────────────────────────────────────────────────────────────────
     const cy = H / 2;
-    const maxHalf = cy * 0.92; // 8% padding so peaks don't clip the edge
+    const maxHalf = cy * (small ? 0.88 : 0.92);
 
-    // Single solid color — DaVinci uses uniform opacity, not a gradient
-    ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+    ctx.fillStyle = small
+      ? `rgba(${r},${g},${b},0.80)`
+      : `rgba(${r},${g},${b},0.85)`;
 
     for (let i = 0; i < peaks.length; i++) {
       const peak = peaks[i];
@@ -219,9 +211,10 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       ctx.fillRect(i * barW, cy - halfH, Math.max(barW, 0.75), halfH * 2);
     }
 
-    // Center line — thin baseline so you can spot exactly where dialogue
-    // starts/ends (the waveform opens up from this line)
-    ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
+    // Center line — thin baseline so dialogue start/end is immediately visible
+    ctx.fillStyle = small
+      ? `rgba(${r},${g},${b},0.22)`
+      : `rgba(${r},${g},${b},0.15)`;
     ctx.fillRect(0, cy - 0.5, W, 1);
   }, [peaks, width, height, small, r, g, b]);
 
