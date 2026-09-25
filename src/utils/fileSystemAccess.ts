@@ -7,6 +7,8 @@ export function serializeProjectData(state: any) {
     url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
     thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
     frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+    // Strip waveformPeaks (can be 600k+ entries) — re-extracted on load by auto-probe
+    waveformPeaks: undefined,
   }));
 
   const projectData = {

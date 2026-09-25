@@ -30,6 +30,26 @@ const defaultMedia: MediaItem = {
 
 const VIDEO_WAVEFORM_HEIGHT = 18;
 const inFlightWaveformProbes = new Set<string>();
+const failedWaveformProbes = new Set<string>();
+
+// Listen for refresh events to clear failed probe cache
+if (typeof window !== 'undefined') {
+  window.addEventListener('procut-clear-failed-waveform-probe', ((e: CustomEvent) => {
+    const mediaId = e.detail?.mediaId;
+    if (mediaId) failedWaveformProbes.delete(mediaId);
+    else failedWaveformProbes.clear();
+  }) as EventListener);
+}
+
+/** Check if waveform peaks contain any audible (non-zero) data. */
+function hasAudiblePeaks(peaks: number[] | undefined): boolean {
+  if (!peaks || peaks.length === 0) return false;
+  // Quick scan: at least one peak must exceed the render threshold
+  for (let i = 0; i < peaks.length; i++) {
+    if (peaks[i] > 0.02) return true;
+  }
+  return false;
+}
 
 interface TimelineClipRowProps {
   track: TimelineTrack;
@@ -131,34 +151,40 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   const left = Number.isFinite(clip.startTime) && Number.isFinite(zoomLevel) ? clip.startTime * zoomLevel : 0;
   const clipHeight = (trackType === 'text' || trackType === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8;
   const isVideoWithAudio =
-    media.type === 'video' && media.waveformPeaks && media.waveformPeaks.length > 0;
+    media.type === 'video' && hasAudiblePeaks(media.waveformPeaks);
   const mainVisualHeight = isVideoWithAudio ? Math.max(16, clipHeight - VIDEO_WAVEFORM_HEIGHT) : clipHeight;
 
-  // Auto-probe waveform for video clips that have not yet extracted waveform peaks
+  // Auto-probe waveform for video clips that have not yet extracted waveform peaks,
+  // or whose peaks are all zeros (silent extraction from a previous attempt).
+  const needsWaveformProbe =
+    media.type === 'video' &&
+    !hasAudiblePeaks(media.waveformPeaks) &&
+    media.url &&
+    !media.url.startsWith('PENDING_') &&
+    !inFlightWaveformProbes.has(media.id) &&
+    !failedWaveformProbes.has(media.id);
+
   useEffect(() => {
-    if (
-      media.type === 'video' &&
-      !media.waveformPeaks &&
-      media.url &&
-      !media.url.startsWith('PENDING_') &&
-      !inFlightWaveformProbes.has(media.id)
-    ) {
-      inFlightWaveformProbes.add(media.id);
-      import('@/utils/mediaProbe')
-        .then(({ extractWaveformFromUrl }) => extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration }))
-        .then((peaks) => {
-          if (peaks && peaks.length > 0) {
-            (useEditorStore.getState() as any).setMediaWaveformPeaks?.(media.id, peaks);
-          }
-        })
-        .catch(() => {
-          // Video may not have audio track — ignore
-        })
-        .finally(() => {
-          inFlightWaveformProbes.delete(media.id);
-        });
-    }
-  }, [media.id, media.type, media.url, media.duration, media.waveformPeaks]);
+    if (!needsWaveformProbe) return;
+    inFlightWaveformProbes.add(media.id);
+    import('@/utils/mediaProbe')
+      .then(({ extractWaveformFromUrl }) => extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration }))
+      .then((peaks) => {
+        if (peaks && peaks.length > 0 && peaks.some((p) => p > 0.02)) {
+          (useEditorStore.getState() as any).setMediaWaveformPeaks?.(media.id, peaks);
+        } else {
+          // Video has no audible audio — don't retry
+          failedWaveformProbes.add(media.id);
+        }
+      })
+      .catch(() => {
+        // Video may not have audio track — mark as failed to prevent infinite retries
+        failedWaveformProbes.add(media.id);
+      })
+      .finally(() => {
+        inFlightWaveformProbes.delete(media.id);
+      });
+  }, [needsWaveformProbe, media.id, media.url, media.duration]);
 
   const clipAnims = clip.animations?.['transform.x'] || [];
   const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);

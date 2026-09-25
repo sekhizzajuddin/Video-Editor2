@@ -1364,6 +1364,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('procut-evict-media-cache', { detail: { id: media.id } }));
       window.dispatchEvent(new CustomEvent('procut-invalidate-speed-cache', { detail: { clipId: clip.id } }));
+      // Clear failed waveform probe cache so auto-probe can retry
+      window.dispatchEvent(new CustomEvent('procut-clear-failed-waveform-probe', { detail: { mediaId: media.id } }));
     }
 
     try {

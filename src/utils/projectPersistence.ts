@@ -328,6 +328,7 @@ export async function saveProcutFile(fileHandle: FileSystemFileHandle, data: {
     url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
     thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
     frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+    waveformPeaks: undefined,
   }));
 
   const cleanTracks = sanitizeTracksForStorage(data.tracks);
@@ -415,6 +416,7 @@ export async function saveProjectToDB(data: {
         url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
         thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
         frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+        waveformPeaks: undefined,
       }));
 
       const cleanTracks = sanitizeTracksForStorage(data.tracks);
@@ -625,6 +627,7 @@ export async function saveAutosaveToDB(data: {
     url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
     thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
     frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+    waveformPeaks: undefined,
   }));
 
   const cleanTracks = sanitizeTracksForStorage(data.tracks);
@@ -853,6 +856,7 @@ export async function saveTemplatesToDB(templates: any[]): Promise<void> {
       url: item.type === 'text' || item.type === 'fx' ? '' : 'PENDING_RESTORE',
       thumbnail: item.thumbnail ? 'PENDING_RESTORE' : undefined,
       frameStrip: item.frameStrip ? item.frameStrip.map(() => 'PENDING_RESTORE') : undefined,
+      waveformPeaks: undefined,
     })),
     tracks: sanitizeTracksForStorage(template.tracks)
   }));

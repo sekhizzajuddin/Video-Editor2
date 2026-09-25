@@ -207,13 +207,16 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     for (let i = 0; i < peaks.length; i++) {
       const peak = peaks[i];
       const halfH = peak * maxHalf;
-      if (halfH < 0.5) continue; // true silence = skip (center line shows through)
+      // For small (video) waveforms, lower the min bar threshold so even
+      // quiet audio is visible in the 18px strip.
+      const minBar = small ? 0.3 : 0.5;
+      if (halfH < minBar) continue;
       ctx.fillRect(i * barW, cy - halfH, Math.max(barW, 0.75), halfH * 2);
     }
 
     // Center line — thin baseline so dialogue start/end is immediately visible
     ctx.fillStyle = small
-      ? `rgba(${r},${g},${b},0.22)`
+      ? `rgba(${r},${g},${b},0.35)`
       : `rgba(${r},${g},${b},0.15)`;
     ctx.fillRect(0, cy - 0.5, W, 1);
   }, [peaks, width, height, small, r, g, b]);
