@@ -7,6 +7,7 @@ import {
   getTransitionWindow,
   getMaxTransitionDuration,
   normalizeTransition,
+  getDefaultSoundForKind,
   TRANSITION_SOUND_OPTIONS,
   type ActiveTransition,
 } from './transitionEngine';
@@ -247,6 +248,109 @@ describe('buildTransitionPlan', () => {
       .toBe('rgbSplit');
     expect(planAt({ type: 'pixelate', name: 'Pixelate', duration: 1 }, 0.5).postEffect)
       .toBe('pixelate');
+  });
+
+  it('blurDissolve peaks blur at the midpoint and applies it to both layers', () => {
+    const mid = planAt({ type: 'blurDissolve', name: 'Blur Dissolve', duration: 1 }, 0.5);
+    const edge = planAt({ type: 'blurDissolve', name: 'Blur Dissolve', duration: 1 }, 0);
+    expect(mid.from.blur!).toBeGreaterThan(0);
+    expect(mid.to.blur).toBeCloseTo(mid.from.blur!);
+    expect(edge.from.blur!).toBeCloseTo(0, 5);
+  });
+
+  it('circleWipe grows (in) or shrinks (out) the circular reveal', () => {
+    const quarter = planAt({ type: 'circleWipe', name: 'Iris In', duration: 1, params: { zoomDirection: 'in' } }, 0.25);
+    const threeQ = planAt({ type: 'circleWipe', name: 'Iris In', duration: 1, params: { zoomDirection: 'in' } }, 0.75);
+    expect(quarter.to.clipCircle!.r).toBeLessThan(threeQ.to.clipCircle!.r);
+    expect(quarter.from.opacity).toBeCloseTo(1);
+
+    // Iris Out: A's circle SHRINKS over time
+    const outEarly = planAt({ type: 'circleWipe', name: 'Iris Out', duration: 1, params: { zoomDirection: 'out' } }, 0.25);
+    const outLate = planAt({ type: 'circleWipe', name: 'Iris Out', duration: 1, params: { zoomDirection: 'out' } }, 0.75);
+    expect(outLate.from.clipCircle!.r).toBeLessThan(outEarly.from.clipCircle!.r);
+  });
+
+  it('cardFlip squashes A away then flips B in around the axis', () => {
+    const firstHalf = planAt({ type: 'cardFlip', name: 'Card Flip', duration: 1 }, 0.25);
+    expect(firstHalf.to.opacity).toBe(0);
+    expect(firstHalf.from.scaleX!).toBeLessThan(1);
+    const secondHalf = planAt({ type: 'cardFlip', name: 'Card Flip', duration: 1 }, 0.75);
+    expect(secondHalf.from.opacity).toBe(0);
+    expect(secondHalf.to.scaleX!).toBeLessThan(1);
+    // Vertical direction flips around the horizontal axis instead
+    const vert = planAt({ type: 'cardFlip', name: 'Card Flip', duration: 1, params: { direction: 'up' } }, 0.25);
+    expect(vert.from.scaleY!).toBeLessThan(1);
+  });
+
+  it('zoomBounce overshoots mid-transition but lands exactly on 1.0 scale', () => {
+    const midB = planAt({ type: 'zoomBounce', name: 'Elastic Zoom', duration: 1, params: { kind: 'zoomBounce' } }, 0.7);
+    expect(midB.to.scale).toBeGreaterThan(1); // overshoot
+    const end = planAt({ type: 'zoomBounce', name: 'Elastic Zoom', duration: 1, params: { kind: 'zoomBounce' } }, 1);
+    expect(end.to.scale).toBeCloseTo(1, 5); // no seam on the final frame
+  });
+
+  it('clockWipe sweeps a growing wedge of B', () => {
+    const quarter = planAt({ type: 'clockWipe', name: 'Clock Wipe', duration: 1 }, 0.25);
+    const threeQ = planAt({ type: 'clockWipe', name: 'Clock Wipe', duration: 1 }, 0.75);
+    expect(quarter.to.clipWedge!.angle).toBeLessThan(threeQ.to.clipWedge!.angle);
+    expect(quarter.from.opacity).toBeCloseTo(1);
+  });
+
+  it('preset display names map to the new professional kinds', () => {
+    expect(normalizeTransition({ type: 'x', name: 'Iris In', duration: 1 }).kind).toBe('circleWipe');
+    expect(normalizeTransition({ type: 'x', name: 'Blur Dissolve', duration: 1 }).kind).toBe('blurDissolve');
+    expect(normalizeTransition({ type: 'x', name: 'Card Flip', duration: 1 }).kind).toBe('cardFlip');
+    expect(normalizeTransition({ type: 'x', name: 'Elastic Zoom', duration: 1 }).kind).toBe('zoomBounce');
+    expect(normalizeTransition({ type: 'x', name: 'Clock Wipe', duration: 1 }).kind).toBe('clockWipe');
+  });
+
+  it('every professional kind has a recommended default sound', () => {
+    for (const kind of ['blurDissolve', 'circleWipe', 'cardFlip', 'zoomBounce', 'clockWipe'] as const) {
+      expect(getDefaultSoundForKind(kind)).not.toBe('none');
+    }
+  });
+
+  it('paperFold reveals B from the named edge with fold squash and lip shadow', () => {
+    const leftQ = planAt({ type: 'paperFold', name: 'Paper Fold Left', duration: 1 }, 0.25);
+    const left3Q = planAt({ type: 'paperFold', name: 'Paper Fold Left', duration: 1 }, 0.75);
+    expect(leftQ.to.clipRect!.w).toBeLessThan(left3Q.to.clipRect!.w);
+    expect(leftQ.to.scaleX!).toBeLessThan(left3Q.to.scaleX!); // page un-squashes
+    expect(leftQ.overlay.type).toBe('edgeGradient');
+    expect(leftQ.overlay.gradientDir).toBe('left');
+
+    const right = planAt({ type: 'paperFold', name: 'Paper Fold Right', duration: 1 }, 0.5);
+    expect(right.to.clipRect!.x).toBeGreaterThan(0); // anchored to right edge
+    const top = planAt({ type: 'paperFold', name: 'Paper Fold Top', duration: 1 }, 0.5);
+    expect(top.to.clipRect!.h).toBeLessThan(1);      // vertical reveal
+    expect(top.to.scaleY!).toBeLessThan(1);
+  });
+
+  it('particleDissolve masks B with a growing deterministic noise grid', () => {
+    const mid = planAt({ type: 'particleDissolve', name: 'Particle Dissolve', duration: 1 }, 0.5);
+    expect(mid.to.noiseReveal).toBeDefined();
+    expect(mid.to.noiseReveal!.amount).toBeGreaterThan(0);
+    expect(mid.from.opacity).toBeCloseTo(1); // A untouched underneath
+  });
+
+  it('sliceShift disassembles A (out) or assembles B (in)', () => {
+    const dis = planAt({ type: 'sliceShift', name: 'Disassemble', duration: 1 }, 0.5);
+    expect(dis.from.slices).toBeDefined();
+    expect(dis.from.slices!.spread).toBeGreaterThan(0);
+
+    const as = planAt({ type: 'sliceShift', name: 'Assemble', duration: 1 }, 0.5);
+    expect(as.to.slices).toBeDefined();
+    // Assemble converges: end-of-transition spread is zero
+    const asEnd = planAt({ type: 'sliceShift', name: 'Assemble', duration: 1 }, 1);
+    expect(asEnd.to.slices!.spread).toBeCloseTo(0, 5);
+  });
+
+  it('premium preset display names map to the premium kinds', () => {
+    expect(normalizeTransition({ type: 'x', name: 'Paper Fold Right', duration: 1 }).kind).toBe('paperFold');
+    expect(normalizeTransition({ type: 'x', name: 'Particle Dissolve', duration: 1 }).kind).toBe('particleDissolve');
+    // "Disassemble" contains "assemble" — disassemble must win
+    expect(normalizeTransition({ type: 'x', name: 'Disassemble', duration: 1 }).zoomDirection).toBe('out');
+    expect(normalizeTransition({ type: 'x', name: 'Assemble', duration: 1 }).kind).toBe('sliceShift');
+    expect(normalizeTransition({ type: 'x', name: 'Paper Fold Top', duration: 1 }).direction).toBe('up');
   });
 });
 

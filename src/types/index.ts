@@ -276,14 +276,49 @@ export interface ClipTextSettings {
   outerStrokeWidth?: number;      // outer stroke width
 }
 
+/** AI-generated custom FX item — stored per-project in customFxList. */
+export interface CustomFxItem {
+  id: string;
+  name: string;               // AI-generated descriptive name (e.g. "Neon HUD — Tech Explainer")
+  description: string;        // Brief scene description
+  category: 'custom';
+  htmlCss: string;            // Self-contained HTML/CSS/SVG animation code
+  thumbnail?: string;         // Base64 JPEG preview (rasterized at t=50%)
+  audioBreakdown: {
+    transcript: string;
+    keywords: string[];
+    tone: string;             // 'energetic' | 'calm' | 'dramatic' | 'comedic' | ...
+    pace: string;             // 'fast' | 'moderate' | 'slow'
+  } | null;                   // null when audio scan failed/skipped
+  visualBreakdown: {
+    sceneType: string;        // 'action' | 'explainer' | 'interview' | 'cinematic' | ...
+    subjects: string;
+    safeZones: string;        // e.g. 'left-third' | 'right-third' | 'lower-third' | 'center'
+    palette: string[];
+    composition: string;
+  } | null;                   // null when vision scan failed/skipped
+  reasoning: string;          // Why this animation justifies the dialogue in the visual scene
+  prompt: string;             // Editable animation directive
+  duration: number;           // Duration in seconds
+  createdAt: number;
+}
+
 export interface ClipFxSettings {
-  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'rhythmic_mirror' | 'action_zoom_pulse' | 'action_strobe' | 'action_shake' | 'quadrant_kaleidoscope' | 'subject_outline_flash' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | 'style_anime' | 'style_watercolor' | 'style_papercut' | string;
+  type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'rhythmic_mirror' | 'continuous_mirror' | 'action_zoom_pulse' | 'action_strobe' | 'action_shake' | 'quadrant_kaleidoscope' | 'subject_outline_flash' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | 'style_anime' | 'style_watercolor' | 'style_papercut' | 'custom_html' | string;
   intensity: number;    // 0 to 100
   wipeAngle?: number;   // 0 to 360 (for wipes)
-  // ── Action FX parameters ──
-  flipInterval?: number;   // seconds per mirror flip (e.g. 0.5s, 1.0s)
-  flipAxis?: 'horizontal' | 'vertical' | 'alternate';
+  // ── Action & Mirror FX parameters ──
+  flipInterval?: number;   // seconds per mirror flip (e.g. 0.25s, 0.5s, 1.0s)
+  flipAxis?: 'horizontal' | 'vertical' | 'both' | 'alternate';
+  mirrorMode?: 'flip' | 'symmetric';
+  mirrorStyle?: 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top' | 'quad';
   impactFlash?: boolean;
+  // ── Glitch parameters ──
+  glitchSpeed?: number;    // 1 to 20 Hz
+  glitchBands?: number;    // 5 to 50 slice count
+  rgbSplitDistance?: number; // 0 to 30px chromatic displacement
+  // ── Other FX parameters ──
+  barRatio?: string;       // '2.39:1' | '2.35:1' | '4:3' | '1:1'
   pulseSpeed?: number;     // Hz or beats per sec
   pulseDepth?: number;     // scale percentage bump (10-50%)
   strobeSpeed?: number;    // Hz
@@ -291,6 +326,10 @@ export interface ClipFxSettings {
   outlineColor?: string;
   outlineWidth?: number;
   glowBlur?: number;
+  // ── Custom AI FX parameters ──
+  customFxId?: string;       // Reference to CustomFxItem.id
+  customHtmlCss?: string;    // Inline HTML/CSS/SVG code (denormalized for render perf)
+  customFxName?: string;     // Display label
 }
 
 export type ParticleEffectType =
@@ -1081,6 +1120,11 @@ export interface EditorState {
 
   // Arrange Mode (card-based clip rearrange view)
   isArrangeMode: boolean;
+
+  // Custom AI FX
+  customFxList: CustomFxItem[];
+  showCustomFxMakerModal: boolean;
+  customFxTargetClipId: string | null;
 }
 
 export interface AspectRatioConflictData {

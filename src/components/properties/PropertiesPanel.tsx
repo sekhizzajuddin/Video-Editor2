@@ -7770,39 +7770,230 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, type: e.target.value as any } })}
                     className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1.5 focus:outline-none focus:border-rose-500 font-medium"
                   >
+                    <option value="continuous_mirror">🔄 Continuous Mirror (Alternating Flip)</option>
+                    <option value="mirror">🪞 Mirror (Symmetry & Split)</option>
+                    <option value="glitch">⚡ Glitch (Digital Slice Jitter)</option>
                     <option value="subject_outline_flash">✨ Subject Outline Flash (AI Human Extract)</option>
                     <option value="rhythmic_mirror">🔄 Rhythmic Mirror Flip (Action/Walking)</option>
                     <option value="action_zoom_pulse">💥 Action Zoom Pulse (Rhythm Bump)</option>
                     <option value="action_strobe">⚡ Impact Strobe Flash</option>
                     <option value="action_shake">📳 Action Shake & RGB Jitter</option>
                     <option value="quadrant_kaleidoscope">🔳 4-Way Mirror Quadrant</option>
-                    <option value="vfx_breakdown">VFX Breakdown</option>
-                    <option value="bw_to_color">B&W to Color</option>
-                    <option value="glitch">Glitch</option>
-                    <option value="old_film">Old Film</option>
-                    <option value="vhs">VHS</option>
-                    <option value="cinematic_bars">Cinematic Bars</option>
-                    <option value="neon_glow">Neon Glow</option>
-                    <option value="rgb_split">RGB Split</option>
-                    <option value="pixelate">Pixelate</option>
-                    <option value="mirror">Standard Mirror</option>
-                    <option value="zoom_blur">Zoom Blur</option>
-                    <option value="lens_flare">Lens Flare</option>
-                    <option value="night_vision">Night Vision</option>
-                    <option value="thermal">Thermal</option>
-                    <option value="posterize">Posterize</option>
-                    <option value="dreamy_blur">Dreamy Blur</option>
-                    <option value="fisheye">Fisheye Lens</option>
-                    <option value="vignette_burn">Vignette Burn</option>
-                    <option value="gameboy">Retro GameBoy</option>
+                    <option value="vhs">📼 Retro VHS Tape</option>
+                    <option value="cinematic_bars">🎬 Cinematic Letterbox Bars</option>
+                    <option value="rgb_split">🌈 RGB Split (Prism)</option>
+                    <option value="old_film">🎞️ Old Film Grain & Flicker</option>
+                    <option value="neon_glow">🔥 Neon Glow Bloom</option>
+                    <option value="pixelate">👾 Pixelate (8-Bit)</option>
+                    <option value="zoom_blur">🌀 Zoom Blur (Radial)</option>
+                    <option value="lens_flare">☀️ Lens Flare Burst</option>
+                    <option value="night_vision">👁️ Night Vision (Phosphor)</option>
+                    <option value="thermal">🎯 Thermal Heat Cam</option>
+                    <option value="dreamy_blur">💧 Dreamy Blur Soft-Focus</option>
+                    <option value="fisheye">🐟 Fisheye Action Cam</option>
+                    <option value="vignette_burn">🌑 Vignette Dark Burn</option>
+                    <option value="gameboy">🎮 Retro GameBoy 4-Shade</option>
+                    <option value="vfx_breakdown">🎭 VFX Breakdown Wipe</option>
+                    <option value="bw_to_color">☀️ B&W to Color Wipe</option>
+                    <option value="posterize">🎨 Posterize Pop-Art</option>
                   </select>
                 </div>
+
+                {/* ── Customized Controls for Continuous / Rhythmic Mirror ── */}
+                {(selectedClip.fxSettings.type === 'continuous_mirror' || selectedClip.fxSettings.type === 'rhythmic_mirror') && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Flip Speed / Interval</label>
+                        <span className="font-mono text-amber-400 text-[10px]">Every {selectedClip.fxSettings.flipInterval ?? 0.5}s</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.05"
+                        max="2.0"
+                        step="0.05"
+                        value={selectedClip.fxSettings.flipInterval ?? 0.5}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipInterval: Number(e.target.value) } })}
+                        className="flex-1 accent-amber-500"
+                      />
+                      <div className="flex gap-1 pt-0.5">
+                        {[
+                          { label: '0.2s Fast', val: 0.2 },
+                          { label: '0.5s Normal', val: 0.5 },
+                          { label: '1.0s Slow', val: 1.0 },
+                        ].map((p) => (
+                          <button
+                            key={p.val}
+                            type="button"
+                            onClick={() => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipInterval: p.val } })}
+                            className={`px-1.5 py-0.5 text-[9px] rounded border transition-colors ${
+                              (selectedClip.fxSettings!.flipInterval ?? 0.5) === p.val
+                                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-semibold'
+                                : 'bg-[var(--theme-bg-app)] border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-white'
+                            }`}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Flip Axis</label>
+                      <select
+                        value={selectedClip.fxSettings.flipAxis ?? 'horizontal'}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipAxis: e.target.value as any } })}
+                        className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1"
+                      >
+                        <option value="horizontal">↔ Horizontal Flip (Walking/Action)</option>
+                        <option value="vertical">↕ Vertical Flip</option>
+                        <option value="both">⤢ Both Axes (Dual Flip)</option>
+                        <option value="alternate">🔄 Alternate Axes Horiz/Vert</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Mirror Mode</label>
+                      <select
+                        value={selectedClip.fxSettings.mirrorMode ?? 'flip'}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, mirrorMode: e.target.value as any } })}
+                        className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1"
+                      >
+                        <option value="flip">Full Frame Flip (Whole canvas alternates)</option>
+                        <option value="symmetric">Symmetric Mirror (Left/Right halves alternate)</option>
+                      </select>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs select-none cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedClip.fxSettings.impactFlash !== false}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, impactFlash: e.target.checked } })}
+                        className="w-3.5 h-3.5 accent-amber-500 rounded"
+                      />
+                      <span className="text-[11px] text-[var(--theme-text-primary)]">Flash Impact Burst on Flip</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* ── Customized Controls for Mirror ── */}
+                {selectedClip.fxSettings.type === 'mirror' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Mirror Reflection Style</label>
+                      <select
+                        value={selectedClip.fxSettings.mirrorStyle ?? 'left_to_right'}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, mirrorStyle: e.target.value as any } })}
+                        className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1"
+                      >
+                        <option value="left_to_right">Left-to-Right Symmetry</option>
+                        <option value="right_to_left">Right-to-Left Symmetry</option>
+                        <option value="top_to_bottom">Top-to-Bottom Symmetry</option>
+                        <option value="bottom_to_top">Bottom-to-Top Symmetry</option>
+                        <option value="quad">4-Quadrant Kaleidoscope</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Customized Controls for Glitch ── */}
+                {selectedClip.fxSettings.type === 'glitch' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Jitter Frequency / Speed</label>
+                        <span className="font-mono text-rose-400 text-[10px]">{selectedClip.fxSettings.glitchSpeed ?? 12} Hz</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="24"
+                        step="1"
+                        value={selectedClip.fxSettings.glitchSpeed ?? 12}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, glitchSpeed: Number(e.target.value) } })}
+                        className="flex-1 accent-rose-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Slice Band Density</label>
+                        <span className="font-mono text-rose-400 text-[10px]">{selectedClip.fxSettings.glitchBands ?? 20} slices</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="5"
+                        max="50"
+                        step="1"
+                        value={selectedClip.fxSettings.glitchBands ?? 20}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, glitchBands: Number(e.target.value) } })}
+                        className="flex-1 accent-rose-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">RGB Chromatic Shift</label>
+                        <span className="font-mono text-rose-400 text-[10px]">{selectedClip.fxSettings.rgbSplitDistance ?? 6} px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="30"
+                        step="1"
+                        value={selectedClip.fxSettings.rgbSplitDistance ?? 6}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, rgbSplitDistance: Number(e.target.value) } })}
+                        className="flex-1 accent-rose-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Customized Controls for RGB Split ── */}
+                {selectedClip.fxSettings.type === 'rgb_split' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Chromatic Offset</label>
+                        <span className="font-mono text-red-400 text-[10px]">{selectedClip.fxSettings.rgbSplitDistance ?? 6} px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="30"
+                        step="1"
+                        value={selectedClip.fxSettings.rgbSplitDistance ?? 6}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, rgbSplitDistance: Number(e.target.value) } })}
+                        className="flex-1 accent-red-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Customized Controls for Cinematic Bars ── */}
+                {selectedClip.fxSettings.type === 'cinematic_bars' && (
+                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Aspect Ratio Preset</label>
+                      <select
+                        value={selectedClip.fxSettings.barRatio ?? '2.39:1'}
+                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, barRatio: e.target.value } })}
+                        className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1"
+                      >
+                        <option value="2.39:1">2.39:1 Anamorphic Widescreen</option>
+                        <option value="2.35:1">2.35:1 Cinema Scope</option>
+                        <option value="4:3">4:3 Retro Academy Ratio</option>
+                        <option value="1:1">1:1 Square Pillarbox</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Customized Controls for Subject Outline Flash ── */}
                 {selectedClip.fxSettings.type === 'subject_outline_flash' && (
                   <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[var(--theme-text-muted)]">Neon Glow Color</label>
+                      <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Neon Glow Color</label>
                       <div className="flex items-center gap-2">
                         <input
                           type="color"
@@ -7874,50 +8065,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
                 )}
 
-                {/* ── Customized Controls for Rhythmic Mirror Flip ── */}
-                {selectedClip.fxSettings.type === 'rhythmic_mirror' && (
-                  <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
-                        Mirror Flip Speed
-                        <span className="font-mono text-amber-400">Every {selectedClip.fxSettings.flipInterval ?? 0.5}s</span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="2.0"
-                        step="0.1"
-                        value={selectedClip.fxSettings.flipInterval ?? 0.5}
-                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipInterval: Number(e.target.value) } })}
-                        className="flex-1 accent-amber-500"
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-[var(--theme-text-muted)]">Flip Axis</label>
-                      <select
-                        value={selectedClip.fxSettings.flipAxis ?? 'horizontal'}
-                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, flipAxis: e.target.value as any } })}
-                        className="bg-[var(--theme-bg-subpanel)] text-white text-xs border border-[var(--theme-border)] rounded px-2 py-1"
-                      >
-                        <option value="horizontal">Horizontal Flip (Walking Scene)</option>
-                        <option value="vertical">Vertical Flip</option>
-                        <option value="alternate">Alternate Both Axes</option>
-                      </select>
-                    </div>
-
-                    <label className="flex items-center gap-2 text-xs select-none cursor-pointer pt-1">
-                      <input
-                        type="checkbox"
-                        checked={selectedClip.fxSettings.impactFlash !== false}
-                        onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, impactFlash: e.target.checked } })}
-                        className="w-3.5 h-3.5 accent-amber-500 rounded"
-                      />
-                      <span className="text-[11px] text-[var(--theme-text-primary)]">Flash Impact Burst on Flip</span>
-                    </label>
-                  </div>
-                )}
-
                 {/* ── Customized Controls for Action Zoom Pulse ── */}
                 {selectedClip.fxSettings.type === 'action_zoom_pulse' && (
                   <div className="flex flex-col gap-2.5 pt-2 border-t border-[#2a2a2a]">
@@ -7975,8 +8122,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
                 )}
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] text-[var(--theme-text-muted)]">Intensity — {selectedClip.fxSettings.intensity ?? 100}%</label>
+                <div className="flex flex-col gap-1.5 pt-2 border-t border-[#2a2a2a]">
+                  <label className="text-[10px] text-[var(--theme-text-muted)] flex justify-between">
+                    FX Master Intensity
+                    <span className="font-mono text-rose-400">{selectedClip.fxSettings.intensity ?? 100}%</span>
+                  </label>
                   <input type="range" min="0" max="100"
                     value={selectedClip.fxSettings.intensity ?? 100}
                     onChange={(e) => updateClip(selectedClip.id, { fxSettings: { ...selectedClip.fxSettings!, intensity: Number(e.target.value) } })}

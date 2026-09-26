@@ -203,11 +203,47 @@ async function tensorFloat16Array(t: any): Promise<F16> {
  *
  * @param videoTime Clip-local time in seconds (used for state-jump detection)
  */
+/**
+ * Per-clip serialization queue. The recurrent state (read → await session.run →
+ * write) is NOT atomic: two concurrent calls for the same clip interleave and
+ * corrupt the temporal memory (the two independent in-flight guards further up
+ * the stack — window flags vs. segmentingInFlight — both allowed this).
+ * Chaining calls per clipId guarantees the state is always consistent; the
+ * queue depth stays ≤1 because callers already throttle.
+ */
+const rvmInFlight = new Map<string, Promise<any>>();
+
 export async function segmentWithRVM(
   source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
   clipId: string,
   videoTime: number,
   maxDim: number = 512
+): Promise<RVMSegmentResult | null> {
+  // Canonicalize the inference size to fixed tiers. Different call sites used
+  // to pass 384/512/768 for the same clip, which changed infW/infH and forced
+  // a recurrent-state reset on every alternating call — silently defeating
+  // RVM's temporal coherence.
+  const canonicalMaxDim = maxDim <= 448 ? 384 : maxDim <= 640 ? 512 : 768;
+
+  const prev = rvmInFlight.get(clipId) || Promise.resolve();
+  const run = prev.then(() =>
+    segmentWithRVMInner(source, clipId, videoTime, canonicalMaxDim)
+  );
+  // Store a never-rejecting handle so one failure doesn't poison the chain.
+  const stored = run.catch(() => null);
+  rvmInFlight.set(clipId, stored);
+  try {
+    return await run;
+  } finally {
+    if (rvmInFlight.get(clipId) === stored) rvmInFlight.delete(clipId);
+  }
+}
+
+async function segmentWithRVMInner(
+  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
+  clipId: string,
+  videoTime: number,
+  maxDim: number
 ): Promise<RVMSegmentResult | null> {
   const session = await loadRVMSession();
   if (!session) return null;
@@ -247,7 +283,9 @@ export async function segmentWithRVM(
     }
     const ort: any = (ortModule as any).default || ortModule;
     const srcTensor = new ort.Tensor('float16', float32ToFloat16Bulk(srcF32), [1, 3, infH, infW]);
-    const dRatio = new ort.Tensor('float32', new Float32Array([maxDim <= 512 ? 0.375 : 0.25]), [1]);
+    // Downsample ratio must be a pure function of the canonical tier so the
+    // recurrent state stays compatible across calls from different pipelines.
+    const dRatio = new ort.Tensor('float32', new Float32Array([maxDim === 768 ? 0.25 : 0.375]), [1]);
 
     // State validation: reset on seek, backward time or resolution change
     const state = getRVMClipState(clipId);

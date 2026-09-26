@@ -58,7 +58,7 @@ const debouncedSaveProject = (state: any) => {
   if (saveTimeoutId) {
     clearTimeout(saveTimeoutId);
   }
-  const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences, projectFileHandle } = state;
+  const { tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, projectName, pipWindows, sequences, projectFileHandle, customFxList } = state;
   const hasAnyMedia = mediaLibrary && mediaLibrary.length > 0;
   const hasAnyClips = tracks && tracks.some((t: any) => t.clips && t.clips.length > 0);
   const hasAnyExtras = (subtitles && subtitles.length > 0) || (markers && markers.length > 0) || (beatMarkers && beatMarkers.length > 0) || (exportRegions && exportRegions.length > 0) || (pipWindows && Object.keys(pipWindows).length > 0);
@@ -71,7 +71,7 @@ const debouncedSaveProject = (state: any) => {
   saveTimeoutId = setTimeout(async () => {
     // Always save to IndexedDB as a fallback backup
     try {
-      await saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, pipWindows, sequences } as any);
+      await saveProjectToDB({ tracks, mediaLibrary, folders, subtitles, markers, beatMarkers, exportRegions, currentTime, aspectRatio, projectId, pipWindows, sequences, customFxList } as any);
       if (projectId !== 'default') {
         await saveProjectMeta({ id: projectId, name: projectName, lastModified: Date.now() });
       }
@@ -417,6 +417,12 @@ interface EditorActions {
 
   // Arrange Mode
   setArrangeMode: (val: boolean) => void;
+
+  // Custom AI FX
+  openCustomFxMaker: (clipId?: string) => void;
+  closeCustomFxMaker: () => void;
+  addCustomFx: (fx: import('@/types').CustomFxItem) => void;
+  removeCustomFx: (id: string) => void;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -504,6 +510,9 @@ const initialState: EditorState = {
   showTeleprompter: false,
   showHelpMenu: false,
   showAiSpeedSyncModal: false,
+  customFxList: [],
+  showCustomFxMakerModal: false,
+  customFxTargetClipId: null,
   activeHelpSection: null,
   useProxies: false,
   showProgressBar: false,
@@ -3858,6 +3867,16 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setShowTeleprompter: (show) => set({ showTeleprompter: show }),
   setShowHelpMenu: (show, section = null) => set({ showHelpMenu: show, activeHelpSection: section }),
   setShowAiSpeedSyncModal: (show) => set({ showAiSpeedSyncModal: show }),
+  openCustomFxMaker: (clipId) => set({ showCustomFxMakerModal: true, customFxTargetClipId: clipId || null }),
+  closeCustomFxMaker: () => set({ showCustomFxMakerModal: false, customFxTargetClipId: null }),
+  addCustomFx: (fx) => {
+    set((state) => ({ customFxList: [...state.customFxList, fx] }));
+    debouncedSaveProject(useEditorStore.getState());
+  },
+  removeCustomFx: (id) => {
+    set((state) => ({ customFxList: state.customFxList.filter((f) => f.id !== id) }));
+    debouncedSaveProject(useEditorStore.getState());
+  },
   setUseProxies: (use) => set({ useProxies: use }),
   syncSelectedClips: () => {
     set((state) => {

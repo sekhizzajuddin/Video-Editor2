@@ -3,6 +3,7 @@ import { Sparkles, ArrowLeftRight, GripVertical, ZoomIn, Plus } from 'lucide-rea
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
+import { normalizeTransition, getDefaultSoundForKind } from '@/utils/transitionEngine';
 
 interface TransitionTargetProps {
   position?: 'in' | 'out';
@@ -53,12 +54,79 @@ function TransitionPreviewTooltipCanvas({ transitionName }: { transitionName: st
       if (nameLower.includes('dissolve')) {
         drawBlock(colorA, 1 - t);
         drawBlock(colorB, t);
+      } else if (nameLower.includes('iris') || nameLower.includes('circle')) {
+        // Iris / circle wipe: growing (or shrinking) circular reveal.
+        const out = nameLower.includes('out');
+        drawBlock(out ? colorB : colorA, 1);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(W / 2, H / 2, Math.max(1, (out ? 1 - t : t) * W * 0.75), 0, Math.PI * 2);
+        ctx.clip();
+        drawBlock(out ? colorA : colorB, 1);
+        ctx.restore();
+      } else if (nameLower.includes('flip')) {
+        // 3D card flip approximation: squash A away, then B flips in.
+        if (t < 0.5) {
+          const c = Math.max(0.02, Math.cos(t * Math.PI));
+          ctx.save();
+          ctx.translate(W / 2, 0);
+          ctx.scale(c, 1);
+          const w2 = W / c;
+          ctx.fillStyle = colorA;
+          ctx.fillRect(-w2 / 2, 0, w2, H);
+          ctx.restore();
+        } else {
+          const c = Math.max(0.02, Math.cos((t - 1) * Math.PI));
+          ctx.save();
+          ctx.translate(W / 2, 0);
+          ctx.scale(c, 1);
+          const w2 = W / c;
+          ctx.fillStyle = colorB;
+          ctx.fillRect(-w2 / 2, 0, w2, H);
+          ctx.restore();
+        }
       } else if (nameLower.includes('fade')) {
         if (t < 0.5) {
           drawBlock(colorA, 1 - t * 2);
         } else {
           drawBlock(colorB, (t - 0.5) * 2);
         }
+      } else if (nameLower.includes('fold')) {
+        // Paper fold: B revealed from the named edge with a shadow lip
+        drawBlock(colorA, 1);
+        const fromRight = nameLower.includes('right');
+        const fromTop = nameLower.includes('top');
+        ctx.save();
+        ctx.beginPath();
+        if (fromTop) ctx.rect(0, 0, W, H * t);
+        else if (fromRight) ctx.rect(W * (1 - t), 0, W * t, H);
+        else ctx.rect(0, 0, W * t, H);
+        ctx.clip();
+        drawBlock(colorB, 1);
+        ctx.fillStyle = `rgba(0,0,0,${0.4 * (1 - t)})`;
+        if (fromTop) ctx.fillRect(0, H * t - 4, W, 4);
+        else if (fromRight) ctx.fillRect(W * (1 - t), 0, 4, H);
+        else ctx.fillRect(W * t - 4, 0, 4, H);
+        ctx.restore();
+      } else if (nameLower.includes('particle')) {
+        drawBlock(colorA, 1);
+        const cell = 4;
+        ctx.save();
+        for (let y = 0; y < H; y += cell) {
+          for (let x = 0; x < W; x += cell) {
+            const s = Math.sin((x / cell) * 12.9898 + (y / cell) * 78.233) * 43758.5453123;
+            const hsh = s - Math.floor(s);
+            if (hsh < t) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(x, y, cell, cell);
+              ctx.clip();
+              drawBlock(colorB, 1);
+              ctx.restore();
+            }
+          }
+        }
+        ctx.restore();
       } else if (nameLower.includes('wipe')) {
         if (nameLower.includes('left')) {
           drawBlock(colorA, 1);
@@ -158,22 +226,28 @@ export function TransitionTarget({
     const name = e.dataTransfer.getData('application/procut-transition');
     if (!name) return;
 
-    let type: 'dissolve' | 'wipe' | 'zoom' | 'slide' = 'dissolve';
-    if (name.toLowerCase().includes('wipe')) type = 'wipe';
-    else if (name.toLowerCase().includes('zoom')) type = 'zoom';
-    else if (name.toLowerCase().includes('slide')) type = 'slide';
+    // Map the preset name to the canonical kind so the drop works even if the
+    // preset is later renamed (normalizeTransition re-parses the name anyway,
+    // but storing the kind makes the Properties panel show the right one).
+    const probe = normalizeTransition({ type: name.toLowerCase().replace(/\s+/g, '_'), name, duration: 1 });
 
     const state = useEditorStore.getState();
     const clip = findClipDeep(state, clipId)?.clip;
     const clipDuration = clip?.duration ?? 2.5;
     const defaultDuration = Math.min(1.0, clipDuration * 0.4);
 
+    // Auto-attach the recommended sound effect as a tasteful default; the user
+    // can change it or set it to "No Sound" in the Transition Settings panel.
+    const defaultSound = getDefaultSoundForKind(probe.kind);
+
     const newTransition = {
       id: Math.random().toString(36).substr(2, 9),
       name,
-      type,
+      type: probe.kind,
       duration: Math.max(0.1, defaultDuration),
-      params: { alignment: 'center' },
+      params: { alignment: 'center', kind: probe.kind },
+      soundEffect: defaultSound,
+      soundVolume: 0.8,
     };
 
     if (position === 'in') {

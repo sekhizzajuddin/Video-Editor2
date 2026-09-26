@@ -189,7 +189,7 @@ const segmentingInFlight = new Set<string>();
 
 export function getEmptyMaskSentinel(): HTMLCanvasElement {
   const s = getPooledCanvas('_empty_mask_sentinel', 1, 1);
-  return s;
+  return s as HTMLCanvasElement;
 }
 
 function isEmptyMaskMarker(m: ImageBitmap | HTMLCanvasElement): boolean {
@@ -215,10 +215,25 @@ export function notifyMaskReady(): void {
 // ── Canvas Pool with LRU Eviction ─────────────────────────────────────────────
 // Pre-allocated canvases with LRU eviction to prevent unbounded memory growth.
 
-const canvasPool = new Map<string, HTMLCanvasElement>();
+type PooledCanvas = HTMLCanvasElement | OffscreenCanvas;
+
+const canvasPool = new Map<string, PooledCanvas>();
 const MAX_POOL_SIZE = 50;
 
-export function getPooledCanvas(key: string, w: number, h: number): HTMLCanvasElement {
+// Worker-safe canvas factory: OffscreenCanvas works in both window and worker
+// scopes; document.createElement throws inside the export worker (used to crash
+// exports whenever choke/feather or blur/outline/color cutout modes were used).
+function createCanvas(w: number, h: number): PooledCanvas {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    return new OffscreenCanvas(w, h);
+  }
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c;
+}
+
+export function getPooledCanvas(key: string, w: number, h: number): PooledCanvas {
   let c = canvasPool.get(key);
   if (c) {
     // Re-insert to mark as most recently used in Map iteration order
@@ -229,7 +244,7 @@ export function getPooledCanvas(key: string, w: number, h: number): HTMLCanvasEl
       const firstKey = canvasPool.keys().next().value;
       if (firstKey) canvasPool.delete(firstKey);
     }
-    c = document.createElement('canvas');
+    c = createCanvas(w, h);
     canvasPool.set(key, c);
   }
   if (c.width !== w || c.height !== h) {
@@ -386,12 +401,12 @@ export function captureSnapshotBlob(
   // Freeze the snapshot into an immutable Blob immediately.
   // toBlob is async but fires synchronously from the current canvas state.
   return new Promise<{ blob: Blob; w: number; h: number } | null>((resolve) => {
-    snapCanvas.toBlob((blob) => {
+    (snapCanvas as any).toBlob((blob: any) => {
       if (blob) {
         resolve({ blob, w: inferW, h: inferH });
       } else {
         // Fallback to PNG if JPEG fails
-        snapCanvas.toBlob((pngBlob) => {
+        (snapCanvas as any).toBlob((pngBlob: any) => {
           resolve(pngBlob ? { blob: pngBlob, w: inferW, h: inferH } : null);
         }, 'image/png');
       }
@@ -794,13 +809,13 @@ export function applySpillSuppression(
  * Refine mask alpha boundaries with Choke (shrink/expand) and Feather (Gaussian blur).
  */
 export function refineMaskEdges(
-  maskCanvas: HTMLCanvasElement | ImageBitmap | HTMLCanvasElement,
+  maskCanvas: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
   width: number,
   height: number,
   choke: number = 0,
   feather: number = 0,
   poolKey: string = 'mask_refine'
-): HTMLCanvasElement {
+): PooledCanvas {
   const temp = getPooledCanvas(`${poolKey}_edge`, width, height);
   const tCtx = temp.getContext('2d');
   if (!tCtx) return temp;
@@ -911,13 +926,13 @@ export function applyPreRenderedMaskIfAvailable(
       bCtx.globalAlpha = localT;
       bCtx.drawImage(nextMask as any, 0, 0, width, height);
       bCtx.globalAlpha = 1.0;
-      preMask = blendCanvas;
+      preMask = blendCanvas as any;
     }
   }
 
   // Instant GPU texture composite with Choke and Feather
   const refinedMask = (choke !== 0 || feather > 0)
-    ? refineMaskEdges(preMask, width, height, choke, feather, `${clipId}_pre`)
+    ? refineMaskEdges(preMask!, width, height, choke, feather, `${clipId}_pre`)
     : preMask;
 
   const mode = extraOptions?.mode || 'remove';

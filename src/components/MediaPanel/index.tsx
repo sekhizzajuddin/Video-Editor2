@@ -555,10 +555,10 @@ export function MediaPanel() {
        attempts++;
     }
 
-    const FX_TYPE_MAP: Record<string, string> = Object.fromEntries(
-      FX_EFFECTS.map((fx) => [fx.name, fx.type])
+    const matchedFx = FX_EFFECTS.find(
+      (fx) => fx.name.toLowerCase() === effect.name.toLowerCase() || fx.type === effect.type
     );
-    const fxType = FX_TYPE_MAP[effect.name] ?? effect.type ?? effect.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const fxType = matchedFx?.type ?? effect.type ?? effect.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const fxMediaId = `fx_media_${Math.random().toString(36).substr(2, 9)}`;
     const fxClipId = `fx_clip_${Math.random().toString(36).substr(2, 9)}`;
     
@@ -586,13 +586,15 @@ export function MediaPanel() {
       effects: [],
       fxSettings: {
         type: fxType as any,
-        intensity: 100,
+        intensity: effect.defaultSettings?.intensity ?? matchedFx?.defaultSettings?.intensity ?? 100,
+        ...(matchedFx?.defaultSettings || {}),
+        ...(effect.defaultSettings || {}),
       },
     };
     addClip(fxClip);
     selectClip(fxClipId);
     saveSnapshot();
-    toast.success(`Added effect "${effect.name}" to FX track`);
+    toast.success(`Added FX clip "${effect.name}" to FX track`);
   };
 
   const handleColorPresetClick = (effect: any) => {
@@ -660,6 +662,8 @@ export function MediaPanel() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [openSection, setOpenSection] = useState<'fx' | 'color' | 'particles'>('fx');
+  const [fxCategoryFilter, setFxCategoryFilter] = useState<'all' | 'mirror' | 'glitch' | 'motion' | 'cinematic' | 'stylize' | 'particles' | 'color' | 'custom'>('all');
+  const [fxSearchQuery, setFxSearchQuery] = useState('');
   const [previewItem, setPreviewItem] = useState<any | null>(null);
   const [templateCategory, setTemplateCategory] = useState<string>('all');
   const [templateSubTab, setTemplateSubTab] = useState<'text' | 'video' | 'project'>('text');
@@ -891,7 +895,7 @@ export function MediaPanel() {
     { id: 'project', label: 'Media', icon: Folder },
     { id: 'audio', label: 'Audio', icon: Music },
     { id: 'text', label: 'Text', icon: Type },
-    { id: 'effects', label: 'Effects', icon: Waves },
+    { id: 'fx', label: 'FX', icon: Wand2 },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
     { id: 'templates', label: 'Elements', icon: Clapperboard },
   ];
@@ -1291,7 +1295,7 @@ export function MediaPanel() {
         <div className="flex flex-col items-center w-full gap-0.5">
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = activeMediaTab === tab.id;
+            const isActive = activeMediaTab === tab.id || (tab.id === 'fx' && activeMediaTab === 'effects');
             return (
               <button
                 key={tab.id}
@@ -1337,7 +1341,13 @@ export function MediaPanel() {
         <div className="h-10 px-3 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0 bg-[var(--theme-bg-panel)]/80 backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <h2 className="text-xs font-semibold text-[var(--theme-text-primary)] tracking-wide capitalize">
-              {activeMediaTab === 'project' ? 'Media Library' : activeMediaTab === 'templates' ? 'Elements' : activeMediaTab}
+              {activeMediaTab === 'project'
+                ? 'Media Library'
+                : activeMediaTab === 'templates'
+                ? 'Elements'
+                : (activeMediaTab === 'fx' || activeMediaTab === 'effects')
+                ? 'FX Effects'
+                : activeMediaTab}
             </h2>
             {activeMediaTab === 'project' && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] border border-[var(--theme-border)] font-mono">
@@ -2838,127 +2848,362 @@ export function MediaPanel() {
           </div>
         )}
 
-        {activeMediaTab === 'effects' && (() => {
-          const Section = ({ id, label, color, children }: { id: 'fx'|'color'|'particles'; label: string; color: string; children: React.ReactNode }) => (
-            <div>
-              <button
-                onClick={() => setOpenSection(prev => prev === id ? 'fx' : id)}
-                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors mb-1`}
-              >
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${color}`}>{label}</span>
-                {openSection === id
-                  ? <ChevronDown className="w-3 h-3 text-[var(--theme-text-muted)]" />
-                  : <ChevronRight className="w-3 h-3 text-[var(--theme-text-muted)]" />}
-              </button>
-              {openSection === id && <div className="mb-3">{children}</div>}
-            </div>
-          );
+        {(activeMediaTab === 'fx' || activeMediaTab === 'effects') && (() => {
+          const categories: { id: typeof fxCategoryFilter; label: string; icon?: string }[] = [
+            { id: 'all', label: 'All FX' },
+            { id: 'mirror', label: '🔄 Mirror & Flip' },
+            { id: 'glitch', label: '⚡ Glitch' },
+            { id: 'motion', label: '💥 Motion & Shake' },
+            { id: 'cinematic', label: '🎬 Cinematic' },
+            { id: 'stylize', label: '🎨 Stylize' },
+            { id: 'particles', label: '✦ Particles' },
+            { id: 'color', label: '🌈 Color Presets' },
+            { id: 'custom', label: '✨ Custom AI' },
+          ];
+
+          const filteredFxList = FX_EFFECTS.filter((fx) => {
+            const matchesCat = fxCategoryFilter === 'all' || fx.category === fxCategoryFilter;
+            const matchesQuery = !fxSearchQuery || 
+              fx.name.toLowerCase().includes(fxSearchQuery.toLowerCase()) || 
+              fx.desc.toLowerCase().includes(fxSearchQuery.toLowerCase());
+            return matchesCat && matchesQuery;
+          });
+
+          const hasFxTrack = tracks.some(t => t.type === 'fx');
 
           return (
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {/* ── Timeline FX ── */}
-              <Section id="fx" label="Timeline FX" color="text-rose-500">
-                <p className="text-[9px] text-[var(--theme-text-muted)] px-1 mb-1.5 font-medium">Add FX Track first, then drag here</p>
-                <div className="grid grid-cols-1 gap-1">
-                  {FX_EFFECTS.map((effect) => {
-                    const Icon = effect.icon;
-                    return (
-                      <div
-                        key={effect.name}
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('application/procut-effect', effect.name);
-                          e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                        onClick={() => handleEffectClick(effect)}
-                        onMouseEnter={() => setHoveredItem(effect.name)}
-                        onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2.5 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl border border-transparent hover:border-[var(--theme-border)] cursor-pointer transition-colors group"
-                      >
-                        <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
-                          <Icon className={`w-4 h-4 ${effect.color}`} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-xs text-[var(--theme-text-primary)] font-semibold block leading-tight">{effect.name}</span>
-                          <span className="text-[9px] text-[var(--theme-text-muted)]">{effect.desc}</span>
-                        </div>
-                        <span className="text-[8px] text-rose-500/70 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity font-bold font-mono">FX</span>
-                      </div>
-                    );
-                  })}
+            <div className="flex-1 overflow-y-auto p-2 space-y-3">
+              {/* ── FX Track Banner & Quick Action ── */}
+              <div className="bg-gradient-to-br from-rose-500/10 via-purple-500/5 to-transparent border border-rose-500/20 rounded-xl p-3 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded bg-rose-500/20 border border-rose-500/30 flex items-center justify-center">
+                      <Sparkles className="w-3 h-3 text-rose-400 animate-pulse" />
+                    </div>
+                    <span className="text-xs font-bold text-[var(--theme-text-primary)]">FX Track Clips</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      addTrack('fx');
+                      toast.success('Added new FX track to timeline');
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 rounded-lg text-[10px] font-semibold transition-all hover:scale-105 active:scale-95 shadow-sm"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{hasFxTrack ? '+ Add Another FX Track' : '+ Add FX Track'}</span>
+                  </button>
                 </div>
-              </Section>
+                <p className="text-[10px] text-[var(--theme-text-muted)] leading-relaxed">
+                  Overlay dynamic shaders across your video clips. Click any effect to insert at playhead or drag directly to timeline.
+                </p>
+              </div>
 
-              <div className="h-px bg-[var(--theme-border)]" />
-
-              {/* ── Color Presets ── */}
-              <Section id="color" label="Color Presets" color="text-amber-500">
-                <p className="text-[9px] text-[var(--theme-text-muted)] px-1 mb-1.5 font-medium">Drag onto a video / image clip</p>
-                <div className="grid grid-cols-1 gap-1">
-                  {COLOR_CORRECTION_EFFECTS.map((effect) => {
-                    const Icon = effect.icon;
-                    return (
-                      <div
-                        key={effect.name}
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('application/procut-color-preset', JSON.stringify(effect.preset));
-                          e.dataTransfer.setData('application/procut-effect', effect.name);
-                          e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                        onClick={() => handleColorPresetClick(effect)}
-                        onMouseEnter={() => setHoveredItem(effect.name)}
-                        onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2.5 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl border border-transparent hover:border-[var(--theme-border)] cursor-pointer transition-colors group"
-                      >
-                        <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-                          <Icon className={`w-4 h-4 ${effect.color}`} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-xs text-[var(--theme-text-primary)] font-semibold block leading-tight">{effect.name}</span>
-                          <span className="text-[9px] text-[var(--theme-text-muted)]">{effect.desc}</span>
-                        </div>
-                        <span className="text-[8px] text-amber-500/70 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity font-bold font-mono">CC</span>
-                      </div>
-                    );
-                  })}
+              {/* ── Search & Filter Rails ── */}
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--theme-text-muted)]" />
+                  <input
+                    type="text"
+                    placeholder="Search FX (Glitch, Mirror, Shake...)"
+                    value={fxSearchQuery}
+                    onChange={(e) => setFxSearchQuery(e.target.value)}
+                    className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-lg pl-8 pr-7 py-1.5 text-xs text-[var(--theme-text-primary)] placeholder-[var(--theme-text-muted)] focus:outline-none focus:border-rose-500"
+                  />
+                  {fxSearchQuery && (
+                    <button
+                      onClick={() => setFxSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--theme-text-muted)] hover:text-white"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
-              </Section>
 
-              <div className="h-px bg-[var(--theme-border)]" />
-
-              {/* ── Particle Effects ── */}
-              <Section id="particles" label="✦ Particle Effects" color="text-violet-500">
-                <p className="text-[9px] text-[var(--theme-text-muted)] px-1 mb-1.5 font-medium">Drag onto any video/image clip — click emitter on preview to reposition</p>
-                <div className="grid grid-cols-1 gap-1">
-                  {PARTICLE_EFFECTS.map((effect) => {
-                    const Icon = effect.icon;
-                    return (
-                      <div
-                        key={effect.name}
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('application/procut-particle', effect.type);
-                          e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                        onClick={() => handleParticleClick(effect)}
-                        onMouseEnter={() => setHoveredItem(effect.name)}
-                        onMouseLeave={() => setHoveredItem(null)}
-                        className="flex items-center gap-2.5 px-2.5 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl border border-transparent hover:border-[var(--theme-border)] cursor-pointer transition-colors group"
-                      >
-                        <div className={`w-8 h-8 rounded-lg ${effect.bgColor} border flex items-center justify-center shrink-0 shadow-sm`}>
-                          <Icon className={`w-4 h-4 ${effect.color}`} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-xs text-[var(--theme-text-primary)] font-semibold block leading-tight">{effect.name}</span>
-                          <span className="text-[9px] text-[var(--theme-text-muted)]">{effect.desc}</span>
-                        </div>
-                        <span className="text-[8px] text-violet-500/70 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity font-bold font-mono">✦</span>
-                      </div>
-                    );
-                  })}
+                {/* Filter Pills */}
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar text-[10px]">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setFxCategoryFilter(cat.id)}
+                      className={`px-2 py-1 rounded-full whitespace-nowrap transition-colors shrink-0 font-medium ${
+                        fxCategoryFilter === cat.id
+                          ? 'bg-rose-600 text-white font-semibold shadow-sm'
+                          : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] border border-[var(--theme-border)]'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
                 </div>
-              </Section>
+              </div>
+
+              {/* ── Custom AI FX Maker Banner ── */}
+              <div className="bg-gradient-to-br from-amber-500/10 via-rose-500/5 to-transparent border border-amber-500/20 rounded-xl p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-[var(--theme-text-primary)]">AI Custom FX Maker</span>
+                </div>
+                <p className="text-[9px] text-[var(--theme-text-muted)] leading-relaxed">
+                  Analyze your clip with AI vision + audio to generate scene-justified animation overlays.
+                </p>
+                <button
+                  onClick={() => {
+                    // Find the selected clip or the playhead clip
+                    const state = useEditorStore.getState();
+                    const selectedClipId = state.selectedClipId;
+                    if (selectedClipId) {
+                      state.openCustomFxMaker(selectedClipId);
+                    } else {
+                      toast.info('Select a video clip first to create a Custom FX');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600/30 to-rose-600/30 hover:from-amber-600/40 hover:to-rose-600/40 text-amber-300 border border-amber-500/40 rounded-lg text-[10px] font-semibold transition-all hover:scale-105 active:scale-95 shadow-sm w-full justify-center"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  ✨ Create Custom FX
+                </button>
+              </div>
+
+              {/* ── Custom FX Cards (user-generated) ── */}
+              {(() => {
+                const customFxList = useEditorStore.getState().customFxList || [];
+                if (customFxList.length === 0 || (fxCategoryFilter !== 'all' && fxCategoryFilter !== 'custom')) return null;
+                const filtered = customFxList.filter((fx: any) =>
+                  !fxSearchQuery || fx.name.toLowerCase().includes(fxSearchQuery.toLowerCase())
+                );
+                if (filtered.length === 0) return null;
+                return (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                        ✨ Custom AI FX ({filtered.length})
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {filtered.map((fx: any) => (
+                        <div
+                          key={fx.id}
+                          draggable
+                          onDragStart={(e: React.DragEvent) => {
+                            e.dataTransfer.setData('application/procut-custom-fx', JSON.stringify(fx));
+                            e.dataTransfer.effectAllowed = 'copy';
+                          }}
+                          onClick={() => {
+                            // Add custom FX to the FX track at playhead
+                            const state = useEditorStore.getState();
+                            const fxTrack = state.tracks.find((t: any) => t.type === 'fx');
+                            if (!fxTrack) {
+                              toast.info('Add an FX track first');
+                              return;
+                            }
+                            const clipId = `custom-fx-clip-${Date.now()}`;
+                            state.insertClip({
+                              id: clipId,
+                              mediaId: fx.id,
+                              trackId: fxTrack.id,
+                              startTime: state.currentTime,
+                              duration: fx.duration || 3,
+                              trimStart: 0,
+                              trimEnd: 0,
+                              opacity: 1,
+                              speed: 1,
+                              effects: [],
+                              transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+                              fxSettings: {
+                                type: 'custom_html',
+                                intensity: 100,
+                                customFxId: fx.id,
+                                customHtmlCss: fx.htmlCss,
+                                customFxName: fx.name,
+                              },
+                            } as any, state.currentTime, fxTrack.id);
+                            toast.success(`Added "${fx.name}" to FX track`);
+                          }}
+                          className="group relative flex items-center gap-3 p-2.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-xl cursor-pointer hover:border-amber-500/50 hover:bg-amber-500/5 transition-all hover:shadow-md active:scale-[0.98]"
+                        >
+                          {/* Thumbnail */}
+                          <div className="w-12 h-8 rounded-lg bg-black/40 border border-amber-500/20 overflow-hidden flex-shrink-0">
+                            {fx.thumbnail ? (
+                              <img src={fx.thumbnail} alt={fx.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Sparkles className="w-4 h-4 text-amber-400/50" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold text-[var(--theme-text-primary)] truncate">{fx.name}</span>
+                              <span className="px-1 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-[7px] text-amber-300 font-bold">AI</span>
+                            </div>
+                            <p className="text-[8px] text-[var(--theme-text-muted)] truncate">{fx.description}</p>
+                          </div>
+                          {/* Delete Button */}
+                          <button
+                            onClick={(e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              useEditorStore.getState().removeCustomFx(fx.id);
+                              toast.success(`Removed "${fx.name}"`);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-[var(--theme-text-muted)] hover:text-red-400 transition-all"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── FX Clips Section ── */}
+              {fxCategoryFilter !== 'color' && fxCategoryFilter !== 'particles' && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400">
+                      Visual FX Clips ({filteredFxList.length})
+                    </span>
+                    <span className="text-[9px] text-[var(--theme-text-muted)]">Click to add at playhead</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {filteredFxList.map((effect) => {
+                      const Icon = effect.icon;
+                      return (
+                        <div
+                          key={effect.name}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('application/procut-effect', effect.name);
+                            e.dataTransfer.effectAllowed = 'copy';
+                          }}
+                          onClick={() => handleEffectClick(effect)}
+                          onMouseEnter={() => setHoveredItem(effect.name)}
+                          onMouseLeave={() => setHoveredItem(null)}
+                          className="flex items-center gap-2.5 p-2 bg-[var(--theme-bg-subpanel)]/50 hover:bg-black/10 dark:hover:bg-white/5 rounded-xl border border-[var(--theme-border)] hover:border-rose-500/40 cursor-pointer transition-all group shadow-sm hover:shadow-md"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                            <Icon className={`w-4 h-4 ${effect.color}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className="text-xs text-[var(--theme-text-primary)] font-semibold truncate leading-tight">
+                                {effect.name}
+                              </span>
+                              {effect.badge && (
+                                <span className="text-[8px] px-1 py-0.2 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 font-mono">
+                                  {effect.badge}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[9px] text-[var(--theme-text-muted)] line-clamp-1">
+                              {effect.desc}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEffectClick(effect);
+                              }}
+                              title="Add to FX track"
+                              className="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded text-[9px] font-bold tracking-wider uppercase opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 shadow"
+                            >
+                              <Plus className="w-2.5 h-2.5" />
+                              Add
+                            </button>
+                            <span className="text-[8px] text-rose-500/60 font-mono font-bold group-hover:hidden">FX</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {filteredFxList.length === 0 && (
+                      <div className="p-4 text-center text-xs text-[var(--theme-text-muted)] bg-[var(--theme-bg-subpanel)] rounded-xl">
+                        No FX found matching "{fxSearchQuery}".
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Color Presets Section ── */}
+              {(fxCategoryFilter === 'all' || fxCategoryFilter === 'color') && (
+                <div className="space-y-1.5 pt-2">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500">
+                      Color Presets (Drag onto video/image)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-1">
+                    {COLOR_CORRECTION_EFFECTS.map((effect) => {
+                      const Icon = effect.icon;
+                      return (
+                        <div
+                          key={effect.name}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('application/procut-color-preset', JSON.stringify(effect.preset));
+                            e.dataTransfer.setData('application/procut-effect', effect.name);
+                            e.dataTransfer.effectAllowed = 'copy';
+                          }}
+                          onClick={() => handleColorPresetClick(effect)}
+                          onMouseEnter={() => setHoveredItem(effect.name)}
+                          onMouseLeave={() => setHoveredItem(null)}
+                          className="flex items-center gap-2.5 px-2.5 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl border border-transparent hover:border-amber-500/30 cursor-pointer transition-colors group"
+                        >
+                          <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                            <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs text-[var(--theme-text-primary)] font-semibold block leading-tight">{effect.name}</span>
+                            <span className="text-[9px] text-[var(--theme-text-muted)]">{effect.desc}</span>
+                          </div>
+                          <span className="text-[8px] text-amber-500/70 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity font-bold font-mono">CC</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Particle Effects Section ── */}
+              {(fxCategoryFilter === 'all' || fxCategoryFilter === 'particles') && (
+                <div className="space-y-1.5 pt-2">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400">
+                      ✦ Particle Effects (Overlays & Emitters)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-1">
+                    {PARTICLE_EFFECTS.map((effect) => {
+                      const Icon = effect.icon;
+                      return (
+                        <div
+                          key={effect.name}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('application/procut-particle', effect.type);
+                            e.dataTransfer.effectAllowed = 'copy';
+                          }}
+                          onClick={() => handleParticleClick(effect)}
+                          onMouseEnter={() => setHoveredItem(effect.name)}
+                          onMouseLeave={() => setHoveredItem(null)}
+                          className="flex items-center gap-2.5 px-2.5 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl border border-transparent hover:border-violet-500/30 cursor-pointer transition-colors group"
+                        >
+                          <div className={`w-7 h-7 rounded-lg ${effect.bgColor} border flex items-center justify-center shrink-0 shadow-sm`}>
+                            <Icon className={`w-3.5 h-3.5 ${effect.color}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs text-[var(--theme-text-primary)] font-semibold block leading-tight">{effect.name}</span>
+                            <span className="text-[9px] text-[var(--theme-text-muted)]">{effect.desc}</span>
+                          </div>
+                          <span className="text-[8px] text-violet-500/70 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity font-bold font-mono">✦</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -3195,9 +3440,100 @@ export const TransitionCard = React.memo(function TransitionCard({ transition, o
         ctx.restore();
       };
 
-      if (nameLower.includes('dissolve')) {
+      if (nameLower.includes('particle')) {
+        // Particle dissolve approximation: crossfade + noise dither on B
+        drawImageCover(imgA, 1);
+        drawImageCover(imgB, t);
+        ctx.save();
+        ctx.globalAlpha = 0.35 * (1 - Math.abs(t - 0.5) * 2);
+        const cell = 4;
+        for (let y = 0; y < H; y += cell) {
+          for (let x = 0; x < W; x += cell) {
+            const s = Math.sin((x / cell) * 12.9898 + (y / cell) * 78.233) * 43758.5453123;
+            const hsh = s - Math.floor(s);
+            if (hsh < t) {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(x, y, cell, cell);
+            }
+          }
+        }
+        ctx.restore();
+      } else if (nameLower.includes('disassemble') || (nameLower.includes('assemble') && !nameLower.includes('disassemble'))) {
+        const dis = nameLower.includes('disassemble');
+        drawImageCover(dis ? imgB : imgA, 1);
+        // Slice illusion: alternating strips offset
+        const n = 6;
+        const spread = dis ? t : 1 - t;
+        for (let i = 0; i < n; i++) {
+          const dir = i % 2 === 0 ? 1 : -1;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, (i * H) / n, W, H / n);
+          ctx.clip();
+          // @ts-expect-error - 4th arg already overloaded
+          drawImageCover(dis ? imgA : imgB, 1, 1, dir * spread * 20, 0);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('fold')) {
+        // Paper fold: B revealed from an edge with a shadow lip
+        drawImageCover(imgA, 1);
+        const fromRight = nameLower.includes('right');
+        const fromTop = nameLower.includes('top');
+        ctx.save();
+        ctx.beginPath();
+        if (fromTop) ctx.rect(0, 0, W, H * t);
+        else if (fromRight) ctx.rect(W * (1 - t), 0, W * t, H);
+        else ctx.rect(0, 0, W * t, H);
+        ctx.clip();
+        ctx.scale(1, 1);
+        drawImageCover(imgB, 1);
+        // fold lip shading
+        ctx.fillStyle = `rgba(0,0,0,${0.4 * (1 - t)})`;
+        if (fromTop) ctx.fillRect(0, H * t - 4, W, 4);
+        else if (fromRight) ctx.fillRect(W * (1 - t), 0, 4, H);
+        else ctx.fillRect(W * t - 4, 0, 4, H);
+        ctx.restore();
+      } else if (nameLower.includes('dissolve')) {
         drawImageCover(imgA, 1 - t);
         drawImageCover(imgB, t);
+      } else if (nameLower.includes('iris') || nameLower.includes('circle')) {
+        const out = nameLower.includes('out');
+        drawImageCover(out ? imgB : imgA, 1);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(W / 2, H / 2, Math.max(1, (out ? 1 - t : t) * W * 0.75), 0, Math.PI * 2);
+        ctx.clip();
+        drawImageCover(out ? imgA : imgB, 1);
+        ctx.restore();
+      } else if (nameLower.includes('flip')) {
+        // 3D card flip: squash A away around the centre axis, then B flips in
+        if (t < 0.5) {
+          const c = Math.max(0.02, Math.cos(t * Math.PI));
+          ctx.save();
+          ctx.translate(W / 2, H / 2);
+          ctx.scale(c, 1);
+          ctx.translate(-W / 2, -H / 2);
+          drawImageCover(imgA, 1);
+          ctx.restore();
+        } else {
+          const c = Math.max(0.02, Math.cos((t - 1) * Math.PI));
+          ctx.save();
+          ctx.translate(W / 2, H / 2);
+          ctx.scale(c, 1);
+          ctx.translate(-W / 2, -H / 2);
+          drawImageCover(imgB, 1);
+          ctx.restore();
+        }
+      } else if (nameLower.includes('clock')) {
+        drawImageCover(imgA, 1);
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(W / 2, H / 2);
+        ctx.arc(W / 2, H / 2, Math.max(W, H) * 1.2, -Math.PI / 2, -Math.PI / 2 + t * Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        drawImageCover(imgB, 1);
+        ctx.restore();
       } else if (nameLower.includes('fade')) {
         if (t < 0.5) {
           drawImageCover(imgA, 1 - t * 2);

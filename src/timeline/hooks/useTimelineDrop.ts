@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineClip, ParticleEffectType, ClipParticleSettings } from '@/types';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
+import { FX_EFFECTS } from '@/constants/mediaPanel';
 import { toast } from 'sonner';
 import { generateId } from '../timelineUtils';
 import { getTrackAtY } from '../trackGeometry';
@@ -282,59 +283,57 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
 
       // ── VFX Effect Drop ──
       const effectName = e.dataTransfer.getData('application/procut-effect');
-      if (effectName && track?.type === 'fx') {
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const startTime = Math.max(0, x / zoomLevel);
+      if (effectName) {
+        let targetTrack = track?.type === 'fx' ? track : useEditorStore.getState().tracks.find((t) => t.type === 'fx');
+        if (!targetTrack) {
+          useEditorStore.getState().addTrack('fx');
+          targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'fx');
+        }
+        if (targetTrack) {
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const startTime = Math.max(0, x / zoomLevel);
 
-        const FX_TYPE_MAP: Record<string, string> = {
-          'VFX Breakdown':     'vfx_breakdown',
-          'B&W to Color':      'bw_to_color',
-          'Glitch':            'glitch',
-          'Old Film':          'old_film',
-          'VHS':               'vhs',
-          'Cinematic Bars':    'cinematic_bars',
-          'Neon Glow':         'neon_glow',
-          'RGB Split':         'rgb_split',
-          'Pixelate':          'pixelate',
-          'Mirror':            'mirror',
-          'Zoom Blur':         'zoom_blur',
-          'Lens Flare':        'lens_flare',
-          'Night Vision':      'night_vision',
-          'Thermal':           'thermal',
-        };
-        const fxType = FX_TYPE_MAP[effectName] ?? effectName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const fxMediaId = generateId();
-        useEditorStore.getState().addMedia({
-          id: fxMediaId,
-          name: effectName,
-          type: 'fx',
-          duration: 5,
-          url: '',
-          createdAt: Date.now(),
-          fxType,
-        });
-        const fxClip: TimelineClip = {
-          id: generateId(),
-          mediaId: fxMediaId,
-          trackId,
-          startTime,
-          duration: 5,
-          trimStart: 0,
-          trimEnd: 0,
-          transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-          opacity: 1,
-          speed: 1,
-          effects: [],
-          fxSettings: {
-            type: fxType as any,
-            intensity: 100,
-          },
-        };
-        useEditorStore.getState().addClip(fxClip);
-        setHoveredTrackId(null);
-        setDropPreview(null);
-        return;
+          const matchedFx = FX_EFFECTS.find(
+            (fx) => fx.name.toLowerCase() === effectName.toLowerCase() || fx.type.toLowerCase() === effectName.toLowerCase()
+          );
+          const fxType = matchedFx?.type ?? effectName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          const fxMediaId = generateId();
+          useEditorStore.getState().addMedia({
+            id: fxMediaId,
+            name: matchedFx?.name || effectName,
+            type: 'fx',
+            duration: 5,
+            url: '',
+            createdAt: Date.now(),
+            fxType,
+          });
+          const fxClip: TimelineClip = {
+            id: generateId(),
+            mediaId: fxMediaId,
+            trackId: targetTrack.id,
+            startTime,
+            duration: 5,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            fxSettings: {
+              type: fxType as any,
+              intensity: matchedFx?.defaultSettings?.intensity ?? 100,
+              ...(matchedFx?.defaultSettings || {}),
+            },
+          };
+          useEditorStore.getState().addClip(fxClip);
+          useEditorStore.getState().selectClip(fxClip.id);
+          useEditorStore.getState().saveSnapshot('Add FX Clip');
+          setHoveredTrackId(null);
+          setDropPreview(null);
+          toast.success(`Added FX clip "${matchedFx?.name || effectName}" to FX track`);
+          return;
+        }
       }
 
       // ── NEW: Sequence Drop (Multi-Image) ──

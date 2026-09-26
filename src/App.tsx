@@ -34,6 +34,7 @@ const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRat
 const HelpModal = React.lazy(() => import('@/components/HelpModal').then(m => ({ default: m.HelpModal })));
 const GenerativeWorkspace = React.lazy(() => import('@/components/GenerativeWorkspace').then(m => ({ default: m.GenerativeWorkspace })));
 const AiSpeedSyncModal = React.lazy(() => import('@/components/AiSpeedSyncModal').then(m => ({ default: m.AiSpeedSyncModal })));
+const CustomFxMakerModal = React.lazy(() => import('@/components/CustomFxMakerModal').then(m => ({ default: m.CustomFxMakerModal })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -92,6 +93,8 @@ function DesktopApp() {
     showSettingsModal,
     showAiSpeedSyncModal,
     setShowAiSpeedSyncModal,
+    showCustomFxMakerModal,
+    closeCustomFxMaker,
     projectId,
     selectedClipIds,
   } = useEditorStore(useShallow(s => ({
@@ -99,6 +102,8 @@ function DesktopApp() {
     showSettingsModal: s.showSettingsModal,
     showAiSpeedSyncModal: s.showAiSpeedSyncModal,
     setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
+    showCustomFxMakerModal: s.showCustomFxMakerModal,
+    closeCustomFxMaker: s.closeCustomFxMaker,
     togglePlayback: s.togglePlayback,
     activeTool: s.activeTool,
     setActiveTool: s.setActiveTool,
@@ -820,6 +825,11 @@ function DesktopApp() {
       {showAiSpeedSyncModal && (
         <Suspense fallback={null}>
           <AiSpeedSyncModal onClose={() => setShowAiSpeedSyncModal(false)} />
+        </Suspense>
+      )}
+      {showCustomFxMakerModal && (
+        <Suspense fallback={null}>
+          <CustomFxMakerModal onClose={() => closeCustomFxMaker()} />
         </Suspense>
       )}
       {showTeleprompter && (

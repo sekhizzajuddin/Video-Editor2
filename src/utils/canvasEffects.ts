@@ -940,7 +940,8 @@ export function applyFxEffect(
   fxType: string,
   intensity: number,
   relTime: number,
-  isPlaying: boolean
+  isPlaying: boolean,
+  fxSettings?: import('@/types').ClipFxSettings
 ) {
   const norm = intensity / 100;
   try {
@@ -948,6 +949,139 @@ export function applyFxEffect(
     const data = imgData.data;
 
     switch (fxType) {
+      case 'continuous_mirror':
+      case 'rhythmic_mirror': {
+        const interval = Math.max(0.05, fxSettings?.flipInterval || 0.5);
+        const cycleIdx = Math.floor(relTime / interval);
+        const axis = fxSettings?.flipAxis || 'horizontal';
+        const isFlipped = (cycleIdx % 2 === 1);
+        const mode = fxSettings?.mirrorMode || 'flip';
+
+        let flipH = false;
+        let flipV = false;
+        if (axis === 'horizontal') {
+          flipH = isFlipped;
+        } else if (axis === 'vertical') {
+          flipV = isFlipped;
+        } else if (axis === 'both') {
+          flipH = isFlipped;
+          flipV = isFlipped;
+        } else if (axis === 'alternate') {
+          flipH = isFlipped;
+          flipV = (Math.floor(cycleIdx / 2) % 2 === 1);
+        }
+
+        if (mode === 'symmetric') {
+          // Alternating symmetry: left mirrors right vs right mirrors left
+          const halfW = Math.floor(w / 2);
+          const tmp = new Uint8ClampedArray(data);
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < halfW; x++) {
+              const leftIdx = (y * w + x) * 4;
+              const rightIdx = (y * w + (w - 1 - x)) * 4;
+              if (isFlipped) {
+                data[leftIdx] = tmp[rightIdx];
+                data[leftIdx + 1] = tmp[rightIdx + 1];
+                data[leftIdx + 2] = tmp[rightIdx + 2];
+                data[leftIdx + 3] = tmp[rightIdx + 3];
+              } else {
+                data[rightIdx] = tmp[leftIdx];
+                data[rightIdx + 1] = tmp[leftIdx + 1];
+                data[rightIdx + 2] = tmp[leftIdx + 2];
+                data[rightIdx + 3] = tmp[leftIdx + 3];
+              }
+            }
+          }
+        } else {
+          // Full frame flip
+          if (flipH || flipV) {
+            const tmp = new Uint8ClampedArray(data);
+            for (let y = 0; y < h; y++) {
+              const srcY = flipV ? (h - 1 - y) : y;
+              for (let x = 0; x < w; x++) {
+                const srcX = flipH ? (w - 1 - x) : x;
+                const dstIdx = (y * w + x) * 4;
+                const srcIdx = (srcY * w + srcX) * 4;
+                data[dstIdx] = tmp[srcIdx];
+                data[dstIdx + 1] = tmp[srcIdx + 1];
+                data[dstIdx + 2] = tmp[srcIdx + 2];
+                data[dstIdx + 3] = tmp[srcIdx + 3];
+              }
+            }
+          }
+        }
+
+        // Impact flash on each flip cycle (first 60ms)
+        if (fxSettings?.impactFlash !== false) {
+          const timeInCycle = relTime - (cycleIdx * interval);
+          if (timeInCycle >= 0 && timeInCycle < 0.07) {
+            const flashAlpha = (1 - (timeInCycle / 0.07)) * 0.45 * norm;
+            for (let i = 0; i < data.length; i += 4) {
+              data[i] = Math.min(255, data[i] + 255 * flashAlpha);
+              data[i + 1] = Math.min(255, data[i + 1] + 255 * flashAlpha);
+              data[i + 2] = Math.min(255, data[i + 2] + 255 * flashAlpha);
+            }
+          }
+        }
+        break;
+      }
+      case 'action_shake': {
+        const shakeIntensity = (intensity || 50) / 100;
+        const seed = Math.sin(relTime * 12.9898) * 43758.5453;
+        const pseudoRand = seed - Math.floor(seed);
+        const shiftX = Math.round((Math.sin(relTime * 45) * 14 + (pseudoRand - 0.5) * 12) * shakeIntensity);
+        const shiftY = Math.round((Math.cos(relTime * 55) * 14 + (pseudoRand - 0.5) * 12) * shakeIntensity);
+        const tmp = new Uint8ClampedArray(data);
+        for (let y = 0; y < h; y++) {
+          const sy = Math.min(h - 1, Math.max(0, y + shiftY));
+          for (let x = 0; x < w; x++) {
+            const sx = Math.min(w - 1, Math.max(0, x + shiftX));
+            const redSx = Math.min(w - 1, Math.max(0, sx + Math.round(4 * shakeIntensity)));
+            const blueSx = Math.min(w - 1, Math.max(0, sx - Math.round(4 * shakeIntensity)));
+            const dst = (y * w + x) * 4;
+            data[dst] = tmp[(sy * w + redSx) * 4];
+            data[dst + 1] = tmp[(sy * w + sx) * 4 + 1];
+            data[dst + 2] = tmp[(sy * w + blueSx) * 4 + 2];
+          }
+        }
+        break;
+      }
+      case 'action_zoom_pulse': {
+        const speed = fxSettings?.pulseSpeed || 2;
+        const depth = ((fxSettings?.pulseDepth || 20) / 100) * norm;
+        const scale = 1 + Math.max(0, Math.sin(relTime * Math.PI * 2 * speed)) * depth;
+        if (scale > 1.001) {
+          const tmp = new Uint8ClampedArray(data);
+          const cx = w / 2;
+          const cy = h / 2;
+          for (let y = 0; y < h; y++) {
+            const sy = Math.min(h - 1, Math.max(0, Math.round(cy + (y - cy) / scale)));
+            for (let x = 0; x < w; x++) {
+              const sx = Math.min(w - 1, Math.max(0, Math.round(cx + (x - cx) / scale)));
+              const dst = (y * w + x) * 4;
+              const src = (sy * w + sx) * 4;
+              data[dst] = tmp[src];
+              data[dst + 1] = tmp[src + 1];
+              data[dst + 2] = tmp[src + 2];
+              data[dst + 3] = tmp[src + 3];
+            }
+          }
+        }
+        break;
+      }
+      case 'action_strobe': {
+        const speed = fxSettings?.strobeSpeed || 8;
+        const wave = Math.sin(relTime * Math.PI * 2 * speed);
+        if (wave > 0.3) {
+          const strobeAlpha = 0.6 * norm;
+          for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.min(255, data[i] + 255 * strobeAlpha);
+            data[i + 1] = Math.min(255, data[i + 1] + 255 * strobeAlpha);
+            data[i + 2] = Math.min(255, data[i + 2] + 255 * strobeAlpha);
+          }
+        }
+        break;
+      }
       case 'vfx_breakdown': {
         const split = 8 * norm;
         const tmp = new Uint8ClampedArray(data);
@@ -965,11 +1099,9 @@ export function applyFxEffect(
       case 'style_anime': {
         for (let i = 0; i < data.length; i += 4) {
           let r = data[i], g = data[i + 1], b = data[i + 2];
-          // Boost contrast slightly
           r = ((r / 255 - 0.5) * 1.3 + 0.5) * 255;
           g = ((g / 255 - 0.5) * 1.3 + 0.5) * 255;
           b = ((b / 255 - 0.5) * 1.3 + 0.5) * 255;
-          // Quantize (cel shading)
           r = Math.floor(r / 32) * 32;
           g = Math.floor(g / 32) * 32;
           b = Math.floor(b / 32) * 32;
@@ -984,11 +1116,9 @@ export function applyFxEffect(
         for (let y = 1; y < h - 1; y++) {
           for (let x = 1; x < w - 1; x++) {
             const i = (y * w + x) * 4;
-            // Smear randomly
             const nx = x + (Math.random() < 0.5 ? -1 : 1);
             const ny = y + (Math.random() < 0.5 ? -1 : 1);
             const ni = (ny * w + nx) * 4;
-            // Pastel tint + blend
             data[i] = Math.min(255, (tmp[i] * 0.7 + tmp[ni] * 0.3) + 15);
             data[i+1] = Math.min(255, (tmp[i+1] * 0.7 + tmp[ni+1] * 0.3) + 15);
             data[i+2] = Math.min(255, (tmp[i+2] * 0.7 + tmp[ni+2] * 0.3) + 15);
@@ -999,7 +1129,6 @@ export function applyFxEffect(
       case 'style_papercut': {
         for (let i = 0; i < data.length; i += 4) {
           let r = data[i], g = data[i + 1], b = data[i + 2];
-          // Heavy quantization
           r = Math.round(r / 64) * 64;
           g = Math.round(g / 64) * 64;
           b = Math.round(b / 64) * 64;
@@ -1021,20 +1150,26 @@ export function applyFxEffect(
         break;
       }
       case 'glitch': {
-        const bandH = Math.floor(h / 20);
-        const shift = (Math.sin(relTime * 12) * 20 * norm) | 0;
+        const numBands = fxSettings?.glitchBands || 20;
+        const speed = fxSettings?.glitchSpeed || 12;
+        const bandH = Math.max(2, Math.floor(h / numBands));
+        const shiftBase = Math.sin(relTime * speed) * 22 * norm;
+        const chromaticOffset = Math.round(fxSettings?.rgbSplitDistance ?? (6 * norm));
         const tmp = new Uint8ClampedArray(data);
-        for (let b = 0; b < 20; b++) {
-          if (Math.random() < 0.3) continue;
+        for (let b = 0; b < numBands; b++) {
+          if (Math.random() < 0.25) continue;
           const y0 = b * bandH;
+          const bandShift = Math.round(shiftBase * ((b % 3 === 0 ? 1.5 : -1) * (0.6 + (Math.sin(b + relTime * 5) * 0.4))));
           for (let y = y0; y < y0 + bandH && y < h; y++) {
             for (let x = 0; x < w; x++) {
-              const sx = (x + shift + w) % w;
+              const sx = (x + bandShift + w) % w;
               const i = (y * w + x) * 4;
               const si = (y * w + sx) * 4;
-              data[i] = tmp[si];
+              const rIdx = (y * w + ((sx - chromaticOffset + w) % w)) * 4;
+              const bIdx = (y * w + ((sx + chromaticOffset) % w)) * 4;
+              data[i] = tmp[rIdx];
               data[i + 1] = tmp[si + 1];
-              data[i + 2] = tmp[si + 2];
+              data[i + 2] = tmp[bIdx + 2];
             }
           }
         }
@@ -1068,7 +1203,6 @@ export function applyFxEffect(
             data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + n));
           }
         }
-        // RGB split
         const split = 3 * norm;
         const tmp = new Uint8ClampedArray(data);
         for (let y = 0; y < h; y++) {
@@ -1083,7 +1217,11 @@ export function applyFxEffect(
         break;
       }
       case 'cinematic_bars': {
-        const barH = Math.floor(h * 0.107 * norm);
+        let barRatio = 0.107;
+        if (fxSettings?.barRatio === '2.35:1') barRatio = 0.10;
+        else if (fxSettings?.barRatio === '4:3') barRatio = 0.15;
+        else if (fxSettings?.barRatio === '1:1') barRatio = 0.22;
+        const barH = Math.floor(h * barRatio * norm);
         for (let x = 0; x < w; x++) {
           for (let y = 0; y < barH; y++) {
             const i = (y * w + x) * 4;
@@ -1107,7 +1245,7 @@ export function applyFxEffect(
         break;
       }
       case 'rgb_split': {
-        const split = 5 * norm;
+        const split = Math.round(fxSettings?.rgbSplitDistance ?? (6 * norm));
         const tmp = new Uint8ClampedArray(data);
         for (let y = 0; y < h; y++) {
           for (let x = 0; x < w; x++) {
@@ -1147,15 +1285,70 @@ export function applyFxEffect(
         break;
       }
       case 'mirror': {
+        const style = fxSettings?.mirrorStyle || 'left_to_right';
+        const tmp = new Uint8ClampedArray(data);
         const halfW = Math.floor(w / 2);
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < halfW; x++) {
-            const i = (y * w + x) * 4;
-            const mi = (y * w + (w - 1 - x)) * 4;
-            data[mi] = data[i];
-            data[mi + 1] = data[i + 1];
-            data[mi + 2] = data[i + 2];
-            data[mi + 3] = data[i + 3];
+        const halfH = Math.floor(h / 2);
+
+        if (style === 'right_to_left') {
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < halfW; x++) {
+              const leftIdx = (y * w + x) * 4;
+              const rightIdx = (y * w + (w - 1 - x)) * 4;
+              data[leftIdx] = tmp[rightIdx];
+              data[leftIdx + 1] = tmp[rightIdx + 1];
+              data[leftIdx + 2] = tmp[rightIdx + 2];
+              data[leftIdx + 3] = tmp[rightIdx + 3];
+            }
+          }
+        } else if (style === 'top_to_bottom') {
+          for (let y = 0; y < halfH; y++) {
+            for (let x = 0; x < w; x++) {
+              const topIdx = (y * w + x) * 4;
+              const bottomIdx = ((h - 1 - y) * w + x) * 4;
+              data[bottomIdx] = tmp[topIdx];
+              data[bottomIdx + 1] = tmp[topIdx + 1];
+              data[bottomIdx + 2] = tmp[topIdx + 2];
+              data[bottomIdx + 3] = tmp[topIdx + 3];
+            }
+          }
+        } else if (style === 'bottom_to_top') {
+          for (let y = 0; y < halfH; y++) {
+            for (let x = 0; x < w; x++) {
+              const topIdx = (y * w + x) * 4;
+              const bottomIdx = ((h - 1 - y) * w + x) * 4;
+              data[topIdx] = tmp[bottomIdx];
+              data[topIdx + 1] = tmp[bottomIdx + 1];
+              data[topIdx + 2] = tmp[bottomIdx + 2];
+              data[topIdx + 3] = tmp[bottomIdx + 3];
+            }
+          }
+        } else if (style === 'quad') {
+          for (let y = 0; y < halfH; y++) {
+            for (let x = 0; x < halfW; x++) {
+              const i = (y * w + x) * 4;
+              for (let q = 0; q < 4; q++) {
+                const rx = q === 1 || q === 3 ? w - 1 - x : x;
+                const ry = q === 2 || q === 3 ? h - 1 - y : y;
+                const oi = (ry * w + rx) * 4;
+                data[oi] = tmp[i];
+                data[oi + 1] = tmp[i + 1];
+                data[oi + 2] = tmp[i + 2];
+                data[oi + 3] = tmp[i + 3];
+              }
+            }
+          }
+        } else {
+          // Default: left_to_right
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < halfW; x++) {
+              const i = (y * w + x) * 4;
+              const mi = (y * w + (w - 1 - x)) * 4;
+              data[mi] = data[i];
+              data[mi + 1] = data[i + 1];
+              data[mi + 2] = data[i + 2];
+              data[mi + 3] = data[i + 3];
+            }
           }
         }
         break;

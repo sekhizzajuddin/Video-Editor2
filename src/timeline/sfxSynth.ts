@@ -590,6 +590,216 @@ export function synthesizeProceduralSFX(category: string, duration: number): Pro
         osc.connect(gain);
         gain.connect(offlineCtx.destination);
         osc.start(0);
+      } else if (category === 'riser') {
+        // Cinematic riser: band-passed noise climbing upward with a sine sweep
+        // underneath, resolving abruptly at the cut (classic trailer tension).
+        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.Q.setValueAtTime(2.5, 0);
+        filter.frequency.setValueAtTime(400, 0);
+        filter.frequency.exponentialRampToValueAtTime(4200, duration * 0.9);
+
+        const noiseGain = offlineCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.001, 0);
+        noiseGain.gain.exponentialRampToValueAtTime(0.55, duration * 0.9);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        const sweep = offlineCtx.createOscillator();
+        sweep.type = 'sawtooth';
+        sweep.frequency.setValueAtTime(80, 0);
+        sweep.frequency.exponentialRampToValueAtTime(660, duration * 0.9);
+        const sweepFilter = offlineCtx.createBiquadFilter();
+        sweepFilter.type = 'lowpass';
+        sweepFilter.frequency.setValueAtTime(900, 0);
+        const sweepGain = offlineCtx.createGain();
+        sweepGain.gain.setValueAtTime(0.001, 0);
+        sweepGain.gain.exponentialRampToValueAtTime(0.25, duration * 0.9);
+        sweepGain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        noiseSource.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(offlineCtx.destination);
+        sweep.connect(sweepFilter);
+        sweepFilter.connect(sweepGain);
+        sweepGain.connect(offlineCtx.destination);
+        noiseSource.start(0);
+        sweep.start(0);
+      } else if (category === 'suck_reverse') {
+        // Reverse cymbal / suck-back: noise swelling INTO the cut, with the
+        // spectral shape opening up as it approaches (reversed decay illusion).
+        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'highpass';
+        filter.frequency.setValueAtTime(4500, 0);
+        filter.frequency.exponentialRampToValueAtTime(900, duration);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, 0);
+        gain.gain.exponentialRampToValueAtTime(0.7, duration * 0.92);
+        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        noiseSource.connect(filter);
+        filter.connect(gain);
+        gain.connect(offlineCtx.destination);
+        noiseSource.start(0);
+      } else if (category === 'camera_servo') {
+        // Precision lens/iris motor: a short band-limited whirr with two audible
+        // step bursts (start & stop), like a servo engaging.
+        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
+        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const noiseSource = offlineCtx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+
+        const filter = offlineCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.Q.setValueAtTime(9, 0);
+        filter.frequency.setValueAtTime(1800, 0);
+        filter.frequency.linearRampToValueAtTime(2600, duration * 0.5);
+        filter.frequency.linearRampToValueAtTime(1400, duration);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.001, 0);
+        gain.gain.exponentialRampToValueAtTime(0.28, 0.03);
+        gain.gain.setValueAtTime(0.18, duration * 0.85);
+        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+
+        // Start/stop mechanical ticks
+        for (const tickTime of [0, Math.max(0.04, duration - 0.05)]) {
+          const tick = offlineCtx.createOscillator();
+          tick.type = 'square';
+          tick.frequency.setValueAtTime(2400, tickTime);
+          const tickGain = offlineCtx.createGain();
+          tickGain.gain.setValueAtTime(0.18, tickTime);
+          tickGain.gain.exponentialRampToValueAtTime(0.001, tickTime + 0.03);
+          tick.connect(tickGain);
+          tickGain.connect(offlineCtx.destination);
+          tick.start(tickTime);
+          tick.stop(tickTime + 0.04);
+        }
+
+        noiseSource.connect(filter);
+        filter.connect(gain);
+        gain.connect(offlineCtx.destination);
+        noiseSource.start(0);
+      } else if (category === 'shimmer') {
+        // Magic shimmer: bright comb of shimmering sine partials over soft noise,
+        // spectral centre sweeping upward — reads as particles glittering.
+        const partials = [880, 1320, 1980, 2640];
+        for (let pi = 0; pi < partials.length; pi++) {
+          const osc = offlineCtx.createOscillator();
+          osc.type = 'sine';
+          const f0 = partials[pi];
+          osc.frequency.setValueAtTime(f0, 0);
+          osc.frequency.exponentialRampToValueAtTime(f0 * 1.8, duration);
+          const og = offlineCtx.createGain();
+          const amp = 0.22 / (pi + 1);
+          og.gain.setValueAtTime(0.001, 0);
+          og.gain.linearRampToValueAtTime(amp, duration * (0.25 + pi * 0.1));
+          og.gain.exponentialRampToValueAtTime(0.001, duration);
+          osc.connect(og);
+          og.connect(offlineCtx.destination);
+          osc.start(0);
+        }
+        const nSize = Math.max(1, Math.floor(sampleRate * duration));
+        const nBuf = offlineCtx.createBuffer(1, nSize, sampleRate);
+        const nOut = nBuf.getChannelData(0);
+        for (let i = 0; i < nSize; i++) nOut[i] = Math.random() * 2 - 1;
+        const ns = offlineCtx.createBufferSource();
+        ns.buffer = nBuf;
+        const hp = offlineCtx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.setValueAtTime(6000, 0);
+        hp.frequency.exponentialRampToValueAtTime(9000, duration);
+        const ng = offlineCtx.createGain();
+        ng.gain.setValueAtTime(0.001, 0);
+        ng.gain.linearRampToValueAtTime(0.16, duration * 0.5);
+        ng.gain.exponentialRampToValueAtTime(0.001, duration);
+        ns.connect(hp); hp.connect(ng); ng.connect(offlineCtx.destination);
+        ns.start(0);
+      } else if (category === 'paper_sweep') {
+        // Paper fold: mid-band rustle (card drag) that lands with a soft thud.
+        const nSize = Math.max(1, Math.floor(sampleRate * duration));
+        const nBuf = offlineCtx.createBuffer(1, nSize, sampleRate);
+        const nOut = nBuf.getChannelData(0);
+        for (let i = 0; i < nSize; i++) nOut[i] = Math.random() * 2 - 1;
+        const ns = offlineCtx.createBufferSource();
+        ns.buffer = nBuf;
+        const bp = offlineCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.setValueAtTime(1.2, 0);
+        bp.frequency.setValueAtTime(700, 0);
+        bp.frequency.linearRampToValueAtTime(1600, duration * 0.8);
+        const ng = offlineCtx.createGain();
+        ng.gain.setValueAtTime(0.001, 0);
+        ng.gain.linearRampToValueAtTime(0.4, duration * 0.25);
+        ng.gain.setValueAtTime(0.32, duration * 0.8);
+        ng.gain.exponentialRampToValueAtTime(0.001, duration);
+        ns.connect(bp); bp.connect(ng); ng.connect(offlineCtx.destination);
+        ns.start(0);
+        // Soft landing thud at the close of the fold
+        const th = offlineCtx.createOscillator();
+        th.type = 'sine';
+        th.frequency.setValueAtTime(130, duration * 0.82);
+        th.frequency.exponentialRampToValueAtTime(55, duration);
+        const thg = offlineCtx.createGain();
+        thg.gain.setValueAtTime(0.001, duration * 0.82);
+        thg.gain.exponentialRampToValueAtTime(0.45, duration * 0.85);
+        thg.gain.exponentialRampToValueAtTime(0.001, duration);
+        th.connect(thg); thg.connect(offlineCtx.destination);
+        th.start(duration * 0.82);
+        th.stop(duration);
+      } else if (category === 'shatter_hit') {
+        // Shatter burst: crackle of short filtered noise packets over the window
+        // plus a low sine impact at the midpoint.
+        const packets = Math.max(3, Math.round(duration * 14));
+        for (let k = 0; k < packets; k++) {
+          const t0 = (k / packets) * duration;
+          const pSize = Math.max(16, Math.floor(sampleRate * 0.03));
+          const pBuf = offlineCtx.createBuffer(1, pSize, sampleRate);
+          const pOut = pBuf.getChannelData(0);
+          for (let i = 0; i < pSize; i++) pOut[i] = Math.random() * 2 - 1;
+          const ps = offlineCtx.createBufferSource();
+          ps.buffer = pBuf;
+          const bf = offlineCtx.createBiquadFilter();
+          bf.type = 'bandpass';
+          bf.Q.setValueAtTime(3, 0);
+          bf.frequency.setValueAtTime(1200 + (k * 977) % 3400, t0);
+          const pg = offlineCtx.createGain();
+          const env = Math.sin(Math.PI * (k / packets)); // loudest at the middle
+          pg.gain.setValueAtTime(0.001, t0);
+          pg.gain.exponentialRampToValueAtTime(0.12 + 0.3 * env, t0 + 0.012);
+          pg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.03);
+          ps.connect(bf); bf.connect(pg); pg.connect(offlineCtx.destination);
+          ps.start(t0);
+          ps.stop(t0 + 0.03);
+        }
+        const boom = offlineCtx.createOscillator();
+        boom.type = 'sine';
+        const mid = duration * 0.5;
+        boom.frequency.setValueAtTime(160, mid);
+        boom.frequency.exponentialRampToValueAtTime(48, Math.min(duration, mid + 0.18));
+        const bg = offlineCtx.createGain();
+        bg.gain.setValueAtTime(0.001, mid);
+        bg.gain.exponentialRampToValueAtTime(0.6, mid + 0.02);
+        bg.gain.exponentialRampToValueAtTime(0.001, Math.min(duration, mid + 0.18));
+        boom.connect(bg); bg.connect(offlineCtx.destination);
+        boom.start(mid);
+        boom.stop(Math.min(duration, mid + 0.18));
       } else if (category === 'flash') {
         const osc = offlineCtx.createOscillator();
         osc.type = 'sine';

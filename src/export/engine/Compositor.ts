@@ -7,7 +7,9 @@ import {
 } from '@/utils/canvasEffects';
 import { applyLutToCanvas } from '@/utils/lutParser';
 import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCurveActive as isCurveOn } from '@/utils/curvesEngine';
-import { applyVectorMaskToContext } from '@/utils/vectorMaskEngine';
+import { applyVectorMaskToContext, applyVectorMaskRaster, vectorMaskNeedsRaster } from '@/utils/vectorMaskEngine';
+import { applyGeometricMaskToCanvas } from './geometricMask';
+import { applyFeatheredRectMask, applyNoiseRevealMask } from '@/utils/transitionEngine';
 import { renderParticlesDeterministic } from './exportEffects';
 import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { drawPerspectiveTexture, getProjectedCorners } from '@/utils/canvasEffects';
@@ -16,6 +18,15 @@ import { applyPreRenderedMaskIfAvailable, preRenderedMaskCache } from '@/utils/a
 import { applyTransitionPostEffect } from '@/utils/transitionEngine';
 import { drawTextBackground } from '@/utils/textBackgrounds';
 import { applyEasing, smoothNoise } from '@/utils/textAnimationEasing';
+import { createSceneStage, captureSceneFrame, destroySceneStage, type SceneStage, type SeekMode } from '@/utils/cssSceneRasterizer';
+
+// ── Custom FX SceneStage cache for export ─────────────────────────────────────
+const _exportFxStageCache = new Map<string, { stage: SceneStage; seekMode: SeekMode; htmlHash: number }>();
+function _exportSimpleHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
 
 const IDENTITY_CURVE_LUT = (() => {
   const lut = new Uint8ClampedArray(256);
@@ -337,14 +348,132 @@ export class Compositor {
         continue;
       }
       if (layer.type === 'video' && layer.frame) {
-        targetCtx.save();
-
         // Clip-to-clip transition geometry (fractional, resolution-agnostic)
         const tg = layer.transitionGeometry;
+
+        // ── Layer isolation buffer ──────────────────────────────────────────
+        // Two features need the layer rendered into its OWN frame-size buffer
+        // before compositing: soft vector masks (feather / partial opacity —
+        // a clip() cannot express them) and soft transition geometry (feathered
+        // wipe edges / motion blur), both of which are mask/filter passes that
+        // would otherwise punch holes in — or blur — the layers beneath.
+        const vMask = layer.vectorMask;
+        const vMaskSoft = vectorMaskNeedsRaster(vMask);
+        const tgSoft = !!tg && (
+          (tg.clipFeather ?? 0) > 0.0005 ||
+          (tg.blur ?? 0) > 0.0005 ||
+          !!tg.noiseReveal ||
+          (!!tg.slices && tg.slices.spread > 0.0005)
+        );
+        const outerTargetCtx = targetCtx;
+        let vMaskBuffer: OffscreenCanvas | null = null;
+        if ((vMask?.enabled && vMaskSoft) || tgSoft) {
+          const buf = new OffscreenCanvas(this.canvas.width, this.canvas.height);
+          const bufCtx = buf.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D | null;
+          if (bufCtx) {
+            vMaskBuffer = buf;
+            targetCtx = bufCtx;
+          }
+        }
+
+        // Balances the two save() calls of the layer block, then applies the
+        // isolation-buffer passes (blur → feathered wipe edge → vector mask)
+        // and composites the layer back onto the real target. Must be invoked
+        // on EVERY exit path (including the perspective-warp `continue` below).
+        const finishLayer = () => {
+          targetCtx.restore();
+          targetCtx.restore();
+          targetCtx.globalCompositeOperation = 'source-over';
+
+          if (vMaskBuffer) {
+            // Motion blur for blur-dissolve transitions (buffer holds ONLY
+            // this layer — blurring here never touches the clips beneath).
+            if (tg && (tg.blur ?? 0) > 0.0005) {
+              const blurPx = Math.max(1, tg.blur! * vMaskBuffer.width);
+              const tmp = new OffscreenCanvas(vMaskBuffer.width, vMaskBuffer.height);
+              const tctx = tmp.getContext('2d');
+              if (tctx) {
+                tctx.filter = `blur(${blurPx}px)`;
+                tctx.drawImage(vMaskBuffer, 0, 0);
+                tctx.filter = 'none';
+                const back = vMaskBuffer.getContext('2d');
+                if (back) {
+                  back.globalCompositeOperation = 'copy';
+                  back.drawImage(tmp, 0, 0);
+                  back.globalCompositeOperation = 'source-over';
+                }
+              }
+            }
+            // Feathered wipe edge: gradient destination-in on the reveal edge
+            // (shared helper — identical routine to the preview renderer).
+            if (tg?.clipRect && (tg.clipFeather ?? 0) > 0.0005) {
+              applyFeatheredRectMask(
+                targetCtx as unknown as CanvasRenderingContext2D,
+                tg.clipRect,
+                tg.clipFeather!,
+                vMaskBuffer.width,
+                vMaskBuffer.height
+              );
+            }
+            // Particle dissolve: punch the deterministic noise grid out of the
+            // layer (same hash mask the preview uses — frame-seek safe).
+            if (tg?.noiseReveal) {
+              applyNoiseRevealMask(
+                targetCtx as unknown as CanvasRenderingContext2D,
+                tg.noiseReveal.amount,
+                tg.noiseReveal.cell,
+                vMaskBuffer.width,
+                vMaskBuffer.height
+              );
+            }
+            if (vMask?.enabled && vMaskSoft) {
+              applyVectorMaskRaster(
+                targetCtx as unknown as CanvasRenderingContext2D,
+                vMask,
+                this.canvas.width,
+                this.canvas.height
+              );
+            }
+            outerTargetCtx.save();
+            outerTargetCtx.globalAlpha = 1;
+            outerTargetCtx.globalCompositeOperation = 'source-over';
+            if (tg?.slices && tg.slices.spread > 0.0005) {
+              // Disassemble/Assemble: composite strip-by-strip with alternating
+              // perpendicular offsets (same strip math as the preview blit).
+              const { count, axis, spread } = tg.slices;
+              const n = Math.max(2, Math.round(count));
+              const BW = vMaskBuffer.width;
+              const BH = vMaskBuffer.height;
+              for (let i = 0; i < n; i++) {
+                const dir = i % 2 === 0 ? 1 : -1;
+                if (axis === 'x') {
+                  const bw = BW / n;
+                  const off = dir * spread * BH;
+                  outerTargetCtx.drawImage(vMaskBuffer, i * bw, 0, Math.ceil(bw) + 1, BH,
+                    (i * BW) / n, off, BW / n + 1, BH);
+                } else {
+                  const bh = BH / n;
+                  const off = dir * spread * BW;
+                  outerTargetCtx.drawImage(vMaskBuffer, 0, i * bh, BW, Math.ceil(bh) + 1,
+                    off, (i * BH) / n, BW, BH / n + 1);
+                }
+              }
+            } else {
+              outerTargetCtx.drawImage(vMaskBuffer, 0, 0);
+            }
+            outerTargetCtx.restore();
+            targetCtx = outerTargetCtx;
+          }
+        };
+
+        targetCtx.save();
+
         if (tg) {
           const CW = this.canvas.width;
           const CH = this.canvas.height;
-          if (tg.clipRect) {
+          // Hard wipe clip — skipped when a feather is present: the gradient
+          // mask in finishLayer() replaces it (both = double-masked edge).
+          if (tg.clipRect && !(tgSoft && (tg.clipFeather ?? 0) > 0.0005)) {
             targetCtx.beginPath();
             targetCtx.rect(
               tg.clipRect.x * CW,
@@ -354,9 +483,23 @@ export class Compositor {
             );
             targetCtx.clip();
           }
+          if (tg.clipCircle && tg.clipCircle.r > 0.0001) {
+            targetCtx.beginPath();
+            targetCtx.arc(tg.clipCircle.x * CW, tg.clipCircle.y * CH, tg.clipCircle.r * CW, 0, Math.PI * 2);
+            targetCtx.clip();
+          }
+          if (tg.clipWedge && tg.clipWedge.angle < Math.PI * 2 - 0.0001) {
+            targetCtx.beginPath();
+            targetCtx.moveTo(tg.clipWedge.cx * CW, tg.clipWedge.cy * CH);
+            targetCtx.arc(tg.clipWedge.cx * CW, tg.clipWedge.cy * CH, Math.max(CW, CH) * 1.2, -Math.PI / 2, -Math.PI / 2 + tg.clipWedge.angle);
+            targetCtx.closePath();
+            targetCtx.clip();
+          }
           targetCtx.translate(CW / 2 + tg.translateX * CW, CH / 2 + tg.translateY * CH);
           if (tg.rotation) targetCtx.rotate(tg.rotation);
-          if (tg.scale !== 1) targetCtx.scale(tg.scale, tg.scale);
+          const tgSX = tg.scale * (tg.scaleX ?? 1);
+          const tgSY = tg.scale * (tg.scaleY ?? 1);
+          if (tgSX !== 1 || tgSY !== 1) targetCtx.scale(tgSX, tgSY);
           targetCtx.translate(-CW / 2, -CH / 2);
         }
 
@@ -386,6 +529,14 @@ export class Compositor {
 
         const W = this.canvas.width;
         const H = this.canvas.height;
+
+        // Hard-edge, full-opacity vector masks: exact zero-cost clip in frame
+        // space (still untransformed here — matches preview ordering). Also
+        // serves as the graceful fallback when a soft mask's isolation buffer
+        // could not be created (loses feather/opacity but keeps the cutout).
+        if (vMask?.enabled && !vMaskBuffer) {
+          applyVectorMaskToContext(targetCtx as unknown as CanvasRenderingContext2D, vMask, W, H);
+        }
         
         // 1. Calculate active view dimensions based on PROJECT aspect ratio
         let viewW = 854;
@@ -562,15 +713,24 @@ export class Compositor {
           
           targetCtx.restore(); // Exit the transform save before applying warp
           targetCtx.save();
-          
+
           // Apply the perspective texture warp using the same 8×8 grid as preview
           drawPerspectiveTexture(
             targetCtx as unknown as CanvasRenderingContext2D,
             drawable,
             { x0: tl.x, y0: tl.y, x1: tr.x, y1: tr.y, x2: br.x, y2: br.y, x3: bl.x, y3: bl.y }
           );
-          
-          // Skip the standard drawImage path since we've already drawn with warp
+
+          // finishLayer() pops BOTH remaining saves (the one just pushed and
+          // the layer-block save). Previously this `continue` skipped the two
+          // restores at the end of the block, leaking canvas state per warped
+          // layer per frame — and would also have skipped vector-mask isolation
+          // teardown. Keep save/restore balanced on every exit path.
+          finishLayer();
+          // The try/finally below is never entered on this path, so release
+          // the drawable (e.g. converted ImageBitmap) explicitly — previously
+          // leaked per frame for every perspective-warped layer.
+          if (resolved.cleanup) resolved.cleanup();
           continue;
         }
 
@@ -626,34 +786,17 @@ export class Compositor {
           }
         }
 
-        // Common geometric masks are clipped on the compositor and therefore
-        // work for ordinary frames, filtered frames and transition layers.
+        // ── Geometric masks ─────────────────────────────────────────────────
+        // Rasterized onto the clip's content buffer below (destination-in),
+        // mirroring the preview's applyClipMaskOffscreen. This supports ALL
+        // mask types (incl. invert, feather, roundness, rect rotation and the
+        // split/filmstrip/heart/star shapes) — the old clip()-based path
+        // silently dropped invert/feather/roundness/rotation, ignored most
+        // shapes, had no matte path, and even defaulted size differently
+        // (100 vs the preview's 50). 'matte' rasterizes to null with a
+        // one-time warning (source clip unavailable in the worker).
         const mask = layer.mask;
-        if (mask?.enabled && mask.type !== 'matte') {
-          const maskX = dX + dW * ((mask.x ?? 50) / 100);
-          const maskY = dY + dH * ((mask.y ?? 50) / 100);
-          const maskW = dW * ((mask.width ?? 100) / 100);
-          const maskH = dH * ((mask.height ?? 100) / 100);
-          targetCtx.beginPath();
-          if (mask.type === 'circle') {
-            targetCtx.ellipse(maskX, maskY, Math.abs(maskW / 2), Math.abs(maskH / 2), ((mask.rotation || 0) * Math.PI) / 180, 0, Math.PI * 2);
-          } else {
-            targetCtx.rect(maskX - maskW / 2, maskY - maskH / 2, maskW, maskH);
-          }
-          // Canvas clipping cannot invert a path portably; non-inverted masks
-          // cover the overwhelming majority of editor projects.
-          if (!mask.invert && !mask.inverted) targetCtx.clip();
-        }
-
-        // Vector bezier mask (mirrors preview's applyVectorMaskToContext).
-        if (layer.vectorMask?.enabled) {
-          applyVectorMaskToContext(
-            targetCtx as unknown as CanvasRenderingContext2D,
-            layer.vectorMask,
-            Math.round(dW),
-            Math.round(dH)
-          );
-        }
+        const useGeomMask = !!mask?.enabled;
 
         // ── Pixel-pass effects (keying, color wheels, curves, LUT, FX) ────────
         // Any of these requires getImageData/putImageData, so they run on a temp
@@ -727,12 +870,50 @@ export class Compositor {
                   layer.fxSettings.type,
                   layer.fxSettings.intensity ?? 100,
                   localTime,
-                  false
+                  false,
+                  layer.fxSettings
+                );
+              }
+
+              if (useGeomMask) {
+                applyGeometricMaskToCanvas(
+                  tempCtx as unknown as CanvasRenderingContext2D,
+                  mask!,
+                  tempCanvas.width,
+                  tempCanvas.height
                 );
               }
 
               targetCtx.filter = 'none';
               targetCtx.drawImage(tempCanvas, dX, dY, dW, dH);
+            } else {
+              if (srcRot !== 0) targetCtx.rotate((srcRot * Math.PI) / 180);
+              targetCtx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
+            }
+          } else if (useGeomMask) {
+            // Geometric mask without pixel-FX: rasterize the content into a
+            // temp buffer so the (possibly inverted/feathered/rotated) mask
+            // can be composited with destination-in — clip() cannot express
+            // those. Rotation of the SOURCE happens in buffer space so the
+            // mask percentages stay relative to the clip rect, like preview.
+            const mwpx = Math.max(1, Math.round(dW));
+            const mhpx = Math.max(1, Math.round(dH));
+            const mCanvas = new OffscreenCanvas(mwpx, mhpx);
+            const mCtx = mCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D | null;
+            if (mCtx) {
+              mCtx.filter = cssFilters.length ? cssFilters.join(' ') : 'none';
+              if (srcRot !== 0) {
+                mCtx.translate(dW / 2, dH / 2);
+                mCtx.rotate((srcRot * Math.PI) / 180);
+                mCtx.drawImage(drawable as any, sx, sy, sW, sH, -dW / 2, -dH / 2, dW, dH);
+              } else if (sx !== 0 || sy !== 0 || sW !== srcFullW || sH !== srcFullH) {
+                mCtx.drawImage(drawable as any, sx, sy, sW, sH, 0, 0, dW, dH);
+              } else {
+                mCtx.drawImage(drawable, 0, 0, dW, dH);
+              }
+              mCtx.filter = 'none';
+              applyGeometricMaskToCanvas(mCtx as unknown as CanvasRenderingContext2D, mask!, mwpx, mhpx);
+              targetCtx.drawImage(mCanvas, dX, dY, dW, dH);
             } else {
               if (srcRot !== 0) targetCtx.rotate((srcRot * Math.PI) / 180);
               targetCtx.drawImage(drawable as any, sx, sy, sW, sH, dX, dY, dW, dH);
@@ -773,19 +954,35 @@ export class Compositor {
           targetCtx.restore();
         }
         
-        targetCtx.restore();
-        targetCtx.restore();
-        targetCtx.globalCompositeOperation = 'source-over';
+        finishLayer();
       }
     }
 
-    // Full-frame transition overlays
+    // Full-frame transition overlays (flat colour or directional gradient band)
     for (const ov of overlays) {
       if (!ov || !(ov.alpha > 0.001)) continue;
       targetCtx.save();
       targetCtx.globalAlpha = Math.min(1, ov.alpha);
-      targetCtx.fillStyle = ov.color;
-      targetCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      if (ov.rect && ov.gradientDir) {
+        const W = this.canvas.width;
+        const H = this.canvas.height;
+        const x = ov.rect.x * W, y = ov.rect.y * H, w = ov.rect.w * W, h = ov.rect.h * H;
+        let g: CanvasGradient;
+        switch (ov.gradientDir) {
+          case 'right': g = targetCtx.createLinearGradient(x, 0, x + w, 0); break;
+          case 'up':    g = targetCtx.createLinearGradient(0, y + h, 0, y); break;
+          case 'down':  g = targetCtx.createLinearGradient(0, y, 0, y + h); break;
+          case 'left':
+          default:      g = targetCtx.createLinearGradient(x + w, 0, x, 0); break;
+        }
+        g.addColorStop(0, ov.color);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        targetCtx.fillStyle = g as any;
+        targetCtx.fillRect(x, y, w, h);
+      } else {
+        targetCtx.fillStyle = ov.color;
+        targetCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      }
       targetCtx.restore();
     }
 
@@ -826,15 +1023,40 @@ export class Compositor {
       if (layer.type !== 'fx' || !layer.fxSettings) continue;
       if ((layer.fxSettings.intensity ?? 100) <= 0) continue;
       const localTime = Math.max(0, (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
-      applyFxEffect(
-        targetCtx as unknown as CanvasRenderingContext2D,
-        this.canvas.width,
-        this.canvas.height,
-        layer.fxSettings.type,
-        layer.fxSettings.intensity ?? 100,
-        localTime,
-        false
-      );
+      // Custom HTML/CSS FX: render via SceneStage pipeline
+      if (layer.fxSettings.type === 'custom_html' && layer.fxSettings.customHtmlCss) {
+        const cacheKey = layer.clipId || `fx-${layer.order ?? 0}`;
+        const htmlHash = _exportSimpleHash(layer.fxSettings.customHtmlCss);
+        let cached = _exportFxStageCache.get(cacheKey);
+        if (!cached || cached.htmlHash !== htmlHash) {
+          if (cached) destroySceneStage(cached.stage);
+          const stage = createSceneStage(layer.fxSettings.customHtmlCss, {
+            width: this.canvas.width, height: this.canvas.height, transparent: true,
+          });
+          if (stage) {
+            cached = { stage, seekMode: stage.hasAnimations ? 'css' : 'static', htmlHash };
+            _exportFxStageCache.set(cacheKey, cached);
+          }
+        }
+        if (cached) {
+          try {
+            await captureSceneFrame(cached.stage, this.canvas, localTime, cached.seekMode);
+          } catch (e) {
+            console.warn('[Compositor] Custom FX export render error:', e);
+          }
+        }
+      } else {
+        applyFxEffect(
+          targetCtx as unknown as CanvasRenderingContext2D,
+          this.canvas.width,
+          this.canvas.height,
+          layer.fxSettings.type,
+          layer.fxSettings.intensity ?? 100,
+          localTime,
+          false,
+          layer.fxSettings
+        );
+      }
     }
 
     // Second pass: apply adjustment layers over composited content

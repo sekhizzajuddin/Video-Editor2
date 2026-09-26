@@ -187,8 +187,16 @@ export interface RenderLayer {
     translateX: number;
     translateY: number;
     scale: number;
+    scaleX?: number;
+    scaleY?: number;
     rotation: number;
     clipRect?: { x: number; y: number; w: number; h: number };
+    clipFeather?: number;
+    clipCircle?: { x: number; y: number; r: number };
+    clipWedge?: { cx: number; cy: number; angle: number };
+    blur?: number;
+    noiseReveal?: { amount: number; cell: number };
+    slices?: { count: number; axis: 'x' | 'y'; spread: number };
   };
   isAdjustmentLayer?: boolean;
   aiBackground?: {
@@ -226,6 +234,9 @@ export interface RenderLayer {
 export interface FrameOverlay {
   color: string;
   alpha: number;
+  /** Directional gradient band (paper-fold shadow) instead of a flat fill. */
+  rect?: { x: number; y: number; w: number; h: number };
+  gradientDir?: 'left' | 'right' | 'up' | 'down';
 }
 
 /** Full-frame pixel post-effect from an active transition (rgbSplit / pixelate). */
@@ -431,8 +442,16 @@ export class FrameScheduler {
                 translateX: layerDraw.translateX,
                 translateY: layerDraw.translateY,
                 scale: layerDraw.scale,
+                scaleX: layerDraw.scaleX,
+                scaleY: layerDraw.scaleY,
                 rotation: layerDraw.rotation,
                 clipRect: layerDraw.clipRect,
+                clipFeather: layerDraw.clipFeather,
+                clipCircle: layerDraw.clipCircle,
+                clipWedge: layerDraw.clipWedge,
+                blur: layerDraw.blur,
+                noiseReveal: layerDraw.noiseReveal,
+                slices: layerDraw.slices,
               }
             : undefined;
 
@@ -786,6 +805,14 @@ export class FrameScheduler {
       const plan = buildTransitionPlan(active);
       if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
         overlays.push({ color: plan.overlay.color, alpha: plan.overlay.alpha });
+      } else if (plan.overlay.type === 'edgeGradient' && plan.overlay.alpha > 0.001 && plan.overlay.rect) {
+        // Paper-fold shadow band (gradient following the fold lip)
+        overlays.push({
+          color: plan.overlay.color,
+          alpha: plan.overlay.alpha,
+          rect: plan.overlay.rect,
+          gradientDir: plan.overlay.gradientDir,
+        });
       }
       // Pixel post-effects (rgbSplit / pixelate) must reach the Compositor —
       // previously they were computed here and silently dropped, so glitch and

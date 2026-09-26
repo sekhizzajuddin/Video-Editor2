@@ -73,6 +73,9 @@ export interface LayerDraw {
   translateY: number;
   /** Uniform scale multiplier (1 = unchanged). */
   scale: number;
+  /** Optional NON-uniform scale multipliers (default 1) — card flips, squashes. */
+  scaleX?: number;
+  scaleY?: number;
   /** Rotation in radians. */
   rotation: number;
   /**
@@ -82,23 +85,61 @@ export interface LayerDraw {
   clipRect?: { x: number; y: number; w: number; h: number };
   /** Feather radius, in fractions of frame width, for a soft wipe edge. */
   clipFeather?: number;
+  /**
+   * Optional circular clip (iris / circle wipe), normalised frame coordinates,
+   * radius as a fraction of frame width. Rendered as a hard (unfeathered) edge.
+   */
+  clipCircle?: { x: number; y: number; r: number };
+  /**
+   * Optional clock/clock-wipe wedge clip: normalised centre, `angle` = sweep in
+   * radians starting straight up (12 o'clock), clockwise.
+   */
+  clipWedge?: { cx: number; cy: number; angle: number };
+  /**
+   * Direction-independent blur, as a fraction of frame width. Used by professional
+   * motion transitions (blur dissolve). Renderers apply it to the layer's own
+   * buffer only — never to the shared composite.
+   */
+  blur?: number;
+  /**
+   * Particle/noise reveal: the layer is masked by a deterministic hash-noise
+   * grid; cells with hash < amount are kept. Fully deterministic (preview ==
+   * export, seek-safe). `cell` is the cell size as a fraction of frame height.
+   */
+  noiseReveal?: { amount: number; cell: number };
+  /**
+   * Slice disassembly: the layer is cut into `count` strips along `axis` and
+   * adjacent strips are offset perpendicular by ±`spread` (fraction of frame).
+   * spread 0 = intact frame. Used by Disassemble / Assemble transitions.
+   */
+  slices?: { count: number; axis: 'x' | 'y'; spread: number };
   /** Whether the layer should be drawn at all (skips wasted GPU work). */
   visible: boolean;
 }
 
 /** A full-frame overlay drawn on top of both layers (flash, light leak…). */
 export interface OverlayDraw {
-  type: 'color' | 'none';
+  type: 'color' | 'edgeGradient' | 'none';
   color: string;
   alpha: number;
+  /**
+   * 'edgeGradient' only: normalized rect the gradient band occupies, and the
+   * direction in which alpha fades to zero (gradient starts fully coloured).
+   * Used by paper-fold shading that must follow the fold lip.
+   */
+  rect?: { x: number; y: number; w: number; h: number };
+  gradientDir?: 'left' | 'right' | 'up' | 'down';
 }
+
+/** Per-frame pixel effects applied to the composited transition frame. */
+export type TransitionPostEffectType = 'none' | 'rgbSplit' | 'pixelate';
 
 export interface TransitionPlan {
   from: LayerDraw;
   to: LayerDraw;
   overlay: OverlayDraw;
   /** Per-frame pixel effect to apply to the composited result. */
-  postEffect: 'none' | 'rgbSplit' | 'pixelate';
+  postEffect: TransitionPostEffectType;
   /** Strength 0..1 for `postEffect`. */
   postEffectAmount: number;
 }
@@ -155,7 +196,17 @@ export type TransitionKind =
   | 'glitch'
   | 'lightLeak'
   | 'whipPan'
-  | 'pixelate';
+  | 'pixelate'
+  // ── Professional set ──
+  | 'blurDissolve'
+  | 'circleWipe'
+  | 'cardFlip'
+  | 'zoomBounce'
+  | 'clockWipe'
+  // ── Premium set ──
+  | 'paperFold'
+  | 'particleDissolve'
+  | 'sliceShift';
 
 export interface NormalizedTransition {
   kind: TransitionKind;
@@ -191,10 +242,26 @@ export const TRANSITION_SOUND_OPTIONS: TransitionSoundOption[] = [
   { id: 'glitch', label: 'Digital Glitch', category: 'Sci-Fi', description: 'Cyberpunk digital bitcrush & buzz', recommendedFor: ['glitch', 'pixelate'] },
   { id: 'impact', label: 'Cinematic Hit', category: 'Impact', description: 'Heavy impact with resonant tail', recommendedFor: ['shake', 'flash'] },
   { id: 'flash', label: 'Flash Riser', category: 'Light', description: 'Bright white flash resonant riser', recommendedFor: ['flash', 'lightLeak'] },
-  { id: 'shutter', label: 'Camera Shutter', category: 'Mechanical', description: 'Mechanical camera aperture click', recommendedFor: ['flash', 'dissolve'] },
-  { id: 'page_turn', label: 'Paper Page Turn', category: 'Organic', description: 'Crisp paper swish', recommendedFor: ['wipe', 'slide'] },
-  { id: 'pop', label: 'Bubble Pop', category: 'Playful', description: 'Crisp playful pop', recommendedFor: ['zoom', 'zoomSpin'] },
+  { id: 'shutter', label: 'Camera Shutter', category: 'Mechanical', description: 'Mechanical camera aperture click', recommendedFor: ['flash', 'dissolve', 'circleWipe'] },
+  { id: 'page_turn', label: 'Paper Page Turn', category: 'Organic', description: 'Crisp paper swish', recommendedFor: ['wipe', 'slide', 'cardFlip'] },
+  { id: 'pop', label: 'Bubble Pop', category: 'Playful', description: 'Crisp playful pop', recommendedFor: ['zoom', 'zoomSpin', 'zoomBounce'] },
+  { id: 'riser', label: 'Cinematic Riser', category: 'Cinematic', description: 'Tension-building ascent that resolves at the cut', recommendedFor: ['blurDissolve', 'lightLeak', 'flash', 'fadeToWhite'] },
+  { id: 'suck_reverse', label: 'Reverse Suck-Back', category: 'Cinematic', description: 'Reversed cymbal swell that inhales into the cut', recommendedFor: ['zoomBounce', 'circleWipe', 'zoom'] },
+  { id: 'camera_servo', label: 'Camera Servo', category: 'Mechanical', description: 'Precision lens-motor whirr for iris moves', recommendedFor: ['circleWipe', 'clockWipe', 'zoom'] },
+  { id: 'shimmer', label: 'Magic Shimmer', category: 'Light', description: 'Glittering particle sparkle sweep', recommendedFor: ['particleDissolve', 'lightLeak'] },
+  { id: 'paper_sweep', label: 'Paper Sweep', category: 'Organic', description: 'Rustling page-fold swish with soft thud landing', recommendedFor: ['paperFold'] },
+  { id: 'shatter_hit', label: 'Shatter Burst', category: 'Impact', description: 'Crackling burst with low impact tail', recommendedFor: ['sliceShift'] },
 ];
+
+/**
+ * The first recommended preset sound for a transition kind — used to
+ * auto-attach a tasteful default when a transition is dropped onto the
+ * timeline (the user can still change or remove it in Transition Settings).
+ */
+export function getDefaultSoundForKind(kind: TransitionKind): string {
+  const opt = TRANSITION_SOUND_OPTIONS.find((o) => o.recommendedFor?.includes(kind));
+  return opt && opt.id !== 'none' ? opt.id : 'none';
+}
 
 /**
  * Map a stored transition (which may only carry a display `name` such as
@@ -219,6 +286,18 @@ export function normalizeTransition(t: TransitionLike): NormalizedTransition {
   else if (has('whip')) kind = 'whipPan';
   else if (has('shake')) kind = 'shake';
   else if (has('spin')) kind = 'zoomSpin';
+  // ── Professional set (matched before the generic 'wipe'/'zoom' fallbacks) ──
+  else if (has('blur dissolve', 'blurdissolve', 'cross blur', 'gaussian')) kind = 'blurDissolve';
+  else if (has('iris', 'circle wipe', 'circlewipe')) kind = 'circleWipe';
+  else if (has('card flip', 'cardflip', 'flip')) kind = 'cardFlip';
+  else if (has('elastic', 'bounce')) kind = 'zoomBounce';
+  else if (has('clock')) kind = 'clockWipe';
+  // ── Premium set ──
+  else if (has('paper fold', 'paperfold', 'page fold', 'fold')) kind = 'paperFold';
+  else if (has('particle')) kind = 'particleDissolve';
+  // "disassemble" contains "assemble" — match it FIRST.
+  else if (has('disassemble', 'shatter', 'slice')) kind = 'sliceShift';
+  else if (has('assemble')) kind = 'sliceShift';
   else if (has('zoomrush', 'zoom rush')) kind = 'zoom';
   else if (has('zoom')) kind = 'zoom';
   else if (has('push')) kind = 'push';
@@ -231,13 +310,13 @@ export function normalizeTransition(t: TransitionLike): NormalizedTransition {
 
   let direction: NormalizedTransition['direction'] = 'left';
   if (has('right')) direction = 'right';
-  else if (has('up')) direction = 'up';
-  else if (has('down')) direction = 'down';
+  else if (has('up', 'top')) direction = 'up';
+  else if (has('down', 'bottom')) direction = 'down';
   // Validate rather than trust: params come from persisted project files and the
   // AI copilot, so a bad value must fall back instead of producing NaN geometry.
   if (isDirection(p.direction)) direction = p.direction;
 
-  let zoomDirection: 'in' | 'out' = has('out') ? 'out' : 'in';
+  let zoomDirection: 'in' | 'out' = (has('out') || has('disassemble', 'shatter')) ? 'out' : 'in';
   if (p.zoomDirection === 'in' || p.zoomDirection === 'out') zoomDirection = p.zoomDirection;
 
   // "Smooth"/"Cinematic" variants imply a feathered edge.
@@ -270,6 +349,8 @@ export function normalizeTransition(t: TransitionLike): NormalizedTransition {
 const VALID_KINDS: readonly string[] = [
   'dissolve', 'fadeToBlack', 'fadeToWhite', 'wipe', 'slide', 'push', 'zoom',
   'zoomSpin', 'flash', 'shake', 'glitch', 'lightLeak', 'whipPan', 'pixelate',
+  'blurDissolve', 'circleWipe', 'cardFlip', 'zoomBounce', 'clockWipe',
+  'paperFold', 'particleDissolve', 'sliceShift',
 ];
 
 function isTransitionKind(v: any): v is TransitionKind {
@@ -615,6 +696,165 @@ export function buildTransitionPlan(active: ActiveTransition): TransitionPlan {
       break;
     }
 
+    // ── Blur Dissolve (Resolve-style "cross blur") ────────────────────────
+    // Equal cross-fade with a motion-blur peak exactly at the midpoint where
+    // both images are weakest — the blur masks the 50/50 "double image".
+    case 'blurDissolve': {
+      const peak = 0.012 + norm.intensity * 0.03; // fraction of frame width
+      const b = peak * (1 - Math.abs(t - 0.5) * 2);
+      from.opacity = 1 - t;
+      to.opacity = t;
+      from.blur = b;
+      to.blur = b;
+      break;
+    }
+
+    // ── Iris / Circle wipe ────────────────────────────────────────────────
+    // 'in': B is revealed by a circle growing from frame centre.
+    // 'out': A is swallowed by a shrinking circle, revealing B beneath.
+    case 'circleWipe': {
+      // Diagonal coverage: a radius of half the frame diagonal (in frame-width
+      // units for the widest axis) guarantees the circle covers the corners.
+      const maxR = 0.75;
+      from.opacity = 1;
+      to.opacity = 1;
+      if (norm.zoomDirection === 'out') {
+        from.clipCircle = { x: 0.5, y: 0.5, r: Math.max(0.0001, (1 - t) * maxR) };
+      } else {
+        to.clipCircle = { x: 0.5, y: 0.5, r: Math.max(0.0001, t * maxR) };
+      }
+      break;
+    }
+
+    // ── 3D card flip ──────────────────────────────────────────────────────
+    // First half: A rotates away around a central axis (scale squash is the
+    // classic 2.5-D card illusion). Second half: B flips in from the edge-on
+    // position. Direction picks horizontal (left/right) or vertical (up/down)
+    // flip axis.
+    case 'cardFlip': {
+      const horizontal = norm.direction !== 'up' && norm.direction !== 'down';
+      if (t < 0.5) {
+        const c = Math.cos(t * Math.PI); // 2t*π/2 — 1 → 0
+        from.opacity = 1;
+        to.opacity = 0;
+        if (horizontal) from.scaleX = Math.max(0.001, c);
+        else from.scaleY = Math.max(0.001, c);
+      } else {
+        const c = Math.cos((t - 1) * Math.PI); // 0 → 1 over the second half
+        from.opacity = 0;
+        to.opacity = 1;
+        if (horizontal) to.scaleX = Math.max(0.001, c);
+        else to.scaleY = Math.max(0.001, c);
+      }
+      break;
+    }
+
+    // ── Elastic zoom (bounce) ─────────────────────────────────────────────
+    // B zooms in from small with a springy overshoot at the end; A recedes.
+    case 'zoomBounce': {
+      // easeOutBack: e(0)=0, e(1)=1, with a genuine overshoot > 1 around t≈0.8.
+      // Landing exactly on 1 at the end keeps the final frame seamless.
+      const s = 1.2 + norm.intensity * 1.6;
+      const u = t - 1;
+      const e = 1 + (s + 1) * u * u * u + s * u * u;
+      from.opacity = 1 - t;
+      from.scale = 1 - t * 0.2;
+      to.opacity = t;
+      to.scale = 0.6 + 0.4 * e;
+      break;
+    }
+
+    // ── Clock wipe ────────────────────────────────────────────────────────
+    // B sweeps in like a clock hand starting at 12 o'clock.
+    case 'clockWipe': {
+      from.opacity = 1;
+      to.opacity = 1;
+      to.clipWedge = { cx: 0.5, cy: 0.5, angle: t * Math.PI * 2 };
+      break;
+    }
+
+    // ── Paper fold ────────────────────────────────────────────────────────
+    // B folds open over A like turning a page: the revealed region grows while
+    // the "page" un-squashes (3-D illusion), and a soft shadow band follows
+    // the fold lip. Direction picks the edge the page unfolds FROM:
+    // left/right/top.
+    case 'paperFold': {
+      from.opacity = 1;
+      to.opacity = 1;
+      // Unfold squash: the page starts foreshortened (nearly edge-on) and
+      // flattens out as it opens.
+      const squash = 0.30 + 0.70 * t;
+      const lip = 0.04; // shadow band width (frame fraction)
+      // Shadow strongest while the fold is mid-air, gone when flat.
+      const shadowAlpha = (1 - t) * 0.5;
+
+      if (norm.direction === 'right') {
+        to.clipRect = { x: 1 - t, y: 0, w: t, h: 1 };
+        to.scaleX = squash;
+        overlay.type = 'edgeGradient';
+        overlay.color = '#000000';
+        overlay.alpha = shadowAlpha;
+        overlay.rect = { x: Math.max(0, 1 - t), y: 0, w: lip, h: 1 };
+        overlay.gradientDir = 'right';
+      } else if (norm.direction === 'up') {
+        to.clipRect = { x: 0, y: 0, w: 1, h: t };
+        to.scaleY = squash;
+        overlay.type = 'edgeGradient';
+        overlay.color = '#000000';
+        overlay.alpha = shadowAlpha;
+        overlay.rect = { x: 0, y: Math.max(0, t - lip), w: 1, h: lip };
+        overlay.gradientDir = 'up';
+      } else {
+        // 'left' (and a 'down' page turn reads as a left-style fold rotated)
+        const isDown = norm.direction === 'down';
+        to.clipRect = isDown
+          ? { x: 0, y: 1 - t, w: 1, h: t }
+          : { x: 0, y: 0, w: t, h: 1 };
+        if (isDown) to.scaleY = squash; else to.scaleX = squash;
+        overlay.type = 'edgeGradient';
+        overlay.color = '#000000';
+        overlay.alpha = shadowAlpha;
+        overlay.rect = isDown
+          ? { x: 0, y: 1 - t, w: 1, h: lip }
+          : { x: Math.max(0, t - lip), y: 0, w: lip, h: 1 };
+        overlay.gradientDir = isDown ? 'down' : 'left';
+      }
+      break;
+    }
+
+    // ── Particle dissolve ─────────────────────────────────────────────────
+    // B materialises cell-by-cell over A through a deterministic noise grid.
+    // The hash-noise mask is resolution-independent and identical in preview
+    // and export (no Math.random → frame-seek safe).
+    case 'particleDissolve': {
+      from.opacity = 1;
+      to.opacity = 1;
+      // Cell size: 4% → 1% of frame height as intensity rises (finer grain).
+      const cell = 0.04 - norm.intensity * 0.03;
+      to.noiseReveal = { amount: t, cell: Math.max(0.008, cell) };
+      break;
+    }
+
+    // ── Slice disassemble / assemble ──────────────────────────────────────
+    // Disassemble (out): A bursts into strips that slide apart, revealing B.
+    // Assemble (in): B's strips fly in from alternating sides and converge.
+    case 'sliceShift': {
+      const axis: 'x' | 'y' =
+        norm.direction === 'left' || norm.direction === 'right' ? 'x' : 'y';
+      const count = 8;
+      const spread = 0.18 + norm.intensity * 0.4;
+      if (norm.zoomDirection === 'out') {
+        from.opacity = 1 - t * 0.35;
+        from.slices = { count, axis, spread: t * spread };
+        to.opacity = 1;
+      } else {
+        from.opacity = 1;
+        to.opacity = 0.35 + 0.65 * t;
+        to.slices = { count, axis, spread: (1 - t) * spread };
+      }
+      break;
+    }
+
     default: {
       from.opacity = 1 - t;
       to.opacity = t;
@@ -708,6 +948,163 @@ export function applyTransitionPostEffect(
 }
 
 /**
+ * Apply a soft-edged rectangular clip onto a context whose canvas already
+ * contains the layer content, via a destination-in gradient mask.
+ *
+ * The wipe `clipRect` from buildTransitionPlan has ONE moving edge (the reveal
+ * edge); softening happens only on that edge, exactly like Premiere's
+ * "Border" parameter on a wipe. Hard edge orientation is derived from the
+ * rect geometry so preview and export can never disagree.
+ *
+ * Worker-safe (OffscreenCanvas first).
+ */
+export function applyFeatheredRectMask(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  clipRect: { x: number; y: number; w: number; h: number },
+  featherFrac: number,
+  w: number,
+  h: number
+): void {
+  if (!(featherFrac > 0.0005)) return;
+  const mask = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(w, h)
+    : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const m = mask.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (!m) return;
+
+  const rx = clipRect.x * w;
+  const ry = clipRect.y * h;
+  const rw = clipRect.w * w;
+  const rh = clipRect.h * h;
+
+  m.clearRect(0, 0, w, h);
+  m.fillStyle = '#ffffff';
+
+  const horizontal = clipRect.h >= 0.999 && clipRect.w < 0.999;
+  const vertical = clipRect.w >= 0.999 && clipRect.h < 0.999;
+
+  if (horizontal) {
+    // Reveal edge on the right when the rect grows from the left (x≈0),
+    // on the left when it grows from the right.
+    const fromLeft = clipRect.x <= 0.001;
+    const edge = fromLeft ? rx + rw : rx;
+    const f = Math.min(featherFrac * w, rw);
+    const inner = fromLeft ? rx : rx + f;
+    const innerW = Math.max(0, rw - f);
+    m.fillRect(inner, ry, innerW, rh);
+    if (f > 0.5) {
+      const g = fromLeft
+        ? m.createLinearGradient(edge - f, 0, edge, 0)
+        : m.createLinearGradient(edge + f, 0, edge, 0);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      m.fillStyle = g;
+      m.fillRect(fromLeft ? edge - f : edge, ry, f, rh);
+    }
+  } else if (vertical) {
+    const fromTop = clipRect.y <= 0.001;
+    const edge = fromTop ? ry + rh : ry;
+    const f = Math.min(featherFrac * h, rh);
+    const inner = fromTop ? ry : ry + f;
+    const innerH = Math.max(0, rh - f);
+    m.fillRect(rx, inner, rw, innerH);
+    if (f > 0.5) {
+      const g = fromTop
+        ? m.createLinearGradient(0, edge - f, 0, edge)
+        : m.createLinearGradient(0, edge + f, 0, edge);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      m.fillStyle = g;
+      m.fillRect(rx, fromTop ? edge - f : edge, rw, f);
+    }
+  } else {
+    // Non-wipe rect (arbitrary): feather all four edges via a blur of the mask.
+    m.save();
+    m.filter = `blur(${Math.max(1, featherFrac * Math.min(w, h))}px)`;
+    m.fillRect(rx, ry, rw, rh);
+    m.restore();
+  }
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask as CanvasImageSource, 0, 0);
+  ctx.restore();
+}
+
+/**
+ * Deterministic hash-noise reveal mask (particle dissolve). Cells of `cell`×`cell`
+ * (fractions of frame height) are kept where hash(i,j) < amount, with a small
+ * smooth boundary so cells fade in over ~0.12 of progress rather than popping.
+ *
+ * Deterministic by construction (sin-hash, no Math.random): preview, export and
+ * arbitrary frame seeks all produce the exact same mask.
+ *
+ * Worker-safe: uses OffscreenCanvas when available.
+ */
+export function applyNoiseRevealMask(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  amount: number,
+  cellFrac: number,
+  w: number,
+  h: number
+): void {
+  const a = clamp01(amount);
+  if (a >= 1) return; // fully revealed — nothing to mask
+  if (a <= 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.clearRect(0, 0, w, h); // destination-in with fully transparent = clear
+    ctx.restore();
+    return;
+  }
+
+  const mask = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(w, h)
+    : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const m = mask.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (!m) return;
+
+  const cellPx = Math.max(2, Math.round(cellFrac * h));
+  const cols = Math.ceil(w / cellPx);
+  const rows = Math.ceil(h / cellPx);
+  const soft = 0.12; // boundary smoothness in progress units
+
+  const img = m.createImageData(w, h);
+  const d = img.data;
+  // Precompute per-cell alpha (small), then splat — O(cells) work, O(pixels) fill.
+  const cellAlpha = new Float32Array(cols * rows);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const s = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453123;
+      const hash = s - Math.floor(s);
+      const v = (a - hash) / soft;
+      cellAlpha[j * cols + i] = v <= 0 ? 0 : v >= 1 ? 255 : v * 255;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    const j = Math.min(rows - 1, (y / cellPx) | 0);
+    const rowBase = j * cols;
+    const outRow = y * w;
+    for (let x = 0; x < w; x++) {
+      const i = Math.min(cols - 1, (x / cellPx) | 0);
+      const idx = (outRow + x) * 4;
+      const al = cellAlpha[rowBase + i];
+      d[idx] = 255;
+      d[idx + 1] = 255;
+      d[idx + 2] = 255;
+      d[idx + 3] = al;
+    }
+  }
+  m.putImageData(img, 0, 0);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask as CanvasImageSource, 0, 0);
+  ctx.restore();
+}
+
+
+/**
  * The set of transition kinds the Properties panel can offer, with the parameters
  * each one actually respects. Used to build the control UI so we never show a
  * slider that does nothing.
@@ -718,13 +1115,21 @@ export const TRANSITION_KIND_INFO: Array<{
   supports: Array<'direction' | 'zoomDirection' | 'softness' | 'intensity'>;
 }> = [
   { kind: 'dissolve', label: 'Cross Dissolve', supports: [] },
+  { kind: 'blurDissolve', label: 'Blur Dissolve', supports: ['intensity'] },
   { kind: 'fadeToBlack', label: 'Fade to Black', supports: [] },
   { kind: 'fadeToWhite', label: 'Fade to White', supports: [] },
   { kind: 'wipe', label: 'Wipe', supports: ['direction', 'softness'] },
+  { kind: 'clockWipe', label: 'Clock Wipe', supports: [] },
+  { kind: 'circleWipe', label: 'Circle Wipe (Iris)', supports: ['zoomDirection'] },
   { kind: 'slide', label: 'Slide Over', supports: ['direction'] },
   { kind: 'push', label: 'Push', supports: ['direction'] },
   { kind: 'zoom', label: 'Zoom', supports: ['zoomDirection', 'intensity'] },
   { kind: 'zoomSpin', label: 'Zoom Spin', supports: ['intensity'] },
+  { kind: 'zoomBounce', label: 'Elastic Zoom', supports: ['zoomDirection', 'intensity'] },
+  { kind: 'cardFlip', label: '3D Card Flip', supports: ['direction'] },
+  { kind: 'paperFold', label: 'Paper Fold', supports: ['direction'] },
+  { kind: 'particleDissolve', label: 'Particle Dissolve', supports: ['intensity'] },
+  { kind: 'sliceShift', label: 'Slice Assemble / Disassemble', supports: ['direction', 'zoomDirection', 'intensity'] },
   { kind: 'flash', label: 'Flash Cut', supports: [] },
   { kind: 'lightLeak', label: 'Light Leak', supports: ['intensity'] },
   { kind: 'shake', label: 'Camera Shake', supports: ['intensity'] },

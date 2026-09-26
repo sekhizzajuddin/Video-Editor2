@@ -274,7 +274,7 @@ async function runSegmentationAsync(
   (window as any)[flightKey] = true;
 
   try {
-    let maskCanvas: HTMLCanvasElement | null = null;
+    let maskCanvas: any = null;
 
     const videoTime = source && 'currentTime' in source ? (source as HTMLVideoElement).currentTime : 0;
 
@@ -328,7 +328,7 @@ async function runSegmentationAsync(
         );
       }
 
-      const snap = await captureSnapshotBlob(roiCanvas, crop.sw, crop.sh, 384);
+      const snap = await captureSnapshotBlob(roiCanvas as any, crop.sw, crop.sh, 384);
       if (snap) {
         const roiMask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
         if (roiMask) {
@@ -430,7 +430,7 @@ async function runSegmentationSync(
     }
 
     // Export uses full isnet (not fp16) for maximum edge quality
-    const snap = await captureSnapshotBlob(roiCanvas, crop.sw, crop.sh, 512);
+    const snap = await captureSnapshotBlob(roiCanvas as any, crop.sw, crop.sh, 512);
     if (snap) {
       const roiMask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
       if (roiMask) {

@@ -14,6 +14,7 @@ import { useMediaImport } from '@/hooks/media/useMediaImport';
 import { addMediaToTimeline, addTextClipToTimeline, findFreeSlot, mid } from '@/mobile/lib/timeline';
 import { TransitionCard } from '@/components/MediaPanel';
 import { TRANSITIONS, FX_EFFECTS, COLOR_CORRECTION_EFFECTS, PARTICLE_EFFECTS } from '@/constants/mediaPanel';
+import { normalizeTransition, getDefaultSoundForKind } from '@/utils/transitionEngine';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import type { TimelineClip } from '@/types';
@@ -132,12 +133,15 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
       if (clip) break;
     }
     
+    const probe = normalizeTransition({ type: tr.name.toLowerCase().replace(/\s+/g, '_'), name: tr.name, duration: 1 });
     const newTransition = {
       id: Math.random().toString(36).substring(2, 9),
       name: tr.name,
-      type: tr.name.toLowerCase().replace(/\s+/g, '_') as any,
+      type: probe.kind,
       duration: 1.0,
-      params: { alignment: 'center', easing: 'easeInOut' },
+      params: { alignment: 'center', easing: 'easeInOut', kind: probe.kind },
+      soundEffect: getDefaultSoundForKind(probe.kind),
+      soundVolume: 0.8,
       createdAt: Date.now(),
     };
     

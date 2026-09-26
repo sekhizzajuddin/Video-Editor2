@@ -381,6 +381,7 @@ export async function saveProjectToDB(data: {
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
   sequences?: any[];
+  customFxList?: any[];
 }): Promise<void> {
   // Auto-Save Protection
   if (data.targetProjectId && data.targetProjectId !== activeProjectId) {
@@ -447,6 +448,14 @@ export async function saveProjectToDB(data: {
       }
       if (data.sequences) {
         store.put(data.sequences, 'sequences');
+      }
+      if (data.customFxList) {
+        // Strip thumbnails from storage if total size is too large
+        const cleanFxList = data.customFxList.map((fx: any) => ({
+          ...fx,
+          thumbnail: (fx.thumbnail && fx.thumbnail.length > 50000) ? undefined : fx.thumbnail,
+        }));
+        store.put(cleanFxList, 'customFxList');
       }
 
       transaction.oncomplete = () => resolve();
@@ -556,6 +565,7 @@ export async function loadProjectFromDB(): Promise<{
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   pipWindows?: Record<string, any>;
   sequences?: any[];
+  customFxList?: any[];
 } | null> {
   const db = await getDB();
 
@@ -567,6 +577,7 @@ export async function loadProjectFromDB(): Promise<{
       return reject(e);
     }
     const store = transaction.objectStore('project');
+    const customFxListReq = store.get('customFxList');
     const keys = ['tracks', 'mediaLibrary', 'currentTime', 'aspectRatio', 'pipWindows', 'folders', 'subtitles', 'markers', 'beatMarkers', 'exportRegions', 'sequences'];
     let pending = keys.length;
     let hasError = false;
@@ -588,6 +599,7 @@ export async function loadProjectFromDB(): Promise<{
               currentTime: result.currentTime || 0,
               aspectRatio: result.aspectRatio || '16:9',
             }).then(restored => {
+              const customFxList = customFxListReq.result || [];
               resolve({
                 ...restored,
                 pipWindows: result.pipWindows || {},
@@ -596,7 +608,8 @@ export async function loadProjectFromDB(): Promise<{
                 markers: result.markers || [],
                 beatMarkers: result.beatMarkers || [],
                 exportRegions: result.exportRegions || [],
-                sequences: result.sequences || []
+                sequences: result.sequences || [],
+                customFxList,
               });
             }).catch(reject);
           }

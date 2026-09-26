@@ -698,9 +698,14 @@ export class MaskEngine {
     this.ctx.drawImage(this.maskCanvas, 0, 0);
     this.ctx.globalCompositeOperation = "source-over";
     if (mask.opacity < 1) {
-      this.ctx.globalAlpha = mask.opacity;
-      this.ctx.drawImage(this.canvas, 0, 0);
-      this.ctx.globalAlpha = 1;
+      // Drawing the canvas onto itself double-composites. Render a dimmed copy
+      // into a temp canvas, clear, then draw it back (same as applyMask above).
+      const tempCanvas = new OffscreenCanvas(this.width, this.height);
+      const tempCtx = tempCanvas.getContext("2d")!;
+      tempCtx.globalAlpha = mask.opacity;
+      tempCtx.drawImage(this.canvas, 0, 0);
+      this.ctx.clearRect(0, 0, this.width, this.height);
+      this.ctx.drawImage(tempCanvas, 0, 0);
     }
 
     const result = await createImageBitmap(this.canvas);

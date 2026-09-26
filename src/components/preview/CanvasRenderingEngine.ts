@@ -17,6 +17,7 @@ import { TimelineTrack, MediaItem, TimelineClip } from '@/types';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
+import { createSceneStage, captureSceneFrame, destroySceneStage, type SceneStage, type SeekMode } from '@/utils/cssSceneRasterizer';
 
 import { applyLutToCanvas } from '@/utils/lutParser';
 import { applyAiBackgroundSmart, applySubjectNeonOutlineFlash } from '@/utils/aiBackgroundIntegrated';
@@ -39,7 +40,7 @@ import {
   LocalCornerPoints
 } from '@/utils/canvasEffects';
 import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCurveActive as isCurveOn } from '@/utils/curvesEngine';
-import { applyVectorMaskToContext } from '@/utils/vectorMaskEngine';
+import { applyVectorMaskToContext, applyVectorMaskRaster, vectorMaskNeedsRaster } from '@/utils/vectorMaskEngine';
 import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
@@ -51,13 +52,24 @@ import {
   findActiveTransition,
   buildTransitionPlan,
   applyTransitionPostEffect,
+  applyFeatheredRectMask,
+  applyNoiseRevealMask,
   type ActiveTransition,
   type LayerDraw,
+  type OverlayDraw,
 } from '@/utils/transitionEngine';
 import {
   computeEnterExitModifiers,
   type EnterExitModifiers,
 } from '@/utils/clipEnterExitEngine';
+
+// ── Custom FX SceneStage cache ────────────────────────────────────────────────
+const _customFxStageCache = new Map<string, { stage: SceneStage; seekMode: SeekMode; htmlHash: number }>();
+function _simpleHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
 
 // ---------------------------------------------------------------------------
 // Module-level track list cache — avoids filter()+sort()+spread on every frame.
@@ -815,6 +827,49 @@ export async function renderCanvasEngine({
       }
     }
 
+    // ── Vector mask soft edge / partial opacity: frame-space post-pass ────────
+    // A hard clip() cannot express feathered edges or mask opacity < 100%
+    // (setting ctx.filter after clip() used to blur the whole CLIP instead of
+    // the mask edge). Same trick as the motionFx pass above: render the clip
+    // into a full-frame buffer, punch the rasterized (blurred) mask out of it
+    // with destination-in, then blit.
+    if (
+      clip.vectorMask?.enabled &&
+      !(clip as any).__vectorMaskPass &&
+      vectorMaskNeedsRaster(clip.vectorMask)
+    ) {
+      const bufScale = Math.max(0.1, canvas_scale * viewport.zoom);
+      const bufW = Math.max(1, Math.round(W * bufScale));
+      const bufH = Math.max(1, Math.round(H * bufScale));
+      const buf = getOrCreateCanvas(offscreenCanvasPool.current, `__vectormask_${clip.id}`, bufW, bufH);
+      const bctx = buf.getContext('2d');
+      if (bctx) {
+        bctx.setTransform(1, 0, 0, 1, 0, 0);
+        bctx.clearRect(0, 0, buf.width, buf.height);
+        bctx.save();
+        bctx.scale(bufScale, bufScale);
+        await drawSingleClip(
+          { ...clip, __vectorMaskPass: true },
+          opacityMultiplier,
+          extraTransform,
+          bctx
+        );
+        bctx.restore();
+        // Identity space now: raster is built directly in buffer resolution so
+        // the feather blur tracks canvas_scale/zoom.
+        applyVectorMaskRaster(bctx as unknown as CanvasRenderingContext2D, clip.vectorMask, buf.width, buf.height);
+        // Known limitation mirrors the motionFx pass: the inner pass blends
+        // against an empty buffer, so soft vector masks combined with non-normal
+        // blend modes composite over transparent black first. Normal (source-over)
+        // clips — the overwhelming majority — are pixel-identical.
+        ctx.save();
+        ctx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+        ctx.restore();
+        anyClipDrawn = true;
+        return true;
+      }
+    }
+
     if (clip.isAdjustmentLayer || clip.mediaId?.startsWith('adj_') || mediaItem.type === 'adjustment') {
       applyAdjustmentLayerPass(ctx, clip, W, H);
       anyClipDrawn = true;
@@ -1023,7 +1078,10 @@ export async function renderCanvasEngine({
     ctx.globalAlpha = targetCtxForBlend ? 1 : blendPlan.alpha;
     ctx.globalCompositeOperation = targetCtxForBlend ? 'source-over' : blendPlan.mode;
 
-    if (clip.vectorMask?.enabled) {
+    // Hard-edge, full-opacity vector masks: exact zero-cost clip. Feathered or
+    // partially-opaque masks took the raster post-pass above and must not also
+    // clip here (the inner buffer pass carries __vectorMaskPass).
+    if (clip.vectorMask?.enabled && !(clip as any).__vectorMaskPass && !vectorMaskNeedsRaster(clip.vectorMask)) {
       applyVectorMaskToContext(ctx, clip.vectorMask, W, H);
     }
 
@@ -1714,7 +1772,8 @@ export async function renderCanvasEngine({
                   clip.fxSettings.type,
                   fxIntensity,
                   fxRelTime,
-                  isPlaying
+                  isPlaying,
+                  clip.fxSettings
                 );
               }
             }
@@ -2695,6 +2754,42 @@ export async function renderCanvasEngine({
     await drawSingleClip(clipToDraw, 1, undefined, bctx);
     bctx.restore();
 
+    // ── Layer-local post passes (buffer holds ONLY this layer, so they are safe) ──
+    // Motion blur for professional transitions (blurDissolve). Copy through a
+    // second pooled buffer with a blur filter — device-space px must be in
+    // buffer resolution, not frame units.
+    if ((layer.blur ?? 0) > 0.0005) {
+      const blurPx = Math.max(1, layer.blur! * buf.width);
+      const blurBuf = getOrCreateCanvas(offscreenCanvasPool.current, bufferKey + '_blur', bufW, bufH);
+      const bbctx = blurBuf.getContext('2d');
+      if (bbctx) {
+        bbctx.setTransform(1, 0, 0, 1, 0, 0);
+        bbctx.clearRect(0, 0, blurBuf.width, blurBuf.height);
+        bbctx.filter = `blur(${blurPx}px)`;
+        bbctx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, blurBuf.width, blurBuf.height);
+        bbctx.filter = 'none';
+        bctx.globalCompositeOperation = 'copy';
+        bctx.drawImage(blurBuf, 0, 0);
+        bctx.globalCompositeOperation = 'source-over';
+      }
+    }
+
+    // Soft wipe edge: the plan carries a hard clipRect PLUS a feather radius.
+    // With a feather we punch the edge out of the layer buffer with a gradient
+    // mask (shared helper — export uses the identical routine) and skip the
+    // hard clip at blit time.
+    const hasFeatheredRect = !!layer.clipRect && (layer.clipFeather ?? 0) > 0.0005;
+    if (hasFeatheredRect) {
+      // bctx is in identity space here (setTransform above, restores balanced).
+      applyFeatheredRectMask(bctx, layer.clipRect!, layer.clipFeather!, buf.width, buf.height);
+    }
+
+    // Particle dissolve reveal: punch the deterministic hash-noise mask out of
+    // the layer buffer (shared worker-safe helper — identical mask in export).
+    if (layer.noiseReveal) {
+      applyNoiseRevealMask(bctx, layer.noiseReveal.amount, layer.noiseReveal.cell, buf.width, buf.height);
+    }
+
     // Blit the finished layer with the transition's geometry + alpha. `blitCtx`
     // (or the main frame ctx) is already in local frame space, so we work in
     // W/H units throughout.
@@ -2702,10 +2797,25 @@ export async function renderCanvasEngine({
     outCtx.save();
     outCtx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
 
-    if (layer.clipRect) {
+    if (layer.clipRect && !hasFeatheredRect) {
       const r = layer.clipRect;
       outCtx.beginPath();
       outCtx.rect(r.x * W, r.y * H, r.w * W, r.h * H);
+      outCtx.clip();
+    }
+    if (layer.clipCircle && layer.clipCircle.r > 0.0001) {
+      const cc = layer.clipCircle;
+      outCtx.beginPath();
+      outCtx.arc(cc.x * W, cc.y * H, cc.r * W, 0, Math.PI * 2);
+      outCtx.clip();
+    }
+    if (layer.clipWedge && layer.clipWedge.angle < Math.PI * 2 - 0.0001) {
+      const wd = layer.clipWedge;
+      outCtx.beginPath();
+      outCtx.moveTo(wd.cx * W, wd.cy * H);
+      // From 12 o'clock (-π/2) sweeping clockwise; overshoot the corners.
+      outCtx.arc(wd.cx * W, wd.cy * H, Math.max(W, H) * 1.2, -Math.PI / 2, -Math.PI / 2 + wd.angle);
+      outCtx.closePath();
       outCtx.clip();
     }
 
@@ -2714,11 +2824,69 @@ export async function renderCanvasEngine({
     const cyF = H / 2;
     outCtx.translate(cxF + layer.translateX * W, cyF + layer.translateY * H);
     if (layer.rotation) outCtx.rotate(layer.rotation);
-    if (layer.scale !== 1) outCtx.scale(layer.scale, layer.scale);
+    const sx = layer.scale * (layer.scaleX ?? 1);
+    const sy = layer.scale * (layer.scaleY ?? 1);
+    if (sx !== 1 || sy !== 1) outCtx.scale(sx, sy);
     outCtx.translate(-cxF, -cyF);
 
-    outCtx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+    if (layer.slices && layer.slices.spread > 0.0005) {
+      // Disassemble/Assemble: draw the layer strip-by-strip; adjacent strips
+      // offset perpendicular with alternating direction. +1px overlap hides
+      // seams at strip boundaries.
+      const { count, axis, spread } = layer.slices;
+      const n = Math.max(2, Math.round(count));
+      for (let i = 0; i < n; i++) {
+        const dir = i % 2 === 0 ? 1 : -1;
+        if (axis === 'x') {
+          const bw = buf.width / n;
+          const off = dir * spread * H;
+          outCtx.drawImage(buf, i * bw, 0, Math.ceil(bw) + 1, buf.height,
+            (i * W) / n, off, W / n + 1, H);
+        } else {
+          const bh = buf.height / n;
+          const off = dir * spread * W;
+          outCtx.drawImage(buf, 0, i * bh, buf.width, Math.ceil(bh) + 1,
+            off, (i * H) / n, W, H / n + 1);
+        }
+      }
+    } else {
+      outCtx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
+    }
     outCtx.restore();
+  };
+
+  /** Draw a transition overlay (flat colour OR directional gradient band). */
+  const drawTransitionOverlay = (
+    octx: CanvasRenderingContext2D,
+    overlay: OverlayDraw,
+    oW: number,
+    oH: number
+  ) => {
+    if (overlay.type === 'color' && overlay.alpha > 0.001) {
+      octx.save();
+      octx.globalAlpha = Math.min(1, overlay.alpha);
+      octx.fillStyle = overlay.color;
+      octx.fillRect(0, 0, oW, oH);
+      octx.restore();
+    } else if (overlay.type === 'edgeGradient' && overlay.alpha > 0.001 && overlay.rect) {
+      const r = overlay.rect;
+      const x = r.x * oW, y = r.y * oH, w = r.w * oW, h = r.h * oH;
+      let g: CanvasGradient;
+      switch (overlay.gradientDir) {
+        case 'right': g = octx.createLinearGradient(x, 0, x + w, 0); break;
+        case 'up':    g = octx.createLinearGradient(0, y + h, 0, y); break;
+        case 'down':  g = octx.createLinearGradient(0, y, 0, y + h); break;
+        case 'left':
+        default:      g = octx.createLinearGradient(x + w, 0, x, 0); break;
+      }
+      g.addColorStop(0, overlay.color);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      octx.save();
+      octx.globalAlpha = Math.min(1, overlay.alpha);
+      octx.fillStyle = g;
+      octx.fillRect(x, y, w, h);
+      octx.restore();
+    }
   };
 
   /** Render a full clip-to-clip transition (both layers + overlay + post effect). */
@@ -2743,12 +2911,7 @@ export async function renderCanvasEngine({
         pctx.scale(bufScale, bufScale);
         await drawTransitionLayer(active.from, plan.from, '__transition_from', pctx as CanvasRenderingContext2D, bufScale);
         await drawTransitionLayer(active.to, plan.to, '__transition_to', pctx as CanvasRenderingContext2D, bufScale);
-        if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
-          pctx.globalAlpha = Math.min(1, plan.overlay.alpha);
-          pctx.fillStyle = plan.overlay.color;
-          pctx.fillRect(0, 0, W, H);
-          pctx.globalAlpha = 1;
-        }
+        drawTransitionOverlay(pctx as CanvasRenderingContext2D, plan.overlay, W, H);
         pctx.restore();
         applyTransitionPostEffect(pctx as CanvasRenderingContext2D, postBuf.width, postBuf.height, plan.postEffect, plan.postEffectAmount);
         ctx.drawImage(postBuf, 0, 0, postBuf.width, postBuf.height, 0, 0, W, H);
@@ -2759,13 +2922,7 @@ export async function renderCanvasEngine({
     await drawTransitionLayer(active.from, plan.from, '__transition_from');
     await drawTransitionLayer(active.to, plan.to, '__transition_to');
 
-    if (plan.overlay.type === 'color' && plan.overlay.alpha > 0.001) {
-      ctx.save();
-      ctx.globalAlpha = Math.min(1, plan.overlay.alpha);
-      ctx.fillStyle = plan.overlay.color;
-      ctx.fillRect(0, 0, W, H);
-      ctx.restore();
-    }
+    drawTransitionOverlay(ctx, plan.overlay, W, H);
   };
 
   // Render clips sequentially to guarantee correct Z-index order and prevent Canvas 2D
@@ -3002,7 +3159,32 @@ export async function renderCanvasEngine({
         if (currentTime < clip.startTime || currentTime >= clip.startTime + clip.duration + 0.001) continue;
         const fxIntensity = clip.fxSettings.intensity ?? 100;
         const fxRelTime = Math.max(0, currentTime - clip.startTime);
-        applyFxEffect(ctx, composite.width, composite.height, clip.fxSettings.type, fxIntensity, fxRelTime, isPlaying);
+        // Custom HTML/CSS FX: render via cached SceneStage pipeline
+        if (clip.fxSettings.type === 'custom_html' && clip.fxSettings.customHtmlCss) {
+          const cacheKey = clip.id;
+          const htmlHash = _simpleHash(clip.fxSettings.customHtmlCss);
+          let cached = _customFxStageCache.get(cacheKey);
+          if (!cached || cached.htmlHash !== htmlHash) {
+            if (cached) destroySceneStage(cached.stage);
+            const stage = createSceneStage(clip.fxSettings.customHtmlCss, {
+              width: composite.width, height: composite.height, transparent: true,
+            });
+            if (stage) {
+              const seekMode = stage.hasAnimations ? 'css' : 'static';
+              cached = { stage, seekMode, htmlHash };
+              _customFxStageCache.set(cacheKey, cached);
+            }
+          }
+          if (cached) {
+            try {
+              await captureSceneFrame(cached.stage, composite, fxRelTime, cached.seekMode);
+            } catch (e) {
+              console.warn('[CanvasRenderingEngine] Custom FX render error:', e);
+            }
+          }
+        } else {
+          applyFxEffect(ctx, composite.width, composite.height, clip.fxSettings.type, fxIntensity, fxRelTime, isPlaying, clip.fxSettings);
+        }
       }
     }
   }
