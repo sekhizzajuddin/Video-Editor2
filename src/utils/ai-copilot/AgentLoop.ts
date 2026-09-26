@@ -290,15 +290,16 @@ export async function runAgentLoop(userText: string, opts: AgentRunOptions = {})
         error: executed.error,
       };
 
-      if (executed.success && executed.result?.__inspectPreview) {
+      const resAny = executed.result as any;
+      if (executed.success && resAny?.__inspectPreview) {
         emit('looking', turn + 1, 'Looking at the preview (vision)…');
         if (groqCalls < AGENT_MAX_GROQ_CALLS && rpmHeadroomOk(1)) {
-          const frame = await capturePreviewJpeg(executed.result.time);
+          const frame = await capturePreviewJpeg(resAny.time);
           if (frame) {
             try {
-              const look = await visionLook(executed.result.question, frame, opts.signal);
+              const look = await visionLook(resAny.question, frame, opts.signal);
               groqCalls += 1;
-              ev.result = { ...executed.result, vision: look };
+              ev.result = { ...resAny, vision: look };
               ev.status = 'success';
               messages.push({
                 role: 'tool',

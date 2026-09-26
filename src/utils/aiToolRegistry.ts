@@ -1,4 +1,7 @@
 import { useEditorStore } from '../store/editorStore';
+import { EditorAuditor } from './ai-copilot/EditorAuditor';
+import { AutoDirector } from './ai-copilot/AutoDirector';
+import { ProCutFeatureDocs } from './ai-copilot/ProCutFeatureDocs';
 
 // Define the available tools for the AI Copilot
 export const aiToolRegistry = [
@@ -385,8 +388,47 @@ export const aiToolRegistry = [
     name: "listFeatures",
     description: "Returns a compact list of ProCut features the agent can operate.",
     parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "auditEditorSystem",
+    description: "Audits the video editor system: detects timeline logic bugs, conflicts, clip overlaps, and identifies missing NLE features with actionable upgrade recommendations.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "autoEditTimeline",
+    description: "Autonomously edits the timeline in one click: removes dead air/silence, inserts contextual B-roll cutaways on track v2, and choreographs dynamic keyframes & transitions.",
+    parameters: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Optional creative guidance (e.g. 'fast-paced youtube vlog', 'cinematic montage')." }
+      }
+    }
+  },
+  {
+    name: "searchAppCapabilities",
+    description: "Searches ProCut internal documentation & workflow specs. Use whenever looking up how features (like speed ramping/speed frames, keyframes, chroma key, expressions, typography) are implemented in ProCut vs CapCut/Premiere.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Feature or workflow to look up (e.g. 'speed ramping', 'keyframe', 'green screen', 'wiggle')." },
+        category: { type: "string", enum: ["timeline", "animation", "audio", "color", "effects", "ai", "text"], description: "Optional category filter." }
+      },
+      required: ["query"]
+    }
+  },
+  {
+    name: "runProcutCLI",
+    description: "Runs commands in the in-app ProCut terminal: 'docs <topic>', 'list [category]', 'synonyms' (shows CapCut -> ProCut translation map).",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "The CLI command to run (e.g. 'docs speed ramp', 'list animation', 'synonyms')." }
+      },
+      required: ["command"]
+    }
   }
 ];
+
 
 export const DESTRUCTIVE_TOOLS = [
   'rippleDeleteClip',
@@ -743,7 +785,48 @@ export const executeAITool = (name: string, args: any, context?: { currentTime?:
       store.updateClip(clipId, { expressions });
       return { success: true, message: `Expression applied to ${property} on clip ${clipId}` };
     }
+    case 'auditEditorSystem': {
+      const report = EditorAuditor.runAudit();
+      return {
+        success: true,
+        message: report.summary,
+        result: report,
+      };
+    }
+    case 'autoEditTimeline': {
+      // Execute autonomous editing synchronous pass
+      AutoDirector.runAutonomousWorkflow(args?.goal).catch(err => console.error('AutoDirector error:', err));
+      return {
+        success: true,
+        message: 'Autonomous editing initiated on timeline (cuts, B-roll, keyframes, transitions).',
+      };
+    }
+    case 'searchAppCapabilities': {
+      const results = ProCutFeatureDocs.search(args?.query || '', args?.category);
+      if (results.length === 0) {
+        return {
+          success: true,
+          message: `No ProCut features found matching "${args?.query}". Try broader keywords like "speed", "keyframe", "audio", "color", "mask".`,
+          result: []
+        };
+      }
+      return {
+        success: true,
+        message: `Found ${results.length} ProCut feature(s) matching "${args?.query}". Top match: ${results[0].name}`,
+        result: results
+      };
+    }
+    case 'runProcutCLI': {
+      const cliRes = ProCutFeatureDocs.runCommand(args?.command || 'help');
+      return {
+        success: true,
+        message: cliRes.output,
+        result: cliRes
+      };
+    }
     default:
       return { success: false, error: `Tool ${name} not implemented` };
+
   }
 };
+

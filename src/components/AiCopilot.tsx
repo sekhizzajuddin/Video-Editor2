@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bot, User, Send, Mic, X, Sparkles, Square, Brain, ThumbsUp, ThumbsDown, RefreshCw, Trash2, Eye, EyeOff, AlertTriangle, Clock } from 'lucide-react';
+import { Bot, User, Send, Mic, X, Sparkles, Square, Brain, ThumbsUp, ThumbsDown, RefreshCw, Trash2, Eye, EyeOff, AlertTriangle, Clock, Radio, Wand2, ShieldAlert, Terminal } from 'lucide-react';
 import { useAiCopilot, ChatMessage } from '../hooks/useAiCopilot';
+import { useGeminiLiveCopilot } from '../hooks/useGeminiLiveCopilot';
+import { ProCutFeatureDocs } from '../utils/ai-copilot/ProCutFeatureDocs';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
@@ -22,6 +24,11 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
   const [inputText, setInputText] = useState('');
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+  const [showTerminal, setShowTerminal] = useState<boolean>(false);
+  const [terminalOutput, setTerminalOutput] = useState<string>(
+    'ProCut Internal CLI v1.0 [Feature & Architecture Shell]\nType "help", "docs speed", "docs keyframe", or "synonyms" to explore internal architecture.'
+  );
+
   const {
     messages,
     sendMessage,
@@ -45,6 +52,7 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
     streamingText,
     agentModels,
   } = useAiCopilot();
+  const liveCopilot = useGeminiLiveCopilot();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stats = getTrainingStats();
 
@@ -84,11 +92,21 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputText.trim() && !isProcessing) {
+    if (!inputText.trim()) return;
+
+    if (showTerminal) {
+      const res = ProCutFeatureDocs.runCommand(inputText);
+      setTerminalOutput((prev) => `${prev}\n\n$ ${inputText}\n${res.output}`);
+      setInputText('');
+      return;
+    }
+
+    if (!isProcessing) {
       sendMessage(inputText);
       setInputText('');
     }
   };
+
 
   const toggleThinking = (messageId: string) => {
     const newSet = new Set(expandedThinking);
@@ -204,6 +222,37 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
           <Button
             variant="ghost"
             size="icon"
+            className={`w-7 h-7 rounded-lg transition-colors ${
+              liveCopilot.isLiveConnected 
+                ? 'bg-emerald-500/20 text-emerald-400 animate-pulse hover:bg-emerald-500/30' 
+                : liveCopilot.isConnecting 
+                ? 'bg-amber-500/20 text-amber-400 animate-spin'
+                : 'hover:bg-white/10 text-zinc-400'
+            }`}
+            onClick={() => liveCopilot.toggleLiveSession()}
+            title={liveCopilot.isLiveConnected ? "Disconnect Gemini Live Director" : "Connect Gemini Live Director (Watches Canvas & Hears Mic)"}
+            aria-label="Toggle Gemini Live Director"
+          >
+            <Radio className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`w-7 h-7 rounded-lg transition-colors ${
+              showTerminal 
+                ? 'bg-primary/20 text-primary' 
+                : 'hover:bg-white/10 text-zinc-400'
+            }`}
+            onClick={() => setShowTerminal(prev => !prev)}
+            title={showTerminal ? "Switch to Chat View" : "Open ProCut Architecture CLI & Feature Docs"}
+            aria-label="Toggle Internal Terminal View"
+          >
+            <Terminal className="w-4 h-4" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
             className="w-7 h-7 rounded-lg hover:bg-white/10"
             onClick={toggleThinkingMode}
             title={isThinking ? "Disable thinking trace" : "Enable thinking trace"}
@@ -247,6 +296,26 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
           </Button>
         </div>
       </div>
+
+      {/* Gemini Live Director Status Banner */}
+      {liveCopilot.isLiveConnected && (
+        <div className="px-3 py-1.5 bg-emerald-950/40 border-b border-emerald-500/20 text-xs flex items-center justify-between text-emerald-300">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            <span className="font-medium">Live Director Active</span>
+            <span className="text-[10px] text-emerald-400/70">(1fps visual stream + mic)</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[10px] text-emerald-300 hover:text-white hover:bg-emerald-500/20"
+            onClick={() => liveCopilot.stopLiveSession()}
+          >
+            Stop
+          </Button>
+        </div>
+      )}
+
 
       {/* Phase 1: Rate Limit Banner / Cooldown */}
       {(rateLimitStatus.isInCooldown || rateLimitStatus.remainingCalls <= 5) && (
@@ -317,14 +386,39 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
         </div>
       )}
 
-      {/* Chat Area */}
-      <div
-        className="flex-1 p-4 overflow-y-auto min-h-0"
-        ref={scrollRef}
-        role="log"
-        aria-live="polite"
-        aria-label="AI Copilot conversation log"
-      >
+      {/* Terminal View or Chat Area */}
+      {showTerminal ? (
+        <div className="flex-1 p-3 overflow-y-auto font-mono text-xs bg-black/90 text-emerald-400 space-y-2 select-text border-b border-white/5">
+          <div className="flex items-center justify-between text-zinc-500 border-b border-zinc-800 pb-2">
+            <div>
+              <span className="text-emerald-400 font-bold">ProCut Terminal v1.0</span> [Architecture Shell]
+              <div className="text-[10px] text-zinc-400 mt-0.5">
+                Commands: <span className="text-emerald-300">docs &lt;feature&gt;</span> | <span className="text-emerald-300">list</span> | <span className="text-emerald-300">synonyms</span>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px] text-zinc-400 hover:text-white"
+              onClick={() => setTerminalOutput('ProCut Terminal v1.0 [Feature & Architecture Shell]\nType "help", "docs speed", or "synonyms" to explore internal architecture.')}
+            >
+              Clear
+            </Button>
+          </div>
+          <pre className="whitespace-pre-wrap leading-relaxed text-zinc-300 font-mono text-[11px]">
+            {terminalOutput}
+          </pre>
+        </div>
+      ) : (
+        /* Chat Area */
+        <div
+          className="flex-1 p-4 overflow-y-auto min-h-0"
+          ref={scrollRef}
+          role="log"
+          aria-live="polite"
+          aria-label="AI Copilot conversation log"
+        >
+
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 space-y-4">
             <Bot className="w-12 h-12 text-zinc-700" />
@@ -495,9 +589,50 @@ export const AiCopilot: React.FC<AiCopilotProps> = ({ onClose }) => {
           </div>
         )}
       </div>
+      )}
 
       {/* Input Area */}
       <div className="p-3 bg-black/40 border-t border-white/10">
+        {/* Quick Action Badges */}
+        <div className="flex items-center gap-1.5 mb-2 overflow-x-auto text-[11px] no-scrollbar">
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/20 flex items-center gap-1 shrink-0 transition-colors"
+            onClick={() => {
+              setShowTerminal(false);
+              sendMessage('Autonomously edit this timeline: cut dead air, insert B-roll, add keyframes and transitions');
+            }}
+            disabled={isProcessing}
+          >
+            <Wand2 className="w-3 h-3 text-indigo-400" />
+            ⚡ Autopilot Edit
+          </button>
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 shrink-0 transition-colors"
+            onClick={() => {
+              setShowTerminal(false);
+              sendMessage('Audit the video editor system and report logic bugs and missing features');
+            }}
+            disabled={isProcessing}
+          >
+            <ShieldAlert className="w-3 h-3 text-amber-400" />
+            🔍 Audit System
+          </button>
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 flex items-center gap-1 shrink-0 transition-colors"
+            onClick={() => {
+              setShowTerminal(true);
+              setTerminalOutput(ProCutFeatureDocs.runCommand('synonyms').output);
+            }}
+          >
+            <Terminal className="w-3 h-3 text-emerald-400" />
+            💻 CapCut Synonyms
+          </button>
+        </div>
+
+
         <form onSubmit={handleSubmit} className="relative flex items-center gap-2">
           <Input
             value={inputText}
