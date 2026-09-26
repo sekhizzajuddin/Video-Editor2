@@ -3470,7 +3470,6 @@ export const TransitionCard = React.memo(function TransitionCard({ transition, o
           ctx.beginPath();
           ctx.rect(0, (i * H) / n, W, H / n);
           ctx.clip();
-          // @ts-expect-error - 4th arg already overloaded
           drawImageCover(dis ? imgA : imgB, 1, 1, dir * spread * 20, 0);
           ctx.restore();
         }
