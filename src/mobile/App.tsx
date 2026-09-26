@@ -28,17 +28,20 @@ const SettingsModal = React.lazy(() => import('@/components/SettingsModal').then
 const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRatioConflictModal').then((m) => ({ default: m.AspectRatioConflictModal })));
 const HelpModal = React.lazy(() => import('@/components/HelpModal').then((m) => ({ default: m.HelpModal })));
 const AiSpeedSyncModal = React.lazy(() => import('@/components/AiSpeedSyncModal').then((m) => ({ default: m.AiSpeedSyncModal })));
+const CustomFxMakerModal = React.lazy(() => import('@/components/CustomFxMakerModal').then((m) => ({ default: m.CustomFxMakerModal })));
 
 type Sheet = 'none' | 'media' | 'properties';
 
 export function MobileApp() {
-  const { projectId, showExportModal, showSettingsModal, showAiSpeedSyncModal, setShowAiSpeedSyncModal, selectedClipId } = useEditorStore(
+  const { projectId, showExportModal, showSettingsModal, showAiSpeedSyncModal, setShowAiSpeedSyncModal, showCustomFxMakerModal, closeCustomFxMaker, selectedClipId } = useEditorStore(
     useShallow((s) => ({
       projectId: s.projectId,
       showExportModal: s.showExportModal,
       showSettingsModal: s.showSettingsModal,
       showAiSpeedSyncModal: s.showAiSpeedSyncModal,
       setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
+      showCustomFxMakerModal: s.showCustomFxMakerModal,
+      closeCustomFxMaker: s.closeCustomFxMaker,
       selectedClipId: s.selectedClipId,
     }))
   );
@@ -158,6 +161,11 @@ export function MobileApp() {
       {showAiSpeedSyncModal && (
         <Suspense fallback={null}>
           <AiSpeedSyncModal onClose={() => setShowAiSpeedSyncModal(false)} />
+        </Suspense>
+      )}
+      {showCustomFxMakerModal && (
+        <Suspense fallback={null}>
+          <CustomFxMakerModal onClose={() => closeCustomFxMaker()} />
         </Suspense>
       )}
       <Suspense fallback={null}>

@@ -1,15 +1,20 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, findClipInTracks } from '@/store/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { CustomFxItem } from '@/types';
 import { generateCustomFx, type CustomFxProgress } from '@/utils/customFxDirector';
 import { X, Sparkles, Music, Eye, RefreshCw, Check, AlertTriangle, Loader2 } from 'lucide-react';
 
 export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
-  const { tracks, customFxTargetClipId, addCustomFx } = useEditorStore((s) => ({
-    tracks: s.tracks,
-    customFxTargetClipId: s.customFxTargetClipId,
-    addCustomFx: s.addCustomFx,
-  }));
+  const { tracks, customFxTargetClipId, addCustomFx, pipWindows, mediaLibrary } = useEditorStore(
+    useShallow((s) => ({
+      tracks: s.tracks,
+      customFxTargetClipId: s.customFxTargetClipId,
+      addCustomFx: s.addCustomFx,
+      pipWindows: s.pipWindows,
+      mediaLibrary: s.mediaLibrary,
+    }))
+  );
 
   const [phase, setPhase] = useState<CustomFxProgress['phase']>('idle');
   const [message, setMessage] = useState('');
@@ -34,31 +39,15 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
   // Find the target clip
   const targetClip = React.useMemo(() => {
     if (!customFxTargetClipId) return null;
-    for (const track of tracks) {
-      const clip = track.clips.find((c) => c.id === customFxTargetClipId);
-      if (clip) return clip;
-    }
-    return null;
-  }, [tracks, customFxTargetClipId]);
+    return findClipInTracks(tracks, customFxTargetClipId, pipWindows);
+  }, [tracks, customFxTargetClipId, pipWindows]);
 
   // Find media URL for the target clip
   const mediaUrl = React.useMemo(() => {
     if (!targetClip) return null;
-    const mediaLibrary = useEditorStore.getState().mediaLibrary;
     const mediaItem = mediaLibrary.find((m) => m.id === targetClip.mediaId);
     return mediaItem?.url || mediaItem?.thumbnail || null;
-  }, [targetClip]);
-
-  // Auto-start generation when modal opens
-  useEffect(() => {
-    if (targetClip && mediaUrl && phase === 'idle') {
-      startGeneration();
-    }
-    return () => {
-      abortRef.current?.abort();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [targetClip, mediaLibrary]);
 
   const startGeneration = useCallback(async () => {
     if (!targetClip || !mediaUrl) {
@@ -107,6 +96,21 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
     }
   }, [targetClip, mediaUrl, customPrompt]);
 
+  // Auto-start generation when modal opens and clip is available
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (targetClip && mediaUrl && phase === 'idle' && !startedRef.current) {
+      startedRef.current = true;
+      startGeneration();
+    }
+  }, [targetClip, mediaUrl, phase, startGeneration]);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const handleRegenerate = useCallback(() => {
     abortRef.current?.abort();
     setIsRegenerating(true);
@@ -152,9 +156,9 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
   const isProcessing = phase !== 'idle' && phase !== 'done' && phase !== 'error';
   const clipName = React.useMemo(() => {
     if (!targetClip) return 'Unknown clip';
-    const media = useEditorStore.getState().mediaLibrary.find((m) => m.id === targetClip.mediaId);
+    const media = mediaLibrary.find((m) => m.id === targetClip.mediaId);
     return media?.name || targetClip.id;
-  }, [targetClip]);
+  }, [targetClip, mediaLibrary]);
 
   return (
     <div

@@ -404,6 +404,7 @@ export function MediaPanel() {
     seek,
     aiVideoIsGenerating,
     aiVideoProgress,
+    customFxList,
   } = useEditorStore(useShallow(s => ({
     mediaLibrary: s.mediaLibrary,
     activeMediaTab: s.activeMediaTab,
@@ -434,6 +435,7 @@ export function MediaPanel() {
     seek: s.seek,
     aiVideoIsGenerating: s.aiVideoIsGenerating,
     aiVideoProgress: s.aiVideoProgress,
+    customFxList: s.customFxList || [],
   })));
 
   // PERF: MediaPanel (~3.5k lines) only uses the playhead to highlight which
@@ -2966,9 +2968,9 @@ export function MediaPanel() {
 
               {/* ── Custom FX Cards (user-generated) ── */}
               {(() => {
-                const customFxList = useEditorStore.getState().customFxList || [];
-                if (customFxList.length === 0 || (fxCategoryFilter !== 'all' && fxCategoryFilter !== 'custom')) return null;
-                const filtered = customFxList.filter((fx: any) =>
+                const list = customFxList || [];
+                if (list.length === 0 || (fxCategoryFilter !== 'all' && fxCategoryFilter !== 'custom')) return null;
+                const filtered = list.filter((fx: any) =>
                   !fxSearchQuery || fx.name.toLowerCase().includes(fxSearchQuery.toLowerCase())
                 );
                 if (filtered.length === 0) return null;
