@@ -330,6 +330,15 @@ export interface ClipFxSettings {
   customFxId?: string;       // Reference to CustomFxItem.id
   customHtmlCss?: string;    // Inline HTML/CSS/SVG code (denormalized for render perf)
   customFxName?: string;     // Display label
+  // ── UI / bypass state ──
+  /**
+   * Bypass toggle. `undefined` and `true` both mean "render this FX"; only an
+   * explicit `false` skips it, which is how both the preview renderer and the
+   * export Compositor already test it.
+   */
+  enabled?: boolean;
+  /** Whether the FX sub-track row is collapsed in the timeline. */
+  isCollapsed?: boolean;
 }
 
 export type ParticleEffectType =
@@ -600,6 +609,8 @@ export interface MapAnimationSettings {
 // Timeline Clip
 export interface TimelineClip {
   id: string;
+  /** Optional display label; falls back to the source media name in the UI. */
+  name?: string;
   mediaId: string;
   trackId: string;
   startTime: number;    // position on timeline

@@ -297,7 +297,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
           if (!targetClip) {
             for (const t of state.tracks) {
-              if (t.type === 'video' || t.type === 'image' || t.type === 'text') {
+              // Visual tracks only. Images live on 'video' tracks — there is no
+              // 'image' track type.
+              if (t.type === 'video' || t.type === 'text') {
                 const c = t.clips.find((clip) => dropTime >= clip.startTime && dropTime < clip.startTime + clip.duration);
                 if (c) { targetClip = c; break; }
               }
