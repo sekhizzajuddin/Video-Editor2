@@ -17,6 +17,8 @@ interface ClipDetectionState {
   cachedMaskTimestamp: number;
   cachedMaskFrameCount: number;
   monotoneFramesSinceInference: number;
+  /** performance.now() of the last real inference (wall-clock staleness). */
+  lastInferenceTimestamp: number;
   previousHistogram: Uint32Array | null;
   sceneCheckCounter: number;
 
@@ -38,6 +40,7 @@ function getClipState(clipId: string): ClipDetectionState {
       cachedMaskTimestamp: 0,
       cachedMaskFrameCount: 0,
       monotoneFramesSinceInference: 0,
+      lastInferenceTimestamp: 0,
       previousHistogram: null,
       sceneCheckCounter: 0,
       smoothedBbox: null,
@@ -50,10 +53,16 @@ function getClipState(clipId: string): ClipDetectionState {
   return state;
 }
 
-const BALANCED_CACHE_FRAMES = 3;
-const PERFORMANCE_CACHE_FRAMES = 5;
-const BALANCED_MAX_STALE_FRAMES = 8;
-const PERFORMANCE_MAX_STALE_FRAMES = 15;
+// Cache lifetimes are expressed in MILLISECONDS, not frames.
+//
+// Frame counts made the cutout behave differently at 24 fps and 60 fps: "3
+// frames" is 125 ms on one machine and 50 ms on another, so the matte refresh
+// rate — and therefore how much the silhouette lagged the subject — depended on
+// the display refresh rate. Wall-clock budgets keep it consistent.
+const BALANCED_CACHE_MS = 130;
+const PERFORMANCE_CACHE_MS = 230;
+const BALANCED_MAX_STALE_MS = 340;
+const PERFORMANCE_MAX_STALE_MS = 620;
 
 // ─── Temporal Mask Cache ────────────────────────────────────────────────────
 
@@ -95,6 +104,15 @@ export function cacheMaskCanvas(clipId: string, mask: HTMLCanvasElement | null):
 export function markInferencePerformed(clipId: string): void {
   const state = getClipState(clipId);
   state.monotoneFramesSinceInference = 0;
+  state.lastInferenceTimestamp = performance.now();
+}
+
+function cacheBudgetMs(playbackQuality: 'full' | 'balanced' | 'performance'): number {
+  return playbackQuality === 'performance' ? PERFORMANCE_CACHE_MS : BALANCED_CACHE_MS;
+}
+
+function staleBudgetMs(playbackQuality: 'full' | 'balanced' | 'performance'): number {
+  return playbackQuality === 'performance' ? PERFORMANCE_MAX_STALE_MS : BALANCED_MAX_STALE_MS;
 }
 
 export function shouldUseCachedMask(
@@ -104,14 +122,9 @@ export function shouldUseCachedMask(
   const state = getClipState(clipId);
   if (!state.cachedMask) return false;
   if (playbackQuality === 'full') return false;
-
   state.cachedMaskFrameCount++;
   state.monotoneFramesSinceInference++;
-
-  const maxFrames = playbackQuality === 'performance'
-    ? PERFORMANCE_CACHE_FRAMES
-    : BALANCED_CACHE_FRAMES;
-  return state.cachedMaskFrameCount < maxFrames;
+  return performance.now() - state.cachedMaskTimestamp < cacheBudgetMs(playbackQuality);
 }
 
 export function peekCachedMaskValid(
@@ -121,10 +134,7 @@ export function peekCachedMaskValid(
   const state = getClipState(clipId);
   if (!state.cachedMask) return false;
   if (playbackQuality === 'full') return false;
-  const maxFrames = playbackQuality === 'performance'
-    ? PERFORMANCE_CACHE_FRAMES
-    : BALANCED_CACHE_FRAMES;
-  return state.cachedMaskFrameCount < maxFrames;
+  return performance.now() - state.cachedMaskTimestamp < cacheBudgetMs(playbackQuality);
 }
 
 export function mustForceResegment(
@@ -133,10 +143,8 @@ export function mustForceResegment(
 ): boolean {
   if (playbackQuality === 'full') return true;
   const state = getClipState(clipId);
-  const maxStale = playbackQuality === 'performance'
-    ? PERFORMANCE_MAX_STALE_FRAMES
-    : BALANCED_MAX_STALE_FRAMES;
-  return state.monotoneFramesSinceInference >= maxStale;
+  if (!state.lastInferenceTimestamp) return true;
+  return performance.now() - state.lastInferenceTimestamp >= staleBudgetMs(playbackQuality);
 }
 
 export function invalidateMaskCache(clipId?: string): void {
@@ -148,6 +156,7 @@ export function invalidateMaskCache(clipId?: string): void {
       state.cachedMaskTimestamp = 0;
       state.cachedMaskFrameCount = 0;
       state.monotoneFramesSinceInference = 0;
+      state.lastInferenceTimestamp = 0;
       state.smoothedBbox = null;
     }
   } else {
@@ -157,6 +166,7 @@ export function invalidateMaskCache(clipId?: string): void {
       state.cachedMaskTimestamp = 0;
       state.cachedMaskFrameCount = 0;
       state.monotoneFramesSinceInference = 0;
+      state.lastInferenceTimestamp = 0;
       state.smoothedBbox = null;
     }
   }
@@ -171,25 +181,54 @@ export function setCachedMask(clipId: string, mask: HTMLCanvasElement | null): v
 
 // ─── Scene Change Detection ─────────────────────────────────────────────────
 
-let cachedSampleCanvas: HTMLCanvasElement | null = null;
-let cachedSampleCtx: CanvasRenderingContext2D | null = null;
+/**
+ * Reusable scratch surfaces.
+ *
+ * PERF: this used to be `document.createElement('canvas')` on every call. Both
+ * `detectHumanPresence` and `computeLuminanceHistogram` call it, and both ran
+ * once per clip per rendered frame — two fresh canvases + two fresh 2D contexts
+ * 60 times a second, all immediately garbage. The resulting GC churn showed up
+ * as periodic hitches during playback with the cutout enabled.
+ *
+ * Keyed by size so the (rare) non-default request doesn't thrash the default
+ * one, and OffscreenCanvas-first so this stays usable off the main thread.
+ *
+ * Returns `null` rather than throwing: callers fail open, because a scratch
+ * surface we cannot allocate must never take the cutout down with it.
+ */
+type SampleSurface = HTMLCanvasElement | OffscreenCanvas;
 
-function getSampleCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+const sampleSurfaces = new Map<string, { canvas: SampleSurface; ctx: CanvasRenderingContext2D }>();
+
+function getSampleCanvas(w: number, h: number): { canvas: SampleSurface; ctx: CanvasRenderingContext2D } | null {
+  const key = `${w}x${h}`;
+  const existing = sampleSurfaces.get(key);
+  if (existing) return existing;
+
   try {
-    if (!cachedSampleCanvas) {
-      cachedSampleCanvas = document.createElement('canvas');
-      cachedSampleCanvas.width = w;
-      cachedSampleCanvas.height = h;
-      cachedSampleCtx = cachedSampleCanvas.getContext('2d', { willReadFrequently: true });
+    let canvas: SampleSurface;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      canvas = new OffscreenCanvas(w, h);
+    } else if (typeof document !== 'undefined') {
+      canvas = Object.assign(document.createElement('canvas'), { width: w, height: h });
     } else {
-      if (cachedSampleCanvas.width !== w || cachedSampleCanvas.height !== h) {
-        cachedSampleCanvas.width = w;
-        cachedSampleCanvas.height = h;
-      }
+      return null;
     }
-    if (!cachedSampleCtx) return null;
-    return { canvas: cachedSampleCanvas, ctx: cachedSampleCtx };
-  } catch (_e) {
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | null;
+    if (!ctx) return null;
+
+    const entry = { canvas, ctx };
+    if (sampleSurfaces.size > 6) {
+      const oldest = sampleSurfaces.keys().next().value;
+      if (oldest) sampleSurfaces.delete(oldest);
+    }
+    sampleSurfaces.set(key, entry);
+    return entry;
+  } catch {
     return null;
   }
 }
@@ -209,6 +248,9 @@ function computeLuminanceHistogram(
     const sample = getSampleCanvas(sampleW, sampleH);
     if (!sample) return histogram;
     const { ctx } = sample;
+    // The scratch surface is reused across calls — clear it so a source with
+    // alpha can't be read on top of the previous frame's pixels.
+    ctx.clearRect(0, 0, sampleW, sampleH);
     ctx.drawImage(source as CanvasImageSource, 0, 0, sampleW, sampleH);
     const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
     const data = imageData.data;
@@ -292,6 +334,7 @@ export function detectHumanPresence(
       return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
     }
     const { ctx } = sample;
+    ctx.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
     ctx.drawImage(source as CanvasImageSource, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
     const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
     data = imageData.data;

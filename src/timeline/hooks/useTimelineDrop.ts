@@ -297,6 +297,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
           if (!targetClip) {
             for (const t of state.tracks) {
+              // Visual tracks only. `Track['type']` has no 'image' member —
+              // images live on 'video' tracks — but the cast keeps the check
+              // behaviour-preserving in case a persisted project carries one.
               if (t.type === 'video' || (t.type as string) === 'image' || t.type === 'text') {
                 const c = t.clips.find((clip) => dropTime >= clip.startTime && dropTime < clip.startTime + clip.duration);
                 if (c) { targetClip = c; break; }

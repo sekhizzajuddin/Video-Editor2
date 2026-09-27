@@ -1,15 +1,32 @@
 /**
  * aiBackgroundIntegrated.ts
  *
- * Connects humanDetection.ts with aiBackground.ts for maximum accuracy.
+ * Smart orchestrator in front of the AI cutout: decides WHEN to spend an
+ * inference, and composites the result smoothly in between.
  *
- * Integration points:
- *   1. Early-exit: No human → skip all AI, return transparent or fade out mask
- *   2. Scene-change gating: Stable scene + valid cache → reuse mask
- *   3. Smart ROI: Crop to human region, run ONNX at higher effective resolution
- *   4. Model auto-select: Wide bbox → MediaPipe landscape, tall bbox → general
- *   5. Temporal coherence: Smoothed bbox prevents crop-window jitter
- *   6. Pre-rendered cache & professional edge refinement: Full Choke, Feather, Spill Suppression support
+ * ── The flicker this file used to cause ──────────────────────────────────────
+ *
+ * Step 1 of the old pipeline was a hard gate:
+ *
+ *     const human = detectHumanPresence(sourceElement, clipId, 0.008);
+ *     if (!human.hasHuman) return;          // ← composites NOTHING
+ *
+ * `detectHumanPresence` is a 64×36 skin-tone ratio heuristic. Running it on
+ * EVERY rendered frame and letting it veto the composite meant the cutout
+ * blinked out the instant the subject turned away, the lighting dropped, a hand
+ * left frame, or the subject simply wasn't skin-coloured (a pet, a product, a
+ * person in a mask). One frame cut out, the next frame full background. That is
+ * the on/off strobing behind "the background cutout is not smooth".
+ *
+ * ── The rule now ─────────────────────────────────────────────────────────────
+ *
+ *   The heuristics may only decide whether to SPEND AN INFERENCE.
+ *   They may never decide whether a matte is composited.
+ *
+ * An existing matte is always drawn. When the segmenter itself reports an empty
+ * frame several times in a row, the cutout DISSOLVES over ~110 ms via
+ * `LiveMatteTrack` instead of snapping — which is what CapCut does when a
+ * subject walks out of frame.
  */
 
 import {
@@ -17,11 +34,6 @@ import {
   computeROICrop,
   detectSceneChange,
   shouldDetectSceneChange,
-  shouldUseCachedMask,
-  mustForceResegment,
-  getCachedMaskCanvas,
-  cacheMaskCanvas,
-  markInferencePerformed,
   invalidateMaskCache,
 } from './humanDetection';
 
@@ -44,13 +56,23 @@ import {
   applySubjectNeonOutlineFlash,
   ensureClipMasksReady,
   measureMaskCoverage,
+  invalidateClipMatteContinuity,
   MaskAnalysisStatus,
 } from './aiBackground';
 
 import {
   segmentWithRVM,
   RVM_EMPTY_COVERAGE,
+  resetRVMState,
 } from './rvmMatting';
+
+import {
+  getLiveTrack,
+  refineMatte,
+  compositeCutout,
+  type MatteImage,
+  type CutoutStyle,
+} from './matteEngine';
 
 // ─── Smart Orchestrator ─────────────────────────────────────────────────────
 
@@ -105,18 +127,74 @@ const DEFAULT_OPTS: IntegrationOptions = {
 };
 
 /**
+ * How often we are willing to spend an inference during playback, per quality
+ * tier. Much tighter than the old 250–700 ms: the cross-fade hides the latency,
+ * so a shorter interval buys tracking accuracy without visible cost. Inference
+ * is still strictly one-at-a-time per clip, so a slow device naturally degrades
+ * to "as fast as it can manage" rather than queueing up work.
+ */
+const REFRESH_MS: Record<IntegrationOptions['playbackQuality'], number> = {
+  full: 90,
+  balanced: 150,
+  performance: 260,
+};
+
+/** Consecutive empty inferences before the cutout is allowed to dissolve. */
+const EMPTY_FRAMES_BEFORE_DISSOLVE = 3;
+
+interface ClipRuntime {
+  /** performance.now() of the last inference kick-off. */
+  lastRun: number;
+  /** Inference currently in flight for this clip. */
+  inFlight: boolean;
+  /** Last sampled source-media time (seek detection). */
+  lastTime: number;
+  /** Consecutive "segmenter found nothing" results. */
+  emptyStreak: number;
+}
+
+const clipRuntime = new Map<string, ClipRuntime>();
+
+function runtimeFor(clipId: string): ClipRuntime {
+  let r = clipRuntime.get(clipId);
+  if (!r) {
+    r = { lastRun: 0, inFlight: false, lastTime: Number.NaN, emptyStreak: 0 };
+    clipRuntime.set(clipId, r);
+  }
+  return r;
+}
+
+export function resetClipMatteRuntime(clipId: string): void {
+  clipRuntime.delete(clipId);
+}
+
+function sourceTimeOf(source: unknown): number {
+  const t = (source as { currentTime?: unknown })?.currentTime;
+  return typeof t === 'number' ? t : -1;
+}
+
+function styleOf(options: IntegrationOptions): CutoutStyle {
+  return {
+    mode: options.mode,
+    blurStrength: options.blurStrength,
+    strokeColor: options.strokeColor,
+    strokeWidth: options.strokeWidth,
+    strokeGlow: options.strokeGlow,
+    bgColor: options.bgColor,
+  };
+}
+
+/**
  * Apply AI background removal with human-detection intelligence.
  *
- * PERFORMANCE PATH (isPlaying = true):
- *   1. Check human presence (< 1ms)
- *   2. If no human → composite cached mask or skip
- *   3. If human + no scene change + valid cache → reuse cached mask
- *   4. If human + scene change → fire async segmentation (MediaPipe → ONNX ROI)
- *   5. Always composite last valid mask immediately (never wait)
+ * INTERACTIVE PATH (isPlaying = true)
+ *   1. Interpolated pre-rendered matte track → done (the common case once the
+ *      clip has been analysed).
+ *   2. Otherwise sample the clip's cross-faded live matte and composite it.
+ *   3. Independently, maybe schedule a background inference. Never block.
  *
- * EXPORT PATH (isPlaying = false):
- *   1. Run full pipeline synchronously for frame-accurate result
- *   2. Use ROI + full IS-Net for maximum quality
+ * EXPORT / PAUSED PATH (isPlaying = false)
+ *   Await a frame-accurate matte before compositing.
  */
 export async function applyAiBackgroundSmart(
   ctx: CanvasRenderingContext2D,
@@ -127,14 +205,13 @@ export async function applyAiBackgroundSmart(
   opts: Partial<IntegrationOptions> = {}
 ): Promise<void> {
   const options = { ...DEFAULT_OPTS, ...opts };
-  const sourceW = width;
-  const sourceH = height;
 
   try {
     const choke = options.choke || 0;
     const feather = (options.feather || 0) > 0 ? options.feather : options.edgeBlur;
+    const style = styleOf(options);
 
-    // ── STEP 0: Check Pre-Rendered Temporal Cache ────────────────────────
+    // ── STEP 0: Pre-rendered matte track (interpolated, O(log n)) ────────
     if (
       applyPreRenderedMaskIfAvailable(
         ctx,
@@ -148,227 +225,205 @@ export async function applyAiBackgroundSmart(
         feather,
         options.spillSuppression,
         options.spillColor,
-        {
-          mode: options.mode,
-          blurStrength: options.blurStrength,
-          strokeColor: options.strokeColor,
-          strokeWidth: options.strokeWidth,
-          strokeGlow: options.strokeGlow,
-          bgColor: options.bgColor,
-        }
+        style
       )
     ) {
       return;
     }
 
-    // ── STEP 1: Human Presence Check (< 1ms) ─────────────────────────────
-    const human = detectHumanPresence(sourceElement, clipId, options.skinThreshold);
+    const rt = runtimeFor(clipId);
+    const track = getLiveTrack(clipId);
+    const videoTime = sourceTimeOf(sourceElement);
 
-    if (!human.hasHuman) {
-      // No subject in frame → show the ORIGINAL frame. Never erase pixels:
-      // the previous behavior multiplied the frame alpha via destination-in,
-      // which faded the ENTIRE frame (subject + background) to transparent —
-      // the "vanishing video" bug on clips without people.
-      return;
+    // ── STEP 1: Seek detection ───────────────────────────────────────────
+    // A jump backwards, or forwards by more than half a second, means the
+    // cross-fade history belongs to a different moment. Easing from it would
+    // drag a stale silhouette across the new frame.
+    if (
+      Number.isFinite(rt.lastTime) &&
+      videoTime >= 0 &&
+      (videoTime < rt.lastTime - 0.05 || videoTime - rt.lastTime > 0.5)
+    ) {
+      // One call clears every piece of frame-to-frame history for this clip:
+      // the cross-fade track, RVM's recurrent state, the temporal EMA and the
+      // refine scratch surfaces.
+      invalidateClipMatteContinuity(clipId);
+      invalidateMaskCache(clipId);
+      rt.emptyStreak = 0;
+      rt.lastRun = 0;
     }
+    if (videoTime >= 0) rt.lastTime = videoTime;
 
-    // ── STEP 2: Scene Change & Cache Validity ────────────────────────────
-    let sceneChanged = false;
-    if (shouldDetectSceneChange(clipId, options.isPlaying ? 12 : 6)) {
-      sceneChanged = detectSceneChange(clipId, sourceElement, 0.12);
-    }
-
-    const cacheValid = shouldUseCachedMask(clipId, options.playbackQuality);
-    const forceStale = mustForceResegment(clipId, options.playbackQuality);
-
-    if (!sceneChanged && cacheValid && !forceStale) {
-      const cached = getCachedMaskCanvas(clipId, width, height);
-      if (cached) {
-        compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
-        return;
-      }
-    }
-
-    // ── STEP 3: Determine Best Model from Bbox ───────────────────────────
-    let chosenModel: 'general' | 'landscape' = 'general';
-    let useMediaPipe = true;
-
-    if (human.bbox && options.modelSelection === 0) {
-      // Auto-select: if bbox is wider than tall, use landscape model
-      const bboxAspect = human.bbox.w / human.bbox.h;
-      if (bboxAspect > 1.3) {
-        chosenModel = 'landscape';
-      }
-    } else if (options.modelSelection === 2 || options.modelSelection === 3) {
-      chosenModel = 'landscape';
-    }
-
-    // For export (isPlaying=false), always use ONNX for best quality
-    if (!options.isPlaying) {
-      useMediaPipe = false;
-    }
-
-    // ── STEP 4: Segmentation ─────────────────────────────────────────────
+    // ── STEP 2: Segmentation ─────────────────────────────────────────────
     if (options.isPlaying) {
-      // INTERACTIVE: Fire-and-forget async
-      runSegmentationAsync(
-        sourceElement,
-        sourceW,
-        sourceH,
-        clipId,
-        human,
-        chosenModel,
-        useMediaPipe,
-        options.useROI,
-        width,
-        height
-      );
-      // Composite whatever we have cached (might be stale — that's OK)
-      const cached = getCachedMaskCanvas(clipId, width, height);
-      if (cached) {
-        compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
-      }
+      maybeScheduleInference(sourceElement, width, height, clipId, options, rt);
     } else {
-      // EXPORT / PAUSED: Await synchronous high-quality mask
-      const mask = await runSegmentationSync(
-        sourceElement,
-        sourceW,
-        sourceH,
-        clipId,
-        human,
-        chosenModel,
-        options.modelSelection !== 2, // Use MediaPipe GPU unless Ultra Studio IS-Net is selected
-        options.useROI,
-        width,
-        height
-      );
-      if (mask) {
-        cacheMaskCanvas(clipId, mask);
-        markInferencePerformed(clipId);
-        compositeMask(ctx, sourceElement, mask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
-      }
+      await runSegmentationSync(sourceElement, width, height, clipId, options, rt);
     }
+
+    // ── STEP 3: Composite whatever the track holds right now ─────────────
+    // This runs unconditionally. No heuristic is allowed to remove an existing
+    // matte — that was the strobing bug.
+    const matte = track.sample();
+    if (!matte) return;
+
+    const refined = refineMatte(matte, {
+      choke,
+      feather: feather || 0,
+      destWidth: width,
+      destHeight: height,
+      poolKey: `smart:${clipId}`,
+    });
+
+    compositeCutout(
+      ctx,
+      width,
+      height,
+      sourceElement as CanvasImageSource,
+      refined,
+      style,
+      `smart:${clipId}`,
+      options.spillSuppression > 0
+        ? (target, w, h) =>
+            applySpillSuppression(target, w, h, options.spillSuppression, options.spillColor)
+        : undefined
+    );
   } catch (err) {
     console.error('[aiBackgroundIntegrated] Smart mask error:', err);
     // Fail-open: draw nothing (show original frame)
   }
 }
 
-// ─── Async Segmentation (Interactive Playback) ──────────────────────────────
+// ─── Inference scheduling (interactive playback) ────────────────────────────
+
+/**
+ * Decide whether to spend an inference on this frame, and if so kick it off
+ * without blocking the render loop.
+ *
+ * The skin/scene heuristics appear ONLY here, and only ever make us do *less*
+ * work. They can extend the interval on a clip that looks empty and stable;
+ * they can never suppress the composite.
+ */
+function maybeScheduleInference(
+  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
+  width: number,
+  height: number,
+  clipId: string,
+  options: IntegrationOptions,
+  rt: ClipRuntime
+): void {
+  if (rt.inFlight) return;
+
+  const now = performance.now();
+  const track = getLiveTrack(clipId);
+  let interval = REFRESH_MS[options.playbackQuality] ?? REFRESH_MS.balanced;
+
+  // Nothing on screen yet → get a first matte as fast as possible.
+  if (!track.hasMatte) interval = 0;
+
+  if (now - rt.lastRun < interval) return;
+
+  // The pre-analysis job walks keyframes through the same per-clip recurrent
+  // RVM state; a concurrent live inference would seek-jump it.
+  if (getClipAnalysisStatus(clipId).status === 'analyzing') return;
+
+  // Cheap scheduling hints — sampled at most every 12th frame each, and only
+  // once we already passed the interval check (so they cost nothing on the
+  // frames in between).
+  let bbox: { x: number; y: number; w: number; h: number } | undefined;
+  if (track.hasMatte && rt.emptyStreak >= EMPTY_FRAMES_BEFORE_DISSOLVE) {
+    // Confirmed empty and already dissolved: back off hard, but keep polling
+    // often enough to catch the subject walking back in.
+    if (now - rt.lastRun < 500) return;
+  }
+  if (shouldDetectSceneChange(clipId, 12)) {
+    // A scene cut invalidates temporal memory; force a state reset so the next
+    // matte isn't dragged from the previous shot.
+    if (detectSceneChange(clipId, source, 0.12)) {
+      resetRVMState(clipId);
+    }
+  }
+  if (options.modelSelection === 0 || options.useROI) {
+    const human = detectHumanPresence(source, clipId, options.skinThreshold);
+    bbox = human.bbox;
+  }
+
+  rt.inFlight = true;
+  rt.lastRun = now;
+
+  void runSegmentationAsync(source, width, height, clipId, options, rt, bbox).finally(() => {
+    rt.inFlight = false;
+  });
+}
 
 async function runSegmentationAsync(
   source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
-  sourceW: number,
-  sourceH: number,
+  width: number,
+  height: number,
   clipId: string,
-  human: { hasHuman: boolean; bbox?: { x: number; y: number; w: number; h: number } },
-  modelType: 'general' | 'landscape',
-  tryMediaPipe: boolean,
-  useROI: boolean,
-  targetW: number,
-  targetH: number
+  options: IntegrationOptions,
+  rt: ClipRuntime,
+  bbox?: { x: number; y: number; w: number; h: number }
 ): Promise<void> {
-  // Prevent overlapping inference jobs
-  const flightKey = `${clipId}_segment`;
-  if ((window as any)[flightKey]) return;
-  (window as any)[flightKey] = true;
+  const track = getLiveTrack(clipId);
+  const videoTime = sourceTimeOf(source);
 
   try {
-    let maskCanvas: any = null;
-
-    const videoTime = source && 'currentTime' in source ? (source as HTMLVideoElement).currentTime : 0;
-
-    // Try 0: RVM (CapCut-grade) — recurrent temporal memory, best quality.
-    // Skipped while the pre-analysis job runs: it feeds RVM states sequentially
-    // across keyframes, and concurrent live inference would seek-jump the
-    // shared per-clip state, degrading the pre-computed mattes.
-    const analysisActive = getClipAnalysisStatus(clipId).status === 'analyzing';
-    if (!analysisActive) {
-      const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 384).catch(() => null);
-      if (rvmRes) {
-        if (rvmRes.coverage < RVM_EMPTY_COVERAGE) {
-          // No subject in frame — cache nothing so the frame stays original
-          return;
-        }
-        maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
-        const mCtx = maskCanvas.getContext('2d');
-        if (mCtx) {
-          mCtx.clearRect(0, 0, targetW, targetH);
-          mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
-        }
+    // Try 0: RVM — recurrent temporal memory, hair-level alpha.
+    const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 512).catch(() => null);
+    if (rvmRes) {
+      if (rvmRes.coverage < RVM_EMPTY_COVERAGE) {
+        rvmRes.bitmap.close();
+        noteEmptyResult(track, rt);
+      } else {
+        rt.emptyStreak = 0;
+        track.push(rvmRes.bitmap);
         rvmRes.bitmap.close();
       }
+      notifyMaskReady();
+      return;
     }
 
-    // Try 1: MediaPipe on full frame (fastest fallback)
-    if (!maskCanvas && tryMediaPipe) {
+    // Try 1: MediaPipe on the full frame (fast fallback).
+    const modelType = pickMediaPipeModel(options, bbox);
+    if (modelType) {
       const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
       if (mpBitmap) {
-        maskCanvas = getPooledCanvas(`${clipId}_async_mp`, targetW, targetH);
-        const mCtx = maskCanvas.getContext('2d');
-        if (mCtx) {
-          mCtx.clearRect(0, 0, targetW, targetH);
-          mCtx.drawImage(mpBitmap, 0, 0, targetW, targetH);
-        }
+        rt.emptyStreak = 0;
+        track.push(mpBitmap);
         mpBitmap.close();
+        notifyMaskReady();
+        return;
       }
     }
 
-    // Try 2: ONNX with ROI crop (higher effective resolution)
-    if (!maskCanvas && human.bbox && useROI) {
-      const crop = computeROICrop(sourceW, sourceH, human.bbox, 0.25, null);
-      const roiCanvas = getPooledCanvas(`${clipId}_async_roi`, crop.sw, crop.sh);
-      const roiCtx = roiCanvas.getContext('2d');
-      if (roiCtx) {
-        roiCtx.clearRect(0, 0, crop.sw, crop.sh);
-        roiCtx.drawImage(
-          source as CanvasImageSource,
-          crop.sx, crop.sy, crop.sw, crop.sh, // source sub-rect
-          0, 0, crop.sw, crop.sh              // dest full
-        );
+    // Try 2: IS-Net on a ROI crop (higher effective resolution).
+    if (bbox && options.useROI) {
+      const roiMatte = await segmentROI(source, width, height, clipId, bbox, 'isnet_fp16', 384);
+      if (roiMatte) {
+        rt.emptyStreak = 0;
+        track.push(roiMatte);
+        notifyMaskReady();
+        return;
       }
+    }
 
-      const snap = await captureSnapshotBlob(roiCanvas as any, crop.sw, crop.sh, 384);
-      if (snap) {
-        const roiMask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-        if (roiMask) {
-          // Composite ROI mask back to full-frame canvas
-          maskCanvas = document.createElement('canvas');
-          maskCanvas.width = targetW;
-          maskCanvas.height = targetH;
-          const mCtx = maskCanvas.getContext('2d');
-          if (mCtx) {
-            mCtx.clearRect(0, 0, targetW, targetH);
-            mCtx.drawImage(roiMask, crop.sx, crop.sy, crop.sw, crop.sh);
-          }
+    // Try 3: IS-Net on the full frame.
+    const snap = await captureSnapshotBlob(source, width, height, 512);
+    if (snap) {
+      const mask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+      if (mask) {
+        if ((await measureMaskCoverage(mask)) < RVM_EMPTY_COVERAGE) {
+          noteEmptyResult(track, rt);
+        } else {
+          rt.emptyStreak = 0;
+          track.push(mask);
         }
+        notifyMaskReady();
       }
-    }
-
-    // Try 3: ONNX full frame fallback
-    if (!maskCanvas) {
-      const snap = await captureSnapshotBlob(source, sourceW, sourceH, 384);
-      if (snap) {
-        maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-      }
-    }
-
-    // Final guard: never cache a no-subject mask — destination-in with a
-    // near-empty mask erases the entire frame. Cache nothing instead so the
-    // frame stays original.
-    if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
-      maskCanvas = null;
-    }
-
-    if (maskCanvas) {
-      cacheMaskCanvas(clipId, maskCanvas);
-      markInferencePerformed(clipId);
-      notifyMaskReady();
     }
   } catch (err) {
     console.warn('[aiBackgroundIntegrated] Async segmentation failed:', err);
-  } finally {
-    (window as any)[flightKey] = false;
   }
 }
 
@@ -376,208 +431,138 @@ async function runSegmentationAsync(
 
 async function runSegmentationSync(
   source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
-  sourceW: number,
-  sourceH: number,
-  clipId: string,
-  human: { hasHuman: boolean; bbox?: { x: number; y: number; w: number; h: number } },
-  modelType: 'general' | 'landscape',
-  tryMediaPipe: boolean,
-  useROI: boolean,
-  targetW: number,
-  targetH: number
-): Promise<HTMLCanvasElement | null> {
-  let maskCanvas: HTMLCanvasElement | null = null;
-
-  const videoTime = (source as HTMLVideoElement).currentTime || 0;
-
-  // Try 0: RVM (CapCut-grade) — recurrent temporal memory, best quality
-  const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, targetW >= 768 ? 768 : 512).catch(() => null);
-  if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
-    maskCanvas = document.createElement('canvas');
-    maskCanvas.width = targetW;
-    maskCanvas.height = targetH;
-    const mCtx = maskCanvas.getContext('2d');
-    if (mCtx) {
-      mCtx.clearRect(0, 0, targetW, targetH);
-      mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
-    }
-    rvmRes.bitmap.close();
-  }
-
-  if (!maskCanvas && tryMediaPipe) {
-    const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
-    if (mpBitmap) {
-      maskCanvas = document.createElement('canvas');
-      maskCanvas.width = targetW;
-      maskCanvas.height = targetH;
-      const mCtx = maskCanvas.getContext('2d');
-      if (mCtx) {
-        mCtx.clearRect(0, 0, targetW, targetH);
-        mCtx.drawImage(mpBitmap, 0, 0, targetW, targetH);
-      }
-      mpBitmap.close();
-    }
-  }
-
-  // Export: always use ONNX for quality. Optionally with ROI.
-  if (!maskCanvas && human.bbox && useROI) {
-    const crop = computeROICrop(sourceW, sourceH, human.bbox, 0.25, null);
-    const roiCanvas = getPooledCanvas(`${clipId}_sync_roi`, crop.sw, crop.sh);
-    const roiCtx = roiCanvas.getContext('2d');
-    if (roiCtx) {
-      roiCtx.clearRect(0, 0, crop.sw, crop.sh);
-      roiCtx.drawImage(source as CanvasImageSource, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
-    }
-
-    // Export uses full isnet (not fp16) for maximum edge quality
-    const snap = await captureSnapshotBlob(roiCanvas as any, crop.sw, crop.sh, 512);
-    if (snap) {
-      const roiMask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
-      if (roiMask) {
-        maskCanvas = document.createElement('canvas');
-        maskCanvas.width = targetW;
-        maskCanvas.height = targetH;
-        const mCtx = maskCanvas.getContext('2d');
-        if (mCtx) {
-          mCtx.clearRect(0, 0, targetW, targetH);
-          mCtx.drawImage(roiMask, crop.sx, crop.sy, crop.sw, crop.sh);
-        }
-      }
-    }
-  }
-
-  if (!maskCanvas) {
-    const snap = await captureSnapshotBlob(source, sourceW, sourceH, 512);
-    if (snap) {
-      maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
-    }
-  }
-
-  // Final guard: never return a no-subject mask — destination-in with a
-  // near-empty mask erases the entire frame. Return null so the caller keeps
-  // the original frame (CapCut behavior: no subject → no cutout applied).
-  if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
-    return null;
-  }
-
-  return maskCanvas;
-}
-
-// ─── Mask Compositing ───────────────────────────────────────────────────────
-
-function compositeMask(
-  ctx: CanvasRenderingContext2D,
-  sourceElement: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
-  maskCanvas: HTMLCanvasElement,
   width: number,
   height: number,
-  choke: number,
-  feather: number,
-  spillSuppression: number,
-  spillColor?: string,
-  clipId: string = '_smart',
-  cutoutOptions?: IntegrationOptions
-): void {
-  const refinedMask = (choke !== 0 || feather > 0)
-    ? refineMaskEdges(maskCanvas, width, height, choke, feather, `${clipId}_smart`)
-    : maskCanvas;
+  clipId: string,
+  options: IntegrationOptions,
+  rt: ClipRuntime
+): Promise<void> {
+  const track = getLiveTrack(clipId);
+  const videoTime = sourceTimeOf(source);
 
-  const mode = cutoutOptions?.mode || 'remove';
+  // Frame-accurate means "re-run whenever the frame moved", not "every call" —
+  // paused repaints (selection, zoom, overlay toggles) must not re-infer.
+  const alreadyFresh =
+    track.hasMatte && Number.isFinite(rt.lastTime) && Math.abs(videoTime - rt.lastTime) <= 0.02 && rt.lastRun > 0;
+  if (alreadyFresh) return;
+  rt.lastRun = performance.now();
 
-  if (mode === 'blur') {
-    // ── Mode: Portrait Background Blur (DSLR Bokeh) ──
-    const fgCanvas = getPooledCanvas(`${clipId}_smart_fg`, width, height);
-    const fgCtx = fgCanvas.getContext('2d');
-    if (fgCtx) {
-      fgCtx.clearRect(0, 0, width, height);
-      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'destination-in';
-      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'source-over';
-      if (spillSuppression > 0) {
-        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
-      }
-
-      ctx.save();
-      ctx.clearRect(0, 0, width, height);
-      const blurPx = Math.max(1, cutoutOptions?.blurStrength ?? 12);
-      ctx.filter = `blur(${blurPx}px)`;
-      ctx.drawImage(sourceElement as any, 0, 0, width, height);
-      ctx.restore();
-
-      ctx.drawImage(fgCanvas, 0, 0, width, height);
+  // Try 0: RVM at the high tier — this is what export quality hinges on.
+  const rvmRes = await segmentWithRVM(
+    source as any,
+    clipId,
+    videoTime,
+    options.modelSelection >= 2 ? 1024 : 768
+  ).catch(() => null);
+  if (rvmRes) {
+    if (rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
+      rt.emptyStreak = 0;
+      track.push(rvmRes.bitmap);
+      rvmRes.bitmap.close();
+      return;
     }
-  } else if (mode === 'color') {
-    // ── Mode: Studio / Solid Color Backdrop ──
-    const fgCanvas = getPooledCanvas(`${clipId}_smart_fg`, width, height);
-    const fgCtx = fgCanvas.getContext('2d');
-    if (fgCtx) {
-      fgCtx.clearRect(0, 0, width, height);
-      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'destination-in';
-      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'source-over';
-      if (spillSuppression > 0) {
-        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
-      }
+    rvmRes.bitmap.close();
+    noteEmptyResult(track, rt);
+    return;
+  }
 
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = cutoutOptions?.bgColor || '#1e1e24';
-      ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(fgCanvas, 0, 0, width, height);
+  const human = detectHumanPresence(source, clipId, options.skinThreshold);
+  const modelType = pickMediaPipeModel(options, human.bbox);
+  if (modelType && options.modelSelection !== 2) {
+    const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
+    if (mpBitmap) {
+      rt.emptyStreak = 0;
+      track.push(mpBitmap);
+      mpBitmap.close();
+      return;
     }
-  } else if (mode === 'outline') {
-    // ── Mode: Sticker / Neon Outline (Shorts / Reels) ──
-    const fgCanvas = getPooledCanvas(`${clipId}_smart_fg`, width, height);
-    const fgCtx = fgCanvas.getContext('2d');
-    if (fgCtx) {
-      fgCtx.clearRect(0, 0, width, height);
-      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'destination-in';
-      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'source-over';
-      if (spillSuppression > 0) {
-        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
-      }
+  }
 
-      const strokeW = Math.max(1, cutoutOptions?.strokeWidth ?? 4);
-      const strokeCol = cutoutOptions?.strokeColor ?? '#ffffff';
-      const strokeCanvas = getPooledCanvas(`${clipId}_smart_stroke`, width, height);
-      const sCtx = strokeCanvas.getContext('2d');
-      if (sCtx) {
-        sCtx.clearRect(0, 0, width, height);
-        sCtx.drawImage(refinedMask as any, 0, 0, width, height);
-        sCtx.globalCompositeOperation = 'source-in';
-        sCtx.fillStyle = strokeCol;
-        sCtx.fillRect(0, 0, width, height);
-        sCtx.globalCompositeOperation = 'source-over';
-      }
-
-      ctx.clearRect(0, 0, width, height);
-      ctx.save();
-      if (cutoutOptions?.strokeGlow) {
-        ctx.shadowColor = strokeCol;
-        ctx.shadowBlur = strokeW * 3;
-      }
-      const offsets = [-strokeW, 0, strokeW];
-      for (const ox of offsets) {
-        for (const oy of offsets) {
-          if (ox === 0 && oy === 0) continue;
-          ctx.drawImage(strokeCanvas, ox, oy, width, height);
-        }
-      }
-      ctx.restore();
-      ctx.drawImage(fgCanvas, 0, 0, width, height);
+  // Export uses full isnet (not fp16) for maximum edge quality.
+  if (human.bbox && options.useROI) {
+    const roiMatte = await segmentROI(source, width, height, clipId, human.bbox, 'isnet', 512);
+    if (roiMatte) {
+      rt.emptyStreak = 0;
+      track.push(roiMatte);
+      return;
     }
-  } else {
-    // ── Mode: Standard Transparent Cutout ──
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(refinedMask as any, 0, 0, width, height);
-    ctx.globalCompositeOperation = 'source-over';
+  }
 
-    if (spillSuppression > 0) {
-      applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
+  const snap = await captureSnapshotBlob(source, width, height, 768);
+  if (snap) {
+    const mask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
+    if (mask) {
+      if ((await measureMaskCoverage(mask)) < RVM_EMPTY_COVERAGE) {
+        noteEmptyResult(track, rt);
+      } else {
+        rt.emptyStreak = 0;
+        track.push(mask);
+      }
     }
+  }
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function pickMediaPipeModel(
+  options: IntegrationOptions,
+  bbox?: { x: number; y: number; w: number; h: number }
+): 'general' | 'landscape' | null {
+  if (options.modelSelection === 2) return null; // Ultra Studio → IS-Net / RVM only
+  if (options.modelSelection === 3) return 'landscape';
+  if (options.modelSelection === 1) return 'landscape';
+  // Auto: wide subject → landscape model, otherwise the square one.
+  if (bbox && bbox.h > 0 && bbox.w / bbox.h > 1.3) return 'landscape';
+  return 'general';
+}
+
+/**
+ * Run IS-Net on a padded crop around the subject and paste the result back into
+ * a full-frame matte, so small subjects get far more effective resolution.
+ */
+async function segmentROI(
+  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
+  width: number,
+  height: number,
+  clipId: string,
+  bbox: { x: number; y: number; w: number; h: number },
+  model: 'isnet' | 'isnet_fp16',
+  maxDim: number
+): Promise<MatteImage | null> {
+  const crop = computeROICrop(width, height, bbox, 0.25, null);
+  if (crop.sw <= 8 || crop.sh <= 8) return null;
+
+  const roiCanvas = getPooledCanvas(`${clipId}_roi_src`, crop.sw, crop.sh);
+  const roiCtx = roiCanvas.getContext('2d') as CanvasRenderingContext2D | null;
+  if (!roiCtx) return null;
+  roiCtx.clearRect(0, 0, crop.sw, crop.sh);
+  roiCtx.drawImage(source as CanvasImageSource, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
+
+  const snap = await captureSnapshotBlob(roiCanvas as any, crop.sw, crop.sh, maxDim);
+  if (!snap) return null;
+  const roiMask = await segmentBlob(snap.blob, snap.w, snap.h, model);
+  if (!roiMask) return null;
+  if ((await measureMaskCoverage(roiMask)) < RVM_EMPTY_COVERAGE) return null;
+
+  const full = getPooledCanvas(`${clipId}_roi_full`, width, height);
+  const fCtx = full.getContext('2d') as CanvasRenderingContext2D | null;
+  if (!fCtx) return null;
+  fCtx.clearRect(0, 0, width, height);
+  fCtx.imageSmoothingEnabled = true;
+  fCtx.imageSmoothingQuality = 'high';
+  fCtx.drawImage(roiMask, crop.sx, crop.sy, crop.sw, crop.sh);
+  return full as MatteImage;
+}
+
+/**
+ * The segmenter genuinely found nothing. Only dissolve after several
+ * consecutive empty results — a single bad inference (motion blur, a hard cut,
+ * a dropped decode) must not blink the cutout off.
+ */
+function noteEmptyResult(track: ReturnType<typeof getLiveTrack>, rt: ClipRuntime): void {
+  rt.emptyStreak++;
+  if (rt.emptyStreak >= EMPTY_FRAMES_BEFORE_DISSOLVE) {
+    track.pushOpaque();
   }
 }
 
@@ -595,6 +580,7 @@ export {
   cleanupClipBackgroundState,
   invalidateMaskCache,
   applySubjectNeonOutlineFlash,
+  refineMaskEdges,
 };
 
 export type { MaskAnalysisStatus };

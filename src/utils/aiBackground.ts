@@ -1,32 +1,47 @@
 /**
  * aiBackground.ts
  *
- * AI background removal using @imgly/background-removal with forced ONNX WASM proxy.
+ * AI background removal. IS-Net (@imgly/background-removal) is the last-resort
+ * rung; the primary matte comes from RVM (see rvmMatting.ts) with MediaPipe in
+ * between.
  *
- * ── ROOT CAUSE OF PLAYHEAD HANG (NOW FIXED) ──────────────────────────────────
+ * ── ON ort.env.wasm.proxy ────────────────────────────────────────────────────
  *
- * @imgly/background-removal line 1008:
- *   `const proxyToWorker = useWebGPU && config.proxyToWorker;`
+ * @imgly/background-removal only enables its own proxy worker when WebGPU is
+ * present (`const proxyToWorker = useWebGPU && config.proxyToWorker;`), so an
+ * earlier revision pinned `ort.env.wasm.proxy = true` via Object.defineProperty
+ * to force inference off the main thread.
  *
- * The library ONLY enables its ONNX proxy worker when WebGPU is available.
- * On the vast majority of systems (no WebGPU), the entire IS-Net neural network
- * (500ms–3000ms of WASM execution) runs synchronously on the main thread,
- * monopolizing the CPU and freezing the RAF render loop, playhead, and UI.
+ * That is now deliberately `false`. ORT's proxy worker is created from the CDN
+ * origin serving the WASM, and under the COOP/COEP headers this app sets (see
+ * vite.config.ts / vercel.json) that cross-origin worker fails to start — which
+ * killed inference outright rather than merely making it synchronous.
  *
- * FIX: We use Object.defineProperty to force `ort.env.wasm.proxy = true` so the
- * library's attempt to set it to `false` is silently ignored. This makes ONNX
- * Runtime Web create its own internal proxy worker for WASM execution, moving
- * the heavy neural network computation off the main thread automatically.
- *
- * The remaining main-thread work (image resize, tensor prep, pixel loop at 384px)
- * takes < 10ms total, well within a single frame budget.
+ * Main-thread cost is kept acceptable instead by the pre-render analysis pass
+ * (which yields between keyframes) and the adaptive quality governor, so the
+ * IS-Net rung is rarely reached during live playback.
  */
 
 import * as ortModule from 'onnxruntime-web';
 import { ImageSegmenter, FilesetResolver } from '@mediapipe/tasks-vision';
 import { resetClipDetectionState, resetAllDetectionState } from './humanDetection';
-import { stabilizeTemporalAlpha } from './temporalMaskEngine';
+import { stabilizeTemporalAlpha, resetTemporalMaskState } from './temporalMaskEngine';
 import { segmentWithRVM, loadRVMSession, resetRVMState, resetAllRVMStates, RVM_EMPTY_COVERAGE } from './rvmMatting';
+import {
+  pickBracket,
+  lerpMatte,
+  refineMatte,
+  compositeCutout,
+  drawMatte,
+  isEmptyMatte,
+  getLiveTrack,
+  peekLiveTrack,
+  resetLiveTrack,
+  resetAllLiveTracks,
+  dropSurfaces,
+  clearSurfaces,
+  type MatteImage,
+} from './matteEngine';
 
 import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 import type { AiCutoutMode } from '@/types';
@@ -139,10 +154,9 @@ export async function segmentSourceWithMediaPipe(
   }
 }
 
-// ── CRITICAL FIX: Force ONNX WASM proxy ON ──────────────────────────────────
-// This intercepts the library's `ort.env.wasm.proxy = false` assignment and
-// keeps it pinned to `true`, so ONNX runs inference in its internal Web Worker
-// regardless of WebGPU availability.
+// ── ONNX Runtime bootstrap ──────────────────────────────────────────────────
+// `proxy = false`: ORT would otherwise spawn its proxy worker from the CDN
+// origin, which cannot start under this app's COOP/COEP headers.
 if (typeof window !== 'undefined') {
   const ortObj: any = (ortModule as any).default || ortModule;
 
@@ -169,6 +183,11 @@ interface SimpleMaskCache {
 
 const maskCacheMap = new Map<string, SimpleMaskCache>();
 const segmentingInFlight = new Set<string>();
+
+/** Last source-media timestamp each live matte track was sampled at (seek detection). */
+const liveTrackTime = new Map<string, number>();
+/** `performance.now()` of the last live inference kick-off, per clip (throttle). */
+const liveTrackStamp = new Map<string, number>();
 
 // ── Empty-Mask Sentinel ──────────────────────────────────────────────────────
 // Marks "analyzed: no subject in this frame". Consumers must show the ORIGINAL
@@ -264,8 +283,8 @@ export const loadBackgroundRemover = (): Promise<void> => {
         await preloadFn({
           model: 'isnet_fp16',
           publicPath: PUBLIC_PATH,
-          proxyToWorker: true, // Library ignores this without WebGPU, but our
-                               // Object.defineProperty override forces it anyway
+          // Only honoured when WebGPU is present; harmless otherwise.
+          proxyToWorker: true,
         });
       }
       isLoaded = true;
@@ -285,8 +304,9 @@ export const loadBackgroundRemover = (): Promise<void> => {
  * and converting it to a Blob BEFORE calling this function. This ensures the
  * snapshot is frozen (Blobs are immutable) and immune to canvas overwrite races.
  *
- * With the forced ONNX proxy, the heavy WASM inference runs in ONNX Runtime's
- * internal Web Worker. Main-thread cost: ~5-10ms (image resize + pixel loop).
+ * This is the slowest rung of the matte ladder and blocks the main thread when
+ * WebGPU is unavailable, so it is only reached when RVM and MediaPipe both
+ * decline to produce a matte.
  */
 export async function segmentBlob(
   inputBlob: Blob,
@@ -380,7 +400,10 @@ export function captureSnapshotBlob(
   const inferW = Math.max(64, Math.round(targetWidth * scale));
   const inferH = Math.max(64, Math.round(targetHeight * scale));
 
-  const snapCanvas = getPooledCanvas('_snap_capture', inferW, inferH);
+  // Key by size: a single shared '_snap_capture' key forced a canvas resize
+  // (and therefore a full reallocation + clear) every time two clips with
+  // different dimensions took turns.
+  const snapCanvas = getPooledCanvas(`_snap_capture_${inferW}x${inferH}`, inferW, inferH);
   const snapCtx = snapCanvas.getContext('2d');
   if (!snapCtx) return Promise.resolve(null);
   snapCtx.clearRect(0, 0, inferW, inferH);
@@ -404,7 +427,18 @@ export function captureSnapshotBlob(
 
 // ── Pre-rendered Mask Cache & Analysis Job Engine ────────────────────────────
 // For real-time 60 FPS playback without any on-the-fly AI latency, we pre-render
-// frame masks of video clips. Masks are indexed by source video timestamp quantized to 20 FPS.
+// frame mattes of video clips, keyed by source video timestamp.
+//
+// KEY GRANULARITY vs. INFERENCE RATE — these are deliberately different things.
+// Keys quantise time at MASK_CACHE_FPS so the map stays integer-indexed (the
+// export worker transfers it as-is), but we only ever store the frames we
+// ACTUALLY inferred. Playback then interpolates between the two surrounding
+// keyframes, so a 12 fps matte track still moves smoothly at 60 fps.
+//
+// The old code did the opposite: it duplicated each matte into `fillRatio`
+// neighbouring slots so lookups always hit, which (a) made interpolation
+// impossible — the "neighbours" were the same object — and (b) doubled the
+// number of ImageBitmaps cloned across to the export worker.
 
 export interface MaskAnalysisStatus {
   status: 'idle' | 'analyzing' | 'completed' | 'error';
@@ -413,13 +447,115 @@ export interface MaskAnalysisStatus {
   totalFrames: number;
 }
 
-const MASK_CACHE_FPS = 20; // Cache key granularity: 20 keys/sec for smooth playback lookup
+/** Key quantisation. 30 keys/sec resolves every inference rate we use (8–24 fps). */
+const MASK_CACHE_FPS = 30;
 export const preRenderedMaskCache = new Map<string, Map<number, ImageBitmap | HTMLCanvasElement>>();
 const analysisProgressMap = new Map<string, MaskAnalysisStatus>();
 const progressListeners = new Map<string, Set<(status: MaskAnalysisStatus) => void>>();
 
 function timeToKey(time: number): number {
   return Math.round(time * MASK_CACHE_FPS);
+}
+
+function keyToTime(key: number): number {
+  return key / MASK_CACHE_FPS;
+}
+
+// ── Sorted keyframe index (rebuilt lazily when the cache grows) ──────────────
+// `preRenderedMaskCache` is a plain Map because the export worker hydrates it
+// directly from a structured-clone payload. Interpolation needs ordered access,
+// so we memoise a sorted key array per clip and invalidate it on size change.
+
+interface KeyIndex {
+  size: number;
+  keys: Int32Array;
+  times: Float64Array;
+}
+
+const keyIndexCache = new Map<string, KeyIndex>();
+
+function getKeyIndex(clipId: string, map: Map<number, ImageBitmap | HTMLCanvasElement>): KeyIndex {
+  const cached = keyIndexCache.get(clipId);
+  if (cached && cached.size === map.size) return cached;
+
+  const keys = Int32Array.from(map.keys()).sort();
+  const times = new Float64Array(keys.length);
+  for (let i = 0; i < keys.length; i++) times[i] = keyToTime(keys[i]);
+
+  const index: KeyIndex = { size: map.size, keys, times };
+  keyIndexCache.set(clipId, index);
+  return index;
+}
+
+function invalidateKeyIndex(clipId?: string): void {
+  if (clipId) keyIndexCache.delete(clipId);
+  else keyIndexCache.clear();
+}
+
+/**
+ * Largest gap (seconds) we are willing to interpolate across. Beyond this the
+ * analysis simply hasn't reached this part of the clip yet, so we report a miss
+ * and let the live inference path take over rather than stretching a matte from
+ * half a second away across the subject.
+ */
+const MAX_MATTE_GAP_S = 0.34;
+
+export interface MatteSample {
+  /** Ready-to-composite matte, or null when this frame is "analysed, no subject". */
+  matte: MatteImage | null;
+  /** True when the cache genuinely covers this timestamp. */
+  hit: boolean;
+}
+
+/**
+ * Sample the pre-rendered matte track at `time`, interpolating between the two
+ * surrounding keyframes.
+ *
+ * This replaces the old nearest-neighbour lookup (`key`, then ±1, ±2, ±3) plus
+ * its broken "temporal alpha blend", which guessed the keyframe spacing from
+ * the model id, derived the blend phase from `time % interval` against an
+ * absolute grid, and mixed with `globalAlpha` + `source-over` — not a linear
+ * alpha blend, so the matte thinned out mid-transition and the edge pulsed.
+ */
+export function sampleMatteTrack(clipId: string, time: number): MatteSample {
+  const map = preRenderedMaskCache.get(clipId);
+  if (!map || map.size === 0 || !(time >= 0)) return { matte: null, hit: false };
+
+  const index = getKeyIndex(clipId, map);
+  const bracket = pickBracket(index.times, time);
+  if (!bracket) return { matte: null, hit: false };
+
+  const t0 = index.times[bracket.i0];
+  const t1 = index.times[bracket.i1];
+
+  // Outside the analysed span (or inside a hole the job hasn't filled yet).
+  if (bracket.i0 === bracket.i1) {
+    if (Math.abs(time - t0) > MAX_MATTE_GAP_S) return { matte: null, hit: false };
+  } else if (t1 - t0 > MAX_MATTE_GAP_S) {
+    return { matte: null, hit: false };
+  }
+
+  const m0 = map.get(index.keys[bracket.i0]);
+  const m1 = map.get(index.keys[bracket.i1]);
+  if (!m0) return { matte: null, hit: false };
+
+  const m0Empty = isEmptyMatte(m0);
+  const m1Empty = !m1 || isEmptyMatte(m1);
+
+  // Both neighbours say "no subject" → show the original frame untouched.
+  if (m0Empty && m1Empty) return { matte: null, hit: true };
+
+  // One side empty: hold the real matte rather than blending against a 1×1
+  // sentinel (which would smear the whole frame).
+  if (m0Empty) return { matte: m1 as MatteImage, hit: true };
+  if (m1Empty || !m1 || m0 === m1 || bracket.w <= 0.002) {
+    return { matte: m0 as MatteImage, hit: true };
+  }
+
+  return {
+    matte: lerpMatte(m0 as MatteImage, m1 as MatteImage, bracket.w, `pre:${clipId}#mix`),
+    hit: true,
+  };
 }
 
 export function subscribeClipBackgroundAnalysis(clipId: string, listener: (status: MaskAnalysisStatus) => void): () => void {
@@ -528,28 +664,52 @@ export async function startClipBackgroundAnalysis(
 
     const actualDuration = Math.min(isFinite(video.duration) ? Math.max(0.1, video.duration - startTime) : duration, duration);
 
-    // ── High-Accuracy Temporal Keyframe Strategy ───────────────────────────
-    // RVM (primary): recurrent memory keeps temporal coherence across keyframes,
-    // so 10 FPS sampling yields fluid, flicker-free mattes at ~50-100ms/frame.
-    // MediaPipe GPU (fallback, modelSelection 0/1) runs in ~5ms per frame —
-    // sampled at full 20 FPS. IS-Net (modelSelection 2 fallback) at 10 FPS.
-    const inferenceFps = rvmReady ? 10 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
-    const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
-    const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
-    const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
+    // ── Temporal Keyframe Strategy ─────────────────────────────────────────
+    // Keyframes are SPARSE and playback INTERPOLATES between them, so the rate
+    // only has to be high enough that linear interpolation tracks the subject —
+    // not high enough to look smooth on its own. RVM's recurrent memory keeps
+    // consecutive keyframes coherent, which is what makes 12 fps + interpolation
+    // read as continuous where 10 fps + hold read as stepping.
+    let inferenceFps = rvmReady
+      ? 12
+      : (modelSelection === 0 || modelSelection === 1)
+        ? 20   // MediaPipe GPU is ~5 ms/frame, so sample densely
+        : 8;   // IS-Net is the slow path — lean on interpolation instead
+    let totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
+
+    // ── Adaptive quality governor ──────────────────────────────────────────
+    // Matte resolution is the single biggest lever on edge quality, but it is
+    // also the biggest lever on how long the user stares at a progress bar, and
+    // the spread between a WebGPU laptop and a mid-range phone is ~10×. Start
+    // optimistic, measure the first few keyframes, and downshift once if the
+    // device can't keep up. Never upshift — oscillating the tier would reset
+    // RVM's recurrent state (infW/infH change) and undo its temporal coherence.
+    let rvmTier = modelSelection === 2 ? 768 : modelSelection === 1 ? 768 : 512;
+    let governorApplied = false;
+    let measuredMs = 0;
+    let measuredCount = 0;
+    const SLOW_FRAME_MS = 320;
+    const GOVERNOR_SAMPLE = 4;
 
     if (!preRenderedMaskCache.has(clipId)) {
       preRenderedMaskCache.set(clipId, new Map());
     }
     const maskMap = preRenderedMaskCache.get(clipId)!;
+    invalidateKeyIndex(clipId);
 
     let processed = 0;
 
-    for (let i = 0; i < totalKeyframes; i++) {
+    // Walk an explicit time cursor rather than `startTime + i / fps`: the
+    // governor can change `inferenceFps` mid-run, and an index-derived time
+    // would then jump forwards and tear a hole in the matte track.
+    const endTime = startTime + actualDuration;
+    let cursor = startTime;
+
+    for (let guard = 0; cursor <= endTime && guard < 20000; guard++, cursor += 1 / inferenceFps) {
       // Abort gracefully if job was cancelled or clip state cleaned up
       if (analysisProgressMap.get(clipId)?.status !== 'analyzing') break;
 
-      const targetTime = startTime + (i / inferenceFps);
+      const targetTime = cursor;
       if (targetTime > video.duration) break;
 
       const keyframeKey = timeToKey(targetTime);
@@ -583,6 +743,7 @@ export async function startClipBackgroundAnalysis(
 
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 360;
+      const frameStartedAt = performance.now();
 
       let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
       let noSubject = false;
@@ -591,8 +752,7 @@ export async function startClipBackgroundAnalysis(
         // ── PRIMARY: CapCut-grade RVM matting with recurrent temporal memory ──
         // No skin-heuristic gating: RVM handles empty scenes gracefully
         // (near-zero alpha), so gating would only introduce mask holes.
-        const rvmMaxDim = modelSelection === 2 ? 768 : 512;
-        const res = await segmentWithRVM(video, clipId, targetTime - startTime, rvmMaxDim).catch(() => null);
+        const res = await segmentWithRVM(video, clipId, targetTime - startTime, rvmTier).catch(() => null);
         if (res && res.coverage >= RVM_EMPTY_COVERAGE) {
           bitmap = res.bitmap;
         } else if (res) {
@@ -615,7 +775,10 @@ export async function startClipBackgroundAnalysis(
         // holes that flickered during playback.
         if (modelSelection === 0 || modelSelection === 1) {
           const mpType = modelSelection === 0 ? 'general' : 'landscape';
-          bitmap = await segmentSourceWithMediaPipe(video, mpType);
+          // Pass clipId + clip-local time: without them `stabilizeTemporalAlpha`
+          // is skipped entirely and consecutive keyframes jitter against each
+          // other, which interpolation then faithfully reproduces.
+          bitmap = await segmentSourceWithMediaPipe(video, mpType, clipId, targetTime - startTime);
         }
 
         if (!bitmap && modelSelection === 2) {
@@ -628,15 +791,32 @@ export async function startClipBackgroundAnalysis(
         if (!bitmap) noSubject = true;
       }
 
-      // Fill this keyframe AND neighboring cache slots with the SAME reference
-      // (zero extra memory, O(1) lookup). For no-subject frames, store the empty
-      // sentinel so consumers show the ORIGINAL frame instead of erasing pixels.
+      // Store ONLY the real keyframe. Playback interpolates across the gaps
+      // (see sampleMatteTrack) — duplicating the matte into neighbouring slots,
+      // as the old code did, made every "neighbour" identical and so defeated
+      // interpolation entirely. For no-subject frames, store the empty sentinel
+      // so consumers show the ORIGINAL frame instead of erasing pixels.
       const fillValue = noSubject ? getEmptyMaskSentinel() : bitmap;
       if (fillValue) {
-        for (let f = 0; f < fillRatio; f++) {
-          const fillKey = keyframeKey + f;
-          if (fillKey < totalCacheSlots + timeToKey(startTime)) {
-            maskMap.set(fillKey, fillValue);
+        maskMap.set(keyframeKey, fillValue);
+        invalidateKeyIndex(clipId);
+      }
+
+      // Governor: sample the first few keyframes, then downshift once if this
+      // device is too slow for the optimistic tier.
+      if (!governorApplied && rvmReady) {
+        measuredMs += performance.now() - frameStartedAt;
+        measuredCount++;
+        if (measuredCount >= GOVERNOR_SAMPLE) {
+          governorApplied = true;
+          const avg = measuredMs / measuredCount;
+          if (avg > SLOW_FRAME_MS && rvmTier > 512) {
+            rvmTier = 512;
+            inferenceFps = 10;
+            totalKeyframes = Math.max(processed + 1, Math.ceil(actualDuration * inferenceFps));
+            console.info(
+              `[aiBackground] Matte governor: ${avg | 0}ms/frame — dropping to 512px @ ${inferenceFps}fps`,
+            );
           }
         }
       }
@@ -731,7 +911,7 @@ export async function measureMaskCoverage(m: ImageBitmap | HTMLCanvasElement): P
     const w = m.width;
     const h = m.height;
     if (w <= 0 || h <= 0) return 0;
-    const c = getPooledCanvas('_cov_measure', w, h);
+    const c = getPooledCanvas(`_cov_measure_${w}x${h}`, w, h);
     const ctx = c.getContext('2d', { willReadFrequently: true });
     if (!ctx) return 1;
     ctx.clearRect(0, 0, w, h);
@@ -796,6 +976,20 @@ export function applySpillSuppression(
 
 /**
  * Refine mask alpha boundaries with Choke (shrink/expand) and Feather (Gaussian blur).
+ *
+ * Thin wrapper kept for backward compatibility — the work now happens in
+ * `matteEngine.refineMatte`, which is *dramatically* cheaper.
+ *
+ * The previous implementation ran at DESTINATION resolution and did a
+ * `getImageData` → JS loop → `putImageData` round-trip whenever `choke !== 0`.
+ * Because the stock cutout preset ships `choke: -1`, that fired on literally
+ * every rendered frame: ~2 million pixels read back from the GPU, mutated in
+ * JavaScript and uploaded again, 30–60 times a second. It alone blew the frame
+ * budget and is a large part of why the cutout stuttered.
+ *
+ * `refineMatte` instead works at a capped work resolution and expresses choke
+ * as GPU alpha-power passes (`destination-in` ⇒ aⁿ to erode, `source-over` ⇒
+ * 1−(1−a)ⁿ to dilate), so there is no readback at all.
  */
 export function refineMaskEdges(
   maskCanvas: HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
@@ -804,38 +998,14 @@ export function refineMaskEdges(
   choke: number = 0,
   feather: number = 0,
   poolKey: string = 'mask_refine'
-): PooledCanvas {
-  const temp = getPooledCanvas(`${poolKey}_edge`, width, height);
-  const tCtx = temp.getContext('2d');
-  if (!tCtx) return temp;
-
-  tCtx.clearRect(0, 0, width, height);
-  const blurVal = Math.max(0, feather + Math.abs(choke * 0.4));
-  if (blurVal > 0) {
-    tCtx.filter = `blur(${blurVal}px)`;
-    tCtx.drawImage(maskCanvas as any, 0, 0, width, height);
-    tCtx.filter = 'none';
-  } else {
-    tCtx.drawImage(maskCanvas as any, 0, 0, width, height);
-  }
-
-  if (choke !== 0) {
-    try {
-      const imgData = tCtx.getImageData(0, 0, width, height);
-      const data = imgData.data;
-      const shift = Math.round(choke * 15); // Map -10..10 to alpha threshold shift
-      for (let i = 3; i < data.length; i += 4) {
-        let a = data[i];
-        if (a > 0 && a < 255) {
-          data[i] = Math.max(0, Math.min(255, a + shift));
-        }
-      }
-      tCtx.putImageData(imgData, 0, 0);
-    } catch (e) {
-      // Ignore if canvas is tainted
-    }
-  }
-  return temp;
+): any {
+  return refineMatte(maskCanvas as MatteImage, {
+    choke,
+    feather,
+    destWidth: width,
+    destHeight: height,
+    poolKey: `refine:${poolKey}`,
+  });
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -866,8 +1036,8 @@ export function applyPreRenderedMaskIfAvailable(
   height: number,
   sourceElement: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement | ImageBitmap,
   clipId: string,
-  isPlaying: boolean,
-  modelSelection: number = 1,
+  _isPlaying: boolean,
+  _modelSelection: number = 1,
   choke: number = 0,
   feather: number = 0,
   spillSuppression: number = 0,
@@ -875,155 +1045,58 @@ export function applyPreRenderedMaskIfAvailable(
   extraOptions?: AiCutoutCompositeOptions
 ): boolean {
   const currentVideoTime = getVideoCurrentTime(sourceElement);
-  const clipPreRendered = preRenderedMaskCache.get(clipId);
-  if (!clipPreRendered || clipPreRendered.size === 0 || currentVideoTime < 0) {
-    return false;
-  }
+  if (currentVideoTime < 0) return false;
 
-  const targetKey = timeToKey(currentVideoTime);
-  let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
+  // Interpolated sample of the pre-rendered matte track. Note this no longer
+  // depends on `isPlaying` or `modelSelection`: interpolation is just as
+  // important while paused or scrubbing (where the old code snapped to the
+  // nearest keyframe), and the keyframe spacing is now read from the cache
+  // instead of being guessed from the model id.
+  const sample = sampleMatteTrack(clipId, currentVideoTime);
+  if (!sample.hit) return false;
 
-  // If exact frame isn't ready yet, look for closest analyzed frame within +-3 frames (~150ms)
-  if (!preMask) {
-    for (let offset = 1; offset <= 3; offset++) {
-      preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
-      if (preMask) break;
-    }
-  }
-  if (!preMask) return false;
+  // Analysed, but there is no subject in this frame → leave the frame alone.
+  if (!sample.matte) return true;
 
-  // Analyzed-but-no-subject frame → show the original frame (never erase pixels)
-  if (isEmptyMaskMarker(preMask)) return true;
+  const refined = refineMatte(sample.matte, {
+    choke,
+    feather,
+    destWidth: width,
+    destHeight: height,
+    poolKey: `pre:${clipId}`,
+  });
 
-  // Temporal Alpha Blending: smoothly interpolate between adjacent keyframe masks to eliminate popping/flicker
-  const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
-  const interval = 1 / inferenceFps;
-  const prevKey = timeToKey(currentVideoTime - (interval * 0.5));
-  const nextKey = timeToKey(currentVideoTime + (interval * 0.5));
-  const prevMask = clipPreRendered.get(prevKey);
-  const nextMask = clipPreRendered.get(nextKey);
-
-  if (prevMask && nextMask && prevMask !== nextMask && isPlaying &&
-      !isEmptyMaskMarker(prevMask) && !isEmptyMaskMarker(nextMask)) {
-    const localT = Math.max(0, Math.min(1, (currentVideoTime % interval) / interval));
-    const blendCanvas = getPooledCanvas(`${clipId}_temporal_blend`, width, height);
-    const bCtx = blendCanvas.getContext('2d');
-    if (bCtx) {
-      bCtx.clearRect(0, 0, width, height);
-      bCtx.globalAlpha = 1 - localT;
-      bCtx.drawImage(prevMask as any, 0, 0, width, height);
-      bCtx.globalAlpha = localT;
-      bCtx.drawImage(nextMask as any, 0, 0, width, height);
-      bCtx.globalAlpha = 1.0;
-      preMask = blendCanvas as any;
-    }
-  }
-
-  // Instant GPU texture composite with Choke and Feather
-  const refinedMask = (choke !== 0 || feather > 0)
-    ? refineMaskEdges(preMask!, width, height, choke, feather, `${clipId}_pre`)
-    : preMask;
-
-  const mode = extraOptions?.mode || 'remove';
-
-  if (mode === 'blur') {
-    // ── Mode: Portrait Background Blur (Bokeh) ──
-    const fgCanvas = getPooledCanvas(`${clipId}_cutout_fg`, width, height);
-    const fgCtx = fgCanvas.getContext('2d');
-    if (fgCtx) {
-      fgCtx.clearRect(0, 0, width, height);
-      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'destination-in';
-      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'source-over';
-      if (spillSuppression > 0) {
-        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
-      }
-
-      ctx.save();
-      ctx.clearRect(0, 0, width, height);
-      const blurPx = Math.max(1, extraOptions?.blurStrength ?? 12);
-      ctx.filter = `blur(${blurPx}px)`;
-      ctx.drawImage(sourceElement as any, 0, 0, width, height);
-      ctx.restore();
-
-      ctx.drawImage(fgCanvas, 0, 0, width, height);
-    }
-  } else if (mode === 'color') {
-    // ── Mode: Solid / Studio Backdrop Color ──
-    const fgCanvas = getPooledCanvas(`${clipId}_cutout_fg`, width, height);
-    const fgCtx = fgCanvas.getContext('2d');
-    if (fgCtx) {
-      fgCtx.clearRect(0, 0, width, height);
-      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'destination-in';
-      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'source-over';
-      if (spillSuppression > 0) {
-        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
-      }
-
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = extraOptions?.bgColor || '#1e1e24';
-      ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(fgCanvas, 0, 0, width, height);
-    }
-  } else if (mode === 'outline') {
-    // ── Mode: Sticker / Neon Outline (YouTube Shorts / TikTok style) ──
-    const fgCanvas = getPooledCanvas(`${clipId}_cutout_fg`, width, height);
-    const fgCtx = fgCanvas.getContext('2d');
-    if (fgCtx) {
-      fgCtx.clearRect(0, 0, width, height);
-      fgCtx.drawImage(sourceElement as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'destination-in';
-      fgCtx.drawImage(refinedMask as any, 0, 0, width, height);
-      fgCtx.globalCompositeOperation = 'source-over';
-      if (spillSuppression > 0) {
-        applySpillSuppression(fgCtx, width, height, spillSuppression, spillColor);
-      }
-
-      const strokeW = Math.max(1, extraOptions?.strokeWidth ?? 4);
-      const strokeCol = extraOptions?.strokeColor ?? '#ffffff';
-      const strokeCanvas = getPooledCanvas(`${clipId}_cutout_stroke`, width, height);
-      const sCtx = strokeCanvas.getContext('2d');
-      if (sCtx) {
-        sCtx.clearRect(0, 0, width, height);
-        sCtx.drawImage(refinedMask as any, 0, 0, width, height);
-        sCtx.globalCompositeOperation = 'source-in';
-        sCtx.fillStyle = strokeCol;
-        sCtx.fillRect(0, 0, width, height);
-        sCtx.globalCompositeOperation = 'source-over';
-      }
-
-      ctx.clearRect(0, 0, width, height);
-      ctx.save();
-      if (extraOptions?.strokeGlow) {
-        ctx.shadowColor = strokeCol;
-        ctx.shadowBlur = strokeW * 3;
-      }
-      const offsets = [-strokeW, 0, strokeW];
-      for (const ox of offsets) {
-        for (const oy of offsets) {
-          if (ox === 0 && oy === 0) continue;
-          ctx.drawImage(strokeCanvas, ox, oy, width, height);
-        }
-      }
-      ctx.restore();
-      ctx.drawImage(fgCanvas, 0, 0, width, height);
-    }
-  } else {
-    // ── Mode: Standard Transparent Cutout ──
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(refinedMask as any, 0, 0, width, height);
-    ctx.globalCompositeOperation = 'source-over';
-
-    if (spillSuppression > 0) {
-      applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
-    }
-  }
+  compositeCutout(
+    ctx,
+    width,
+    height,
+    sourceElement as CanvasImageSource,
+    refined,
+    extraOptions,
+    `pre:${clipId}`,
+    spillSuppression > 0
+      ? (target, w, h) => applySpillSuppression(target, w, h, spillSuppression, spillColor)
+      : undefined
+  );
   return true;
 }
 
+/**
+ * Live (non-pre-rendered) AI cutout.
+ *
+ * Interactive (isPlaying=true): fire-and-forget async segmentation. The render
+ *   loop NEVER waits for inference — it samples the clip's `LiveMatteTrack` and
+ *   moves on. When a fresh matte lands, `notifyMaskReady()` triggers a repaint.
+ *
+ * Export / paused (isPlaying=false): awaits a frame-accurate matte.
+ *
+ * ── What changed and why ─────────────────────────────────────────────────────
+ * The old version cached a single matte and swapped it the instant inference
+ * finished. Between two inferences (250–700 ms apart) the subject has moved
+ * several pixels, so the silhouette visibly jumped every time. Mattes now go
+ * through `LiveMatteTrack`, which cross-fades over ~110 ms, and an "empty
+ * frame" result dissolves the cutout instead of snapping the background back on.
+ */
 export async function applyAiBackgroundMask(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   width: number,
@@ -1034,7 +1107,13 @@ export async function applyAiBackgroundMask(
   playbackQuality: 'full' | 'balanced' | 'performance' = 'balanced',
   isPlaying: boolean = false,
   clipId: string = '_default',
-  options: { choke?: number; feather?: number; spillSuppression?: number; spillColor?: string } = {}
+  options: {
+    choke?: number;
+    feather?: number;
+    spillSuppression?: number;
+    spillColor?: string;
+    style?: AiCutoutCompositeOptions;
+  } = {}
 ): Promise<void> {
   try {
     const currentVideoTime = getVideoCurrentTime(sourceElement);
@@ -1042,158 +1121,167 @@ export async function applyAiBackgroundMask(
     const feather = (options.feather ?? 0) > 0 ? options.feather! : edgeBlur;
     const spillSuppression = options.spillSuppression ?? 0;
     const spillColor = options.spillColor;
+    const style = options.style;
 
-    // ── STEP 1: FAST O(1) PRE-RENDERED MASK LOOKUP WITH TEMPORAL ALPHA BLENDING ──
-    if (applyPreRenderedMaskIfAvailable(ctx, width, height, sourceElement, clipId, isPlaying, modelSelection, choke, feather, spillSuppression, spillColor)) {
+    // ── STEP 1: interpolated pre-rendered matte track (O(log n) + one GPU mix) ──
+    if (applyPreRenderedMaskIfAvailable(
+      ctx, width, height, sourceElement, clipId, isPlaying, modelSelection,
+      choke, feather, spillSuppression, spillColor, style,
+    )) {
       return;
     }
 
-    const cached = maskCacheMap.get(clipId);
-    let maskCanvas = cached ? cached.maskCanvas : null;
+    const track = getLiveTrack(clipId);
 
-    const updateIntervalMs = playbackQuality === 'performance' ? 700
-                           : playbackQuality === 'full' ? 250
-                           : 450;
+    // Seeking backwards or jumping more than a few frames invalidates the
+    // cross-fade history — otherwise we would ease from a matte belonging to a
+    // completely different part of the clip.
+    const lastTime = liveTrackTime.get(clipId);
+    if (lastTime !== undefined && currentVideoTime >= 0 &&
+        (currentVideoTime < lastTime - 0.05 || currentVideoTime - lastTime > 0.5)) {
+      track.reset();
+      resetRVMState(clipId);
+    }
+    if (currentVideoTime >= 0) liveTrackTime.set(clipId, currentVideoTime);
+
+    const updateIntervalMs = playbackQuality === 'performance' ? 260
+                           : playbackQuality === 'full' ? 90
+                           : 150;
 
     if (isPlaying) {
       // ── INTERACTIVE: non-blocking fire-and-forget ──
-      // Always composite the LAST cached mask (even stale). Only fire a new
-      // segmentation request if enough time has elapsed AND no request is in flight.
-      const elapsed = performance.now() - (cached?.lastUpdateTimestamp || 0);
-      const shouldRefresh = !maskCanvas || elapsed > updateIntervalMs;
+      const lastRun = liveTrackStamp.get(clipId) ?? 0;
+      const elapsed = performance.now() - lastRun;
+      const shouldRefresh = !track.hasMatte || elapsed > updateIntervalMs;
 
       if (shouldRefresh && !segmentingInFlight.has(clipId)) {
         segmentingInFlight.add(clipId);
+        liveTrackStamp.set(clipId, performance.now());
 
         const analysisActive = getClipAnalysisStatus(clipId).status === 'analyzing';
 
-        const segmentPromise = (async (): Promise<HTMLCanvasElement | null> => {
-          // PRIMARY: CapCut-grade RVM with recurrent temporal memory.
-          // Skipped while the pre-analysis job runs — it fills masks
-          // progressively and shares the per-clip recurrent state.
-          if (!analysisActive) {
-            const res = await segmentWithRVM(sourceElement as any, clipId, currentVideoTime, 384).catch(() => null);
-            if (res) {
-              if (res.coverage < RVM_EMPTY_COVERAGE) return null; // no subject → original frame
-              const resCanvas = document.createElement('canvas');
-              resCanvas.width = width;
-              resCanvas.height = height;
-              const rCtx = resCanvas.getContext('2d');
-              if (rCtx) rCtx.drawImage(res.bitmap, 0, 0, width, height);
-              res.bitmap.close();
-              return resCanvas;
-            }
-          }
-          // FALLBACK: MediaPipe GPU → IS-Net snapshot
-          return (modelSelection === 0 || modelSelection === 1)
-            ? segmentSourceWithMediaPipe(sourceElement as any, modelSelection === 0 ? 'general' : 'landscape')
-                .then(async (mpBitmap) => {
-                  if (mpBitmap) {
-                    const resCanvas = document.createElement('canvas');
-                    resCanvas.width = width;
-                    resCanvas.height = height;
-                    const rCtx = resCanvas.getContext('2d');
-                    if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
-                    mpBitmap.close();
-                    return resCanvas;
-                  }
-                  const snap = await captureSnapshotBlob(sourceElement, width, height, 512);
-                  if (!snap) return null;
-                  return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-                })
-            : captureSnapshotBlob(sourceElement, width, height, 640).then(async (snap) => {
-                if (!snap) return null;
-                return segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-              });
-        })();
-
-        segmentPromise
-          .then((result) => {
-            if (result) {
-              maskCacheMap.set(clipId, {
-                maskCanvas: result,
-                lastUpdateTimestamp: performance.now(),
-                lastVideoTime: getVideoCurrentTime(sourceElement),
-              });
-              notifyMaskReady();
-            }
-          })
-          .catch((err) => {
-            console.warn('[aiBackground] Playback segmentation error:', err);
-          })
-          .finally(() => {
-            segmentingInFlight.delete(clipId);
-          });
-      }
-      // Fall through — composite whatever cached mask we have.
-
-    } else {
-      // ── EXPORT / PAUSED: await for frame-accurate mask ──
-      const timeMoved = currentVideoTime >= 0 &&
-        Math.abs(currentVideoTime - (cached?.lastVideoTime ?? -1)) > 0.04;
-
-      if (!maskCanvas || timeMoved) {
-        // PRIMARY: CapCut-grade RVM matting
-        const rvmRes = await segmentWithRVM(sourceElement as any, clipId, currentVideoTime, modelSelection === 2 ? 768 : 512).catch(() => null);
-        if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
-          const resCanvas = document.createElement('canvas');
-          resCanvas.width = width;
-          resCanvas.height = height;
-          const rCtx = resCanvas.getContext('2d');
-          if (rCtx) rCtx.drawImage(rvmRes.bitmap, 0, 0, width, height);
-          rvmRes.bitmap.close();
-          maskCanvas = resCanvas;
-        }
-        if (!maskCanvas) {
-          if (modelSelection === 0 || modelSelection === 1) {
-            const mpType = modelSelection === 0 ? 'general' : 'landscape';
-            const mpBitmap = await segmentSourceWithMediaPipe(sourceElement as any, mpType);
-            if (mpBitmap) {
-              const resCanvas = document.createElement('canvas');
-              resCanvas.width = width;
-              resCanvas.height = height;
-              const rCtx = resCanvas.getContext('2d');
-              if (rCtx) rCtx.drawImage(mpBitmap, 0, 0, width, height);
-              mpBitmap.close();
-              maskCanvas = resCanvas;
-            }
-          }
-          if (!maskCanvas) {
-            const model = 'isnet_fp16';
-            const maxDim = modelSelection === 2 ? 1024 : 512;
-            const snap = await captureSnapshotBlob(sourceElement, width, height, maxDim);
-            if (snap) {
-              const result = await segmentBlob(snap.blob, snap.w, snap.h, model);
-              if (result) {
-                maskCanvas = result;
+        void (async () => {
+          try {
+            // PRIMARY: RVM with recurrent temporal memory. Skipped while the
+            // pre-analysis job runs — it walks keyframes sequentially through
+            // the same per-clip recurrent state.
+            if (!analysisActive) {
+              const res = await segmentWithRVM(sourceElement as any, clipId, currentVideoTime, 512)
+                .catch(() => null);
+              if (res) {
+                if (res.coverage < RVM_EMPTY_COVERAGE) {
+                  res.bitmap.close();
+                  track.pushOpaque();   // dissolve, don't snap
+                } else {
+                  track.push(res.bitmap);
+                  res.bitmap.close();
+                }
+                notifyMaskReady();
+                return;
               }
             }
+
+            // FALLBACK: MediaPipe GPU → IS-Net snapshot
+            if (modelSelection === 0 || modelSelection === 1) {
+              const mpBitmap = await segmentSourceWithMediaPipe(
+                sourceElement as any,
+                modelSelection === 0 ? 'general' : 'landscape',
+                clipId,
+                currentVideoTime,
+              );
+              if (mpBitmap) {
+                track.push(mpBitmap);
+                mpBitmap.close();
+                notifyMaskReady();
+                return;
+              }
+            }
+
+            const snap = await captureSnapshotBlob(sourceElement, width, height, 512);
+            if (!snap) return;
+            const isnet = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+            if (isnet) {
+              track.push(isnet);
+              notifyMaskReady();
+            }
+          } catch (err) {
+            console.warn('[aiBackground] Playback segmentation error:', err);
+          } finally {
+            segmentingInFlight.delete(clipId);
+          }
+        })();
+      }
+      // Fall through — composite whatever the track currently holds.
+
+    } else {
+      // ── EXPORT / PAUSED: await a frame-accurate matte ──
+      const lastTime2 = liveTrackTime.get(clipId);
+      const needsFresh = !track.hasMatte ||
+        lastTime2 === undefined ||
+        Math.abs(currentVideoTime - lastTime2) > 0.04;
+
+      if (needsFresh) {
+        let matte: MatteImage | null = null;
+        let empty = false;
+
+        const rvmRes = await segmentWithRVM(
+          sourceElement as any, clipId, currentVideoTime, modelSelection === 2 ? 1024 : 768,
+        ).catch(() => null);
+        if (rvmRes) {
+          if (rvmRes.coverage >= RVM_EMPTY_COVERAGE) matte = rvmRes.bitmap;
+          else { rvmRes.bitmap.close(); empty = true; }
+        }
+
+        if (!matte && !empty && (modelSelection === 0 || modelSelection === 1)) {
+          const mpType = modelSelection === 0 ? 'general' : 'landscape';
+          const mpBitmap = await segmentSourceWithMediaPipe(sourceElement as any, mpType, clipId, currentVideoTime);
+          if (mpBitmap) matte = mpBitmap;
+        }
+
+        if (!matte && !empty) {
+          const maxDim = modelSelection === 2 ? 1024 : 640;
+          const snap = await captureSnapshotBlob(sourceElement, width, height, maxDim);
+          if (snap) {
+            const result = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+            if (result) matte = result;
           }
         }
-        if (maskCanvas) {
-          maskCacheMap.set(clipId, {
-            maskCanvas: maskCanvas,
-            lastUpdateTimestamp: performance.now(),
-            lastVideoTime: currentVideoTime,
-          });
+
+        if (matte) {
+          track.push(matte);
+          if ('close' in matte && typeof (matte as any).close === 'function') (matte as any).close();
+        } else if (empty) {
+          track.pushOpaque();
         }
       }
     }
 
-    // ── Composite mask (GPU-accelerated drawImage, < 0.1ms) ──
-    if (!maskCanvas) return;
+    // ── Composite the current (cross-faded) matte ──
+    // `sample()` returns null once an "empty frame" has fully dissolved, which
+    // is the signal to leave the frame untouched rather than erase it.
+    const live = track.sample();
+    if (!live) return;
 
-    const refinedMask = (choke !== 0 || feather > 0)
-      ? refineMaskEdges(maskCanvas, width, height, choke, feather, `${clipId}_live`)
-      : (edgeBlur > 0 ? refineMaskEdges(maskCanvas, width, height, 0, edgeBlur, `${clipId}_blur`) : maskCanvas);
+    const refined = refineMatte(live, {
+      choke,
+      feather,
+      destWidth: width,
+      destHeight: height,
+      poolKey: `livefx:${clipId}`,
+    });
 
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(refinedMask as any, 0, 0, width, height);
-    ctx.globalCompositeOperation = 'source-over';
-
-    if (spillSuppression > 0) {
-      applySpillSuppression(ctx, width, height, spillSuppression, spillColor);
-    }
+    compositeCutout(
+      ctx,
+      width,
+      height,
+      sourceElement as CanvasImageSource,
+      refined,
+      style,
+      `livefx:${clipId}`,
+      spillSuppression > 0
+        ? (target, w, h) => applySpillSuppression(target, w, h, spillSuppression, spillColor)
+        : undefined,
+    );
   } catch (err) {
     console.error('[aiBackground] applyAiBackgroundMask error:', err);
   }
@@ -1326,12 +1414,17 @@ function closeMapTextures(map: Map<number, ImageBitmap | HTMLCanvasElement>): vo
 
 export function cleanupAiBackgroundResources(): void {
   canvasPool.clear();
+  clearSurfaces();
+  resetAllLiveTracks();
+  liveTrackTime.clear();
+  liveTrackStamp.clear();
   maskCacheMap.clear();
   segmentingInFlight.clear();
   for (const map of preRenderedMaskCache.values()) {
     closeMapTextures(map);
   }
   preRenderedMaskCache.clear();
+  invalidateKeyIndex();
   analysisProgressMap.clear();
 }
 
@@ -1339,27 +1432,56 @@ export function cleanupClipBackgroundState(clipId: string): void {
   for (const key of canvasPool.keys()) {
     if (key.startsWith(clipId)) canvasPool.delete(key);
   }
+  dropSurfaces(`pre:${clipId}`);
+  dropSurfaces(`refine:${clipId}`);
+  invalidateClipMatteContinuity(clipId);
   maskCacheMap.delete(clipId);
   segmentingInFlight.delete(clipId);
-  resetRVMState(clipId);
 
   const preMap = preRenderedMaskCache.get(clipId);
   if (preMap) {
     closeMapTextures(preMap);
     preRenderedMaskCache.delete(clipId);
   }
+  invalidateKeyIndex(clipId);
   updateClipAnalysisStatus(clipId, { status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
   resetClipDetectionState(clipId);
 }
 
+/**
+ * Drop cached mattes for a clip WITHOUT cancelling its analysis job.
+ * Used when the user seeks, so the live cross-fade doesn't ease from a matte
+ * belonging to a completely different moment in the clip.
+ */
+export function invalidateClipMatteContinuity(clipId: string): void {
+  // Cross-fade history, and the timestamp it is anchored to.
+  resetLiveTrack(clipId);
+  liveTrackTime.delete(clipId);
+  liveTrackStamp.delete(clipId);
+  // RVM is recurrent: its hidden state encodes "what the previous frame looked
+  // like". Carrying that across a seek smears the old silhouette into the new
+  // one for several frames.
+  resetRVMState(clipId);
+  // Per-pixel EMA used by the MediaPipe rung.
+  resetTemporalMaskState(clipId);
+  // Refined-edge scratch, so the next frame cannot blend against stale alpha.
+  dropSurfaces(`smart:${clipId}`);
+  dropSurfaces(`livefx:${clipId}`);
+}
+
 export function cleanupAllBackgroundState(): void {
   canvasPool.clear();
+  clearSurfaces();
+  resetAllLiveTracks();
+  liveTrackTime.clear();
+  liveTrackStamp.clear();
   maskCacheMap.clear();
   segmentingInFlight.clear();
   for (const map of preRenderedMaskCache.values()) {
     closeMapTextures(map);
   }
   preRenderedMaskCache.clear();
+  invalidateKeyIndex();
   analysisProgressMap.clear();
   resetAllDetectionState();
   resetAllRVMStates();
