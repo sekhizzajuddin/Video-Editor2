@@ -171,12 +171,27 @@ export function setCachedMask(clipId: string, mask: HTMLCanvasElement | null): v
 
 // ─── Scene Change Detection ─────────────────────────────────────────────────
 
-function createSampleCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  return { canvas, ctx };
+let cachedSampleCanvas: HTMLCanvasElement | null = null;
+let cachedSampleCtx: CanvasRenderingContext2D | null = null;
+
+function getSampleCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  try {
+    if (!cachedSampleCanvas) {
+      cachedSampleCanvas = document.createElement('canvas');
+      cachedSampleCanvas.width = w;
+      cachedSampleCanvas.height = h;
+      cachedSampleCtx = cachedSampleCanvas.getContext('2d', { willReadFrequently: true });
+    } else {
+      if (cachedSampleCanvas.width !== w || cachedSampleCanvas.height !== h) {
+        cachedSampleCanvas.width = w;
+        cachedSampleCanvas.height = h;
+      }
+    }
+    if (!cachedSampleCtx) return null;
+    return { canvas: cachedSampleCanvas, ctx: cachedSampleCtx };
+  } catch (_e) {
+    return null;
+  }
 }
 
 function computeLuminanceHistogram(
@@ -184,15 +199,26 @@ function computeLuminanceHistogram(
   sampleW: number = 64,
   sampleH: number = 36
 ): Uint32Array {
-  const { ctx } = createSampleCanvas(sampleW, sampleH);
-  ctx.drawImage(source as CanvasImageSource, 0, 0, sampleW, sampleH);
-  const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
-  const data = imageData.data;
   const histogram = new Uint32Array(16);
-  for (let i = 0; i < data.length; i += 4) {
-    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const bin = Math.min(15, (lum / 256) * 16 | 0);
-    histogram[bin]++;
+  if (!source) return histogram;
+  if ('readyState' in source && (source as HTMLVideoElement).readyState < 2) {
+    return histogram;
+  }
+
+  try {
+    const sample = getSampleCanvas(sampleW, sampleH);
+    if (!sample) return histogram;
+    const { ctx } = sample;
+    ctx.drawImage(source as CanvasImageSource, 0, 0, sampleW, sampleH);
+    const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      const bin = Math.min(15, (lum / 256) * 16 | 0);
+      histogram[bin]++;
+    }
+  } catch (_err) {
+    // Fail-open: ignore canvas tainting
   }
   return histogram;
 }
@@ -242,20 +268,37 @@ export interface DetectionResult {
 
 /**
  * Detect human presence using dual skin-tone detection.
- * Thread-safe: creates its own canvas internally.
+ * Thread-safe with pooled canvas and fail-open security guards.
  */
 export function detectHumanPresence(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   clipId: string,
   minSkinRatio: number = 0.008
 ): DetectionResult {
+  if (!source) {
+    return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+  }
+  if ('readyState' in source && (source as HTMLVideoElement).readyState < 2) {
+    return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+  }
+
   const SAMPLE_WIDTH = 64;
   const SAMPLE_HEIGHT = 36;
-  const { ctx } = createSampleCanvas(SAMPLE_WIDTH, SAMPLE_HEIGHT);
+  let data: Uint8ClampedArray;
 
-  ctx.drawImage(source as CanvasImageSource, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-  const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-  const data = imageData.data;
+  try {
+    const sample = getSampleCanvas(SAMPLE_WIDTH, SAMPLE_HEIGHT);
+    if (!sample) {
+      return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+    }
+    const { ctx } = sample;
+    ctx.drawImage(source as CanvasImageSource, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+    const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+    data = imageData.data;
+  } catch (_err) {
+    // Fail-open on cross-origin or canvas read error
+    return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+  }
 
   let skinPixels = 0;
   const totalPixels = SAMPLE_WIDTH * SAMPLE_HEIGHT;

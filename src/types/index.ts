@@ -304,6 +304,8 @@ export interface CustomFxItem {
 }
 
 export interface ClipFxSettings {
+  enabled?: boolean;
+  isCollapsed?: boolean;
   type: 'vfx_breakdown' | 'bw_to_color' | 'glitch' | 'old_film' | 'vhs' | 'cinematic_bars' | 'neon_glow' | 'rgb_split' | 'pixelate' | 'mirror' | 'rhythmic_mirror' | 'continuous_mirror' | 'action_zoom_pulse' | 'action_strobe' | 'action_shake' | 'quadrant_kaleidoscope' | 'subject_outline_flash' | 'zoom_blur' | 'lens_flare' | 'night_vision' | 'thermal' | 'style_anime' | 'style_watercolor' | 'style_papercut' | 'custom_html' | string;
   intensity: number;    // 0 to 100
   wipeAngle?: number;   // 0 to 360 (for wipes)
@@ -600,6 +602,7 @@ export interface MapAnimationSettings {
 // Timeline Clip
 export interface TimelineClip {
   id: string;
+  name?: string;
   mediaId: string;
   trackId: string;
   startTime: number;    // position on timeline

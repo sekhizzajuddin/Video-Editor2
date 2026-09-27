@@ -22,11 +22,8 @@
 
 import * as ortModule from 'onnxruntime-web';
 
-// Ambient declaration: Float16Array ships in modern browsers/Node (ES2026
-// proposal) but TS 5.9's standard libs don't include it yet. Guarded at
-// runtime by isRVMSupported().
-declare const Float16Array: any;
-type F16 = any;
+// Standard Uint16Array is used for ONNX 'float16' tensors (storing raw IEEE-754 half-precision bits)
+type F16 = Uint16Array;
 
 const RVM_MODEL_URL =
   'https://huggingface.co/inverseaibd/rvm_mobilenetv3_fp16/resolve/main/rvm_mobilenetv3_fp16.onnx';
@@ -70,8 +67,8 @@ function halfToFloat(h: number): number {
   return h & 0x8000 ? -f : f;
 }
 
-function float32ToFloat16Bulk(src: Float32Array): F16 {
-  const out = new Float16Array(src.length);
+function float32ToFloat16Bulk(src: Float32Array): Uint16Array {
+  const out = new Uint16Array(src.length);
   for (let i = 0; i < src.length; i++) out[i] = toHalf(src[i]);
   return out;
 }
@@ -79,7 +76,7 @@ function float32ToFloat16Bulk(src: Float32Array): F16 {
 // ── Session management ───────────────────────────────────────────────────────
 
 export function isRVMSupported(): boolean {
-  return typeof window !== 'undefined' && typeof Float16Array !== 'undefined';
+  return typeof window !== 'undefined';
 }
 
 let rvmSessionPromise: Promise<any | null> | null = null;
@@ -90,7 +87,12 @@ export function loadRVMSession(): Promise<any | null> {
   rvmSessionPromise = (async () => {
     try {
       const ort: any = (ortModule as any).default || ortModule;
-      try { ort.env.wasm.wasmPaths = RVM_WASM_CDN; } catch { /* already initialized */ }
+      try {
+        if (ort?.env?.wasm) {
+          ort.env.wasm.proxy = false; // Never use cross-origin Web Worker from CDN
+          ort.env.wasm.wasmPaths = RVM_WASM_CDN;
+        }
+      } catch { /* already initialized */ }
 
       const resp = await fetch(RVM_MODEL_URL);
       if (!resp.ok) throw new Error(`RVM model download failed: ${resp.status}`);
@@ -189,7 +191,7 @@ export interface RVMSegmentResult {
 async function tensorFloat16Array(t: any): Promise<F16> {
   if (t.location === 'gpu-buffer') {
     const buf = await t.getData();
-    return new Float16Array(buf.buffer, buf.byteOffset, buf.byteLength >> 1);
+    return new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength >> 1);
   }
   return t.data as F16;
 }
@@ -299,7 +301,7 @@ async function segmentWithRVMInner(
     const feeds: Record<string, any> = { src: srcTensor, downsample_ratio: dRatio };
     if (isJump) {
       for (let k = 1; k <= 4; k++) {
-        feeds[`r${k}i`] = new ort.Tensor('float16', new Float16Array(1), [1, 1, 1, 1]);
+        feeds[`r${k}i`] = new ort.Tensor('float16', new Uint16Array(1), [1, 1, 1, 1]);
       }
     } else {
       for (let k = 0; k < 4; k++) {

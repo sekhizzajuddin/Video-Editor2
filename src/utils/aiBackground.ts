@@ -152,20 +152,8 @@ if (typeof window !== 'undefined') {
   }
   (window as any).ort = ortObj;
 
-  // Force ort.env.wasm.proxy = true — make it read-only so the library can't
-  // override it to false when WebGPU is unavailable.
-  try {
-    const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-    if (!hasWebGPU && ortObj?.env?.wasm) {
-      Object.defineProperty(ortObj.env.wasm, 'proxy', {
-        get: () => true,
-        set: () => {}, // Silently ignore @imgly's `ort.env.wasm.proxy = false`
-        configurable: true,
-        enumerable: true,
-      });
-    }
-  } catch (_e) {
-    console.warn('[aiBackground] Could not force ONNX WASM proxy — playback may lag during AI background removal');
+  if (ortObj?.env?.wasm) {
+    ortObj.env.wasm.proxy = false;
   }
 }
 
@@ -499,7 +487,9 @@ export async function startClipBackgroundAnalysis(
   updateClipAnalysisStatus(clipId, { status: 'analyzing', progress: 0, processedFrames: 0, totalFrames: 1 });
 
   const video = document.createElement('video');
-  video.crossOrigin = 'anonymous';
+  if (!videoUrl.startsWith('blob:') && !videoUrl.startsWith('data:')) {
+    video.crossOrigin = 'anonymous';
+  }
   video.preload = 'auto';
   video.muted = true;
   video.playsInline = true;
@@ -628,8 +618,8 @@ export async function startClipBackgroundAnalysis(
           bitmap = await segmentSourceWithMediaPipe(video, mpType);
         }
 
-        if (!bitmap) {
-          const maxDim = modelSelection === 2 ? 768 : 512;
+        if (!bitmap && modelSelection === 2) {
+          const maxDim = 768;
           const snap = await captureSnapshotBlob(video, w, h, maxDim);
           if (snap) {
             bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
@@ -661,10 +651,9 @@ export async function startClipBackgroundAnalysis(
       });
       notifyMaskReady(); // Repaint preview if paused on this frame
 
-      // Yield to main thread every 4th keyframe (1ms) to keep UI responsive.
-      // Old: 8ms × 200 frames = 1.6s wasted. New: 1ms × 10 yields = 10ms total.
-      if (processed % 4 === 0) {
-        await new Promise(r => setTimeout(r, 1));
+      // Yield to main thread every 2 keyframes to maintain smooth 60 FPS UI
+      if (processed % 2 === 0) {
+        await new Promise(r => setTimeout(r, 4));
       }
     }
 
