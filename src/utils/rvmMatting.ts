@@ -22,12 +22,14 @@
 
 import * as ortModule from 'onnxruntime-web';
 
-// Standard Uint16Array is used for ONNX 'float16' tensors (storing raw IEEE-754 half-precision bits)
-type F16 = Uint16Array;
+// Support both native Float16Array (modern browsers) and Uint16Array fallback
+type F16 = any;
 
-const RVM_MODEL_URL =
+const RVM_LOCAL_MODEL_URL = '/models/rvm_mobilenetv3_fp16.onnx';
+const RVM_REMOTE_MODEL_URL =
   'https://huggingface.co/inverseaibd/rvm_mobilenetv3_fp16/resolve/main/rvm_mobilenetv3_fp16.onnx';
 
+const RVM_LOCAL_WASM_PATH = '/onnx/';
 // Exact installed version so the ORT JS glue and wasm binary always match ABI.
 const RVM_WASM_CDN =
   'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0-dev.20250206-d981b153d3/dist/';
@@ -36,6 +38,9 @@ const RVM_WASM_CDN =
 export const RVM_EMPTY_COVERAGE = 0.0008;
 
 // ── float16 helpers ──────────────────────────────────────────────────────────
+
+const NativeFloat16Array: any = typeof window !== 'undefined' ? (window as any).Float16Array : typeof globalThis !== 'undefined' ? (globalThis as any).Float16Array : undefined;
+const HasNativeFloat16 = typeof NativeFloat16Array !== 'undefined';
 
 const _f32 = new Float32Array(1);
 const _u32 = new Uint32Array(_f32.buffer);
@@ -73,6 +78,20 @@ function float32ToFloat16Bulk(src: Float32Array): Uint16Array {
   return out;
 }
 
+function createFloat16Tensor(ort: any, dataF32: Float32Array, dims: number[]): any {
+  if (HasNativeFloat16 && NativeFloat16Array) {
+    return new ort.Tensor('float16', new NativeFloat16Array(dataF32), dims);
+  }
+  return new ort.Tensor('float16', float32ToFloat16Bulk(dataF32), dims);
+}
+
+function createZeroStateTensor(ort: any): any {
+  if (HasNativeFloat16 && NativeFloat16Array) {
+    return new ort.Tensor('float16', new NativeFloat16Array(1), [1, 1, 1, 1]);
+  }
+  return new ort.Tensor('float16', new Uint16Array(1), [1, 1, 1, 1]);
+}
+
 // ── Session management ───────────────────────────────────────────────────────
 
 export function isRVMSupported(): boolean {
@@ -90,13 +109,25 @@ export function loadRVMSession(): Promise<any | null> {
       try {
         if (ort?.env?.wasm) {
           ort.env.wasm.proxy = false; // Never use cross-origin Web Worker from CDN
-          ort.env.wasm.wasmPaths = RVM_WASM_CDN;
+          ort.env.wasm.wasmPaths = RVM_LOCAL_WASM_PATH;
         }
       } catch { /* already initialized */ }
 
-      const resp = await fetch(RVM_MODEL_URL);
-      if (!resp.ok) throw new Error(`RVM model download failed: ${resp.status}`);
-      const modelBuf = new Uint8Array(await resp.arrayBuffer());
+      let modelBuf: Uint8Array | null = null;
+      try {
+        const resp = await fetch(RVM_LOCAL_MODEL_URL);
+        if (resp.ok) {
+          modelBuf = new Uint8Array(await resp.arrayBuffer());
+        }
+      } catch (e) {
+        console.warn('[rvmMatting] Failed to load local RVM model, trying remote CDN...', e);
+      }
+
+      if (!modelBuf) {
+        const resp = await fetch(RVM_REMOTE_MODEL_URL);
+        if (!resp.ok) throw new Error(`RVM model download failed: ${resp.status}`);
+        modelBuf = new Uint8Array(await resp.arrayBuffer());
+      }
 
       const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
       try {
@@ -106,6 +137,12 @@ export function loadRVMSession(): Promise<any | null> {
         });
       } catch (epErr) {
         console.warn('[rvmMatting] WebGPU session failed, retrying with pure WASM:', epErr);
+        // Fallback to CDN wasm if local wasm threw
+        try {
+          if (ort?.env?.wasm) {
+            ort.env.wasm.wasmPaths = RVM_WASM_CDN;
+          }
+        } catch {}
         return await ort.InferenceSession.create(modelBuf, {
           executionProviders: ['wasm'],
           graphOptimizationLevel: 'all',
@@ -192,6 +229,9 @@ export interface RVMSegmentResult {
 async function tensorFloat16Array(t: any): Promise<F16> {
   if (t.location === 'gpu-buffer') {
     const buf = await t.getData();
+    if (HasNativeFloat16 && NativeFloat16Array) {
+      return new NativeFloat16Array(buf.buffer, buf.byteOffset, buf.byteLength >> 1);
+    }
     return new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength >> 1);
   }
   return t.data as F16;
@@ -285,7 +325,7 @@ async function segmentWithRVMInner(
       srcF32[2 * npix + p] = img[i + 2] * 0.00392156862745098;
     }
     const ort: any = (ortModule as any).default || ortModule;
-    const srcTensor = new ort.Tensor('float16', float32ToFloat16Bulk(srcF32), [1, 3, infH, infW]);
+    const srcTensor = createFloat16Tensor(ort, srcF32, [1, 3, infH, infW]);
     // Downsample ratio must be a pure function of the canonical tier so the
     // recurrent state stays compatible across calls from different pipelines.
     const dRatio = new ort.Tensor('float32', new Float32Array([maxDim === 768 ? 0.25 : 0.375]), [1]);
@@ -302,7 +342,7 @@ async function segmentWithRVMInner(
     const feeds: Record<string, any> = { src: srcTensor, downsample_ratio: dRatio };
     if (isJump) {
       for (let k = 1; k <= 4; k++) {
-        feeds[`r${k}i`] = new ort.Tensor('float16', new Uint16Array(1), [1, 1, 1, 1]);
+        feeds[`r${k}i`] = createZeroStateTensor(ort);
       }
     } else {
       for (let k = 0; k < 4; k++) {
@@ -333,8 +373,9 @@ async function segmentWithRVMInner(
     const maskData = new ImageData(pw, ph);
     const data32 = new Uint32Array(maskData.data.buffer);
     let sum = 0;
+    const isNativeF16 = HasNativeFloat16 && (phaHalf instanceof (window as any).Float16Array || phaHalf.constructor?.name === 'Float16Array');
     for (let i = 0; i < phaHalf.length; i++) {
-      const a = halfToFloat(phaHalf[i]);
+      const a = isNativeF16 ? (phaHalf as any)[i] : halfToFloat(phaHalf[i]);
       sum += a;
       const alpha = a <= 0 ? 0 : a >= 1 ? 255 : Math.round(a * 255);
       data32[i] = (alpha << 24) | 0x00FFFFFF;

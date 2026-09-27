@@ -76,6 +76,7 @@ import {
 
 import {
   segmentWithRVM,
+  loadRVMSession,
   RVM_EMPTY_COVERAGE,
 } from './rvmMatting';
 
@@ -280,9 +281,25 @@ async function runSegmentationAsync(
     let maskCanvas: any = null;
 
     const videoTime = source && 'currentTime' in source ? (source as any).currentTime : 0;
+    const isVideo = ('videoWidth' in source && (source as HTMLVideoElement).videoWidth > 0) || videoTime > 0;
 
-    // Try 0: MediaPipe GPU on full frame (ultra-fast ~5ms, zero network lag)
-    if (tryMediaPipe) {
+    // Try 0: RVM (ByteDance Robust Video Matting - CapCut-grade temporal recurrent alpha)
+    const rvmSession = await loadRVMSession().catch(() => null);
+    if (rvmSession && isVideo) {
+      const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 512).catch(() => null);
+      if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
+        maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
+        const mCtx = maskCanvas.getContext('2d');
+        if (mCtx) {
+          mCtx.clearRect(0, 0, targetW, targetH);
+          mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
+        }
+        rvmRes.bitmap.close();
+      }
+    }
+
+    // Try 1: MediaPipe GPU on full frame (ultra-fast ~5ms, zero network lag fallback)
+    if (!maskCanvas && tryMediaPipe) {
       const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
       if (mpBitmap) {
         const bufKey = `${clipId}_async_idx`;
@@ -298,24 +315,9 @@ async function runSegmentationAsync(
       }
     }
 
-    // Try 1: RVM (CapCut-grade recurrent memory fallback)
-    const analysisActive = getClipAnalysisStatus(clipId).status === 'analyzing';
-    if (!maskCanvas && !analysisActive) {
-      const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 384).catch(() => null);
-      if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
-        maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
-        const mCtx = maskCanvas.getContext('2d');
-        if (mCtx) {
-          mCtx.clearRect(0, 0, targetW, targetH);
-          mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
-        }
-        rvmRes.bitmap.close();
-      }
-    }
-
     // Try 2: ONNX full frame fallback
     if (!maskCanvas) {
-      const snap = await captureSnapshotBlob(source, sourceW, sourceH, 384);
+      const snap = await captureSnapshotBlob(source, sourceW, sourceH, 512);
       if (snap) {
         maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
       }
@@ -354,25 +356,11 @@ async function runSegmentationSync(
   let maskCanvas: HTMLCanvasElement | null = null;
 
   const videoTime = (source as any).currentTime || 0;
+  const isVideo = ('videoWidth' in source && (source as HTMLVideoElement).videoWidth > 0) || videoTime > 0;
 
-  // Try 0: MediaPipe GPU (instant ~5ms high-accuracy segmentation)
-  if (tryMediaPipe) {
-    const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
-    if (mpBitmap) {
-      maskCanvas = document.createElement('canvas');
-      maskCanvas.width = targetW;
-      maskCanvas.height = targetH;
-      const mCtx = maskCanvas.getContext('2d');
-      if (mCtx) {
-        mCtx.clearRect(0, 0, targetW, targetH);
-        mCtx.drawImage(mpBitmap, 0, 0, targetW, targetH);
-      }
-      mpBitmap.close();
-    }
-  }
-
-  // Try 1: RVM (CapCut-grade recurrent memory fallback)
-  if (!maskCanvas) {
+  // Try 0: RVM (CapCut-grade recurrent memory matting at high resolution)
+  const rvmSession = await loadRVMSession().catch(() => null);
+  if (rvmSession && isVideo) {
     const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, targetW >= 768 ? 768 : 512).catch(() => null);
     if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
       maskCanvas = document.createElement('canvas');
@@ -384,6 +372,22 @@ async function runSegmentationSync(
         mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
       }
       rvmRes.bitmap.close();
+    }
+  }
+
+  // Try 1: MediaPipe GPU (instant ~5ms fallback)
+  if (!maskCanvas && tryMediaPipe) {
+    const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
+    if (mpBitmap) {
+      maskCanvas = document.createElement('canvas');
+      maskCanvas.width = targetW;
+      maskCanvas.height = targetH;
+      const mCtx = maskCanvas.getContext('2d');
+      if (mCtx) {
+        mCtx.clearRect(0, 0, targetW, targetH);
+        mCtx.drawImage(mpBitmap, 0, 0, targetW, targetH);
+      }
+      mpBitmap.close();
     }
   }
 

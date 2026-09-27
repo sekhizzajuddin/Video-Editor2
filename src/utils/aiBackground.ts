@@ -509,15 +509,22 @@ export async function startClipBackgroundAnalysis(
   videoUrl: string,
   startTime: number,
   duration: number,
-  modelSelection: 0 | 1 | 2 = 1  // Default 1: HD Landscape 16:9 High-Accuracy MediaPipe
+  modelSelection: 0 | 1 | 2 = 2,  // Default 2: Studio RVM High-Accuracy Neural Matting
+  forceRefresh: boolean = false
 ): Promise<void> {
+  if (forceRefresh) {
+    preRenderedMaskCache.delete(clipId);
+    analysisProgressMap.delete(clipId);
+    resetRVMState(clipId);
+  }
+
   const inFlight = activeAnalysisPromises.get(clipId);
   if (inFlight) {
     return inFlight;
   }
 
   const existing = analysisProgressMap.get(clipId);
-  if (existing && existing.status === 'completed') {
+  if (existing && existing.status === 'completed' && !forceRefresh) {
     return;
   }
 
@@ -535,7 +542,7 @@ async function runClipBackgroundAnalysisInternal(
   videoUrl: string,
   startTime: number,
   duration: number,
-  modelSelection: 0 | 1 | 2 = 1
+  modelSelection: 0 | 1 | 2 = 2
 ): Promise<void> {
   // If it's an image clip or data URL, run instant static image segmentation (5ms)
   const isImage = videoUrl.match(/\.(png|jpe?g|webp|gif|bmp|svg)$/i) || videoUrl.startsWith('data:image/');
@@ -693,19 +700,31 @@ async function runClipBackgroundAnalysisInternal(
         // ── PRIMARY: CapCut-grade RVM matting with recurrent temporal memory ──
         // No skin-heuristic gating: RVM handles empty scenes gracefully
         // (near-zero alpha), so gating would only introduce mask holes.
-        const rvmMaxDim = modelSelection === 2 ? 768 : 512;
+        const rvmMaxDim = 512;
         const res = await segmentWithRVM(segmentationSource as any, clipId, targetTime - startTime, rvmMaxDim).catch(() => null);
         if (res && res.coverage >= RVM_EMPTY_COVERAGE) {
           bitmap = res.bitmap;
         } else if (res) {
           // RVM (person-focused) sees no subject — could be an object clip.
           // Try the general-purpose IS-Net model for this keyframe.
-          const maxDim = modelSelection === 2 ? 768 : 512;
+          const maxDim = 512;
           const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
           if (snap) {
             bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
           }
           if (!bitmap) noSubject = true;
+        }
+
+        // Robust fallback: if RVM failed on this keyframe, try MediaPipe then IS-Net
+        if (!bitmap && !noSubject) {
+          bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, 'landscape', clipId, targetTime).catch(() => null);
+          if (!bitmap) {
+            const maxDim = 512;
+            const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
+            if (snap) {
+              bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
+            }
+          }
         }
       } else {
         // ── FALLBACK (no RVM): MediaPipe / IS-Net legacy pipeline ──
@@ -916,7 +935,10 @@ export function refineMaskEdges(
   if (!tCtx) return temp;
 
   tCtx.clearRect(0, 0, width, height);
-  const blurVal = Math.max(0, feather + Math.abs(choke * 0.4));
+  tCtx.imageSmoothingEnabled = true;
+  tCtx.imageSmoothingQuality = 'high';
+
+  const blurVal = Math.max(0, feather);
   if (blurVal > 0) {
     tCtx.filter = `blur(${blurVal}px)`;
     tCtx.drawImage(maskCanvas as any, 0, 0, width, height);

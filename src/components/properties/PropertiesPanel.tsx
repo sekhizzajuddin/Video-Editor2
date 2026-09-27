@@ -88,7 +88,7 @@ import {
   BeatSyncSection,
 } from './tabs/effects';
 import { scheduleSaveSnapshot } from '@/utils/snapshotScheduler';
-import { loadBackgroundRemover, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis } from '@/utils/aiBackground';
+import { loadBackgroundRemover, cleanupClipBackgroundState, startClipBackgroundAnalysis, subscribeClipBackgroundAnalysis, getClipAnalysisStatus } from '@/utils/aiBackground';
 import { loadRVMSession } from '@/utils/rvmMatting';
 import PipTab from './tabs/PipTab';
 import { ENTER_EXIT_PRESETS } from '@/utils/clipEnterExitEngine';
@@ -754,6 +754,23 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       setBgAnalysisStatus({ status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
       return;
     }
+    const current = getClipAnalysisStatus(selectedClip.id);
+    setBgAnalysisStatus({ ...current });
+
+    if (current.status === 'idle') {
+      const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId || m.url === selectedClip.mediaId);
+      const clipUrl = mediaItem?.url || (selectedClip as any).url || (selectedClip as any).sourceUrl || '';
+      if (clipUrl) {
+        startClipBackgroundAnalysis(
+          selectedClip.id,
+          clipUrl,
+          selectedClip.trimStart || 0,
+          selectedClip.duration || 5,
+          2
+        );
+      }
+    }
+
     return subscribeClipBackgroundAnalysis(selectedClip.id, (st) => {
       setBgAnalysisStatus({ ...st });
     });
@@ -2833,8 +2850,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-medium">ACTIVE</span>
                       )}
                       {selectedClip.aiBackground?.enabled && bgAnalysisStatus?.status === 'analyzing' && (
-                        <span className="text-[9px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 px-1.5 py-0.5 rounded font-medium">
-                          Caching {bgAnalysisStatus.progress}%
+                        <span className="text-[9px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 px-1.5 py-0.5 rounded font-medium animate-pulse">
+                          Analyzing {bgAnalysisStatus.progress}%
+                        </span>
+                      )}
+                      {selectedClip.aiBackground?.enabled && bgAnalysisStatus?.status === 'completed' && (
+                        <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-medium">
+                          100% STUDIO
                         </span>
                       )}
                     </h4>
@@ -2857,22 +2879,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       strokeWidth: 4,
                       strokeGlow: false,
                       bgColor: '#121316',
-                      modelSelection: 1,
+                      modelSelection: 2,
                     };
                     updateClip(selectedClip.id, {
-                      aiBackground: { ...existing, enabled }
+                      aiBackground: { ...existing, enabled, modelSelection: 2 }
                     });
                     scheduleSaveSnapshot('Toggle AI Cutout');
                     if (enabled) {
                       loadRVMSession().catch(() => {});
-                      const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId);
-                      if (mediaItem && (mediaItem.type === 'video' || (mediaItem.url && mediaItem.url.match(/\.(mp4|webm|mov|mkv)$/i)))) {
+                      const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId || m.url === selectedClip.mediaId);
+                      const clipUrl = mediaItem?.url || (selectedClip as any).url || (selectedClip as any).sourceUrl || '';
+                      if (clipUrl) {
                         startClipBackgroundAnalysis(
                           selectedClip.id,
-                          mediaItem.url || '',
+                          clipUrl,
                           selectedClip.trimStart || 0,
                           selectedClip.duration || 5,
-                          existing.modelSelection ?? 1
+                          2,
+                          true
                         );
                       }
                     } else {
@@ -2891,6 +2915,73 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
               {selectedClip.aiBackground?.enabled && (
                 <div className="mt-3 pt-3 border-t border-[var(--theme-border)]/40 space-y-3">
+                  {/* Analysis Progress Card - CapCut / VEED Style */}
+                  {bgAnalysisStatus?.status === 'analyzing' && (
+                    <div className="bg-gradient-to-r from-cyan-950/50 via-slate-900 to-blue-950/50 border border-cyan-500/40 rounded-lg p-3 shadow-md shadow-cyan-950/40">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                          </span>
+                          <span className="text-[11px] font-semibold text-cyan-200">
+                            Analyzing Background with AI...
+                          </span>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-cyan-300">
+                          {bgAnalysisStatus.progress}%
+                        </span>
+                      </div>
+                      
+                      <div className="w-full bg-[#14151a] rounded-full h-2 overflow-hidden border border-cyan-500/20 p-0.5">
+                        <div
+                          className="bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 h-full rounded-full transition-all duration-300 ease-out shadow-sm shadow-cyan-400/50"
+                          style={{ width: `${Math.max(4, bgAnalysisStatus.progress)}%` }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between mt-2 text-[9px] text-[var(--theme-text-muted)]">
+                        <span className="flex items-center gap-1 text-cyan-400">
+                          <Sparkles className="w-2.5 h-2.5 text-cyan-400" />
+                          <span>ByteDance RVM Neural Matting</span>
+                        </span>
+                        <span className="font-mono text-cyan-200">
+                          {bgAnalysisStatus.processedFrames} / {bgAnalysisStatus.totalFrames} frames
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {bgAnalysisStatus?.status === 'completed' && (
+                    <div className="flex items-center justify-between bg-emerald-950/30 border border-emerald-500/30 rounded-lg px-2.5 py-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <span className="text-[10px] font-medium text-emerald-300">
+                          AI Matte Ready (100% Studio Quality)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId || m.url === selectedClip.mediaId);
+                          const clipUrl = mediaItem?.url || (selectedClip as any).url || (selectedClip as any).sourceUrl || '';
+                          if (clipUrl) {
+                            startClipBackgroundAnalysis(
+                              selectedClip.id,
+                              clipUrl,
+                              selectedClip.trimStart || 0,
+                              selectedClip.duration || 5,
+                              2,
+                              true
+                            );
+                          }
+                        }}
+                        className="text-[9px] text-cyan-400 hover:text-cyan-300 hover:underline font-medium"
+                      >
+                        Re-analyze
+                      </button>
+                    </div>
+                  )}
                   {/* Mode Selector Chips */}
                   <div>
                     <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium mb-1.5">Cutout Style</label>
