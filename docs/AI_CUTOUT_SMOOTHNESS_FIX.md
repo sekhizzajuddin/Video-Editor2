@@ -344,3 +344,48 @@ before-first / after-last / single-key / exact-hit edges, `chokePasses`
 quantisation, `featherRadius` scaling and its dead zone, `lerpAlphaPlanes`
 endpoint and midpoint exactness, and `boxBlurAlpha` (in-place, alpha-only,
 separable, energy-preserving, colour channels untouched).
+
+---
+
+## Merge with `main`'s `cut out` commit (6eb1b64d)
+
+`main` independently landed on the **same float16 root cause** while this work
+was in flight. The two fixes differ in approach, and main carried several
+hardening changes this branch did not have.
+
+### Kept from this branch
+
+**Runtime container probe over a hard-coded `Uint16Array`.** ORT picks its
+float16 container from `typeof Float16Array`:
+
+| Native `Float16Array` | ORT expects |
+| --- | --- |
+| absent (most browsers today) | raw IEEE-754 half **bits** in a `Uint16Array` |
+| present (Chrome 135+, Node 24+) | **real values** in a `Float16Array` |
+
+Hard-coding `Uint16Array` fixes today's browsers and silently re-breaks the
+moment `Float16Array` ships — the identical bug, just inverted. `NATIVE_F16` +
+`allocHalf` / `readHalf` / `tensorHalfArray` handle both. `isRVMSupported()`
+also stays worker-safe (`window || self`) so the export worker can use RVM.
+
+### Adopted from `main`
+
+* **`ort.env.wasm.proxy = false`.** ORT builds its proxy worker from the CDN
+  origin serving the WASM, and under this app's COOP/COEP headers that
+  cross-origin worker cannot start — so inference died outright rather than
+  merely running synchronously. An earlier revision had pinned it to `true`
+  with `Object.defineProperty`; the header comments in `aiBackground.ts` and
+  `rvmMatting.ts` still described that and have been rewritten.
+* **Fail-open guards in `humanDetection.ts`** — `readyState < 2` checks and
+  `try/catch` around `getImageData`, returning "assume a subject is present"
+  when the canvas is cross-origin tainted. Merged with this branch's
+  size-keyed, OffscreenCanvas-first scratch pool (which now returns `null`
+  instead of throwing, as those guards expect) and its `clearRect` before each
+  `drawImage`.
+* **`video.crossOrigin = 'anonymous'` only for non-`blob:`/`data:` URLs.**
+* **`try/catch` around `applyAiBackgroundSmart`** in `CanvasRenderingEngine`.
+* **`modelSelection` default 1** (was 2). The adaptive governor starts at the
+  768 tier for both 1 and 2, then downshifts on slow hardware, so this mainly
+  affects which fallback rungs are eligible.
+* **`(t.type as string) === 'image'`** in `useTimelineDrop` — behaviour-
+  preserving, rather than deleting the dead branch.
