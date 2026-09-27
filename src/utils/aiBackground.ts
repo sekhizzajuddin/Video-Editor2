@@ -174,6 +174,12 @@ export async function segmentSourceWithMediaPipe(
 // This intercepts the library's `ort.env.wasm.proxy = false` assignment and
 // keeps it pinned to `true`, so ONNX runs inference in its internal Web Worker
 // regardless of WebGPU availability.
+//
+// A previous regression replaced the pin below with a plain `proxy = false`,
+// forcing IS-Net + RVM inference onto the MAIN thread (50-300ms per frame) —
+// that was the root cause of the stuttering / "not smooth" cutout playback.
+// The ORT wasm binaries are bundled same-origin under /onnx/, so the proxy
+// worker loads safely.
 if (typeof window !== 'undefined') {
   const ortObj: any = (ortModule as any).default || ortModule;
 
@@ -183,8 +189,27 @@ if (typeof window !== 'undefined') {
   }
   (window as any).ort = ortObj;
 
-  if (ortObj?.env?.wasm) {
-    ortObj.env.wasm.proxy = false;
+  const wasmEnv: any = ortObj?.env?.wasm;
+  if (wasmEnv) {
+    let proxyOn = true;
+    try {
+      // Pinned accessor: @imgly/background-removal hard-codes
+      // `ort.env.wasm.proxy = false` when WebGPU is absent; those writes are
+      // silently ignored now, keeping inference in the worker thread.
+      Object.defineProperty(wasmEnv, 'proxy', {
+        configurable: true,
+        get: () => proxyOn,
+        set: () => { /* pinned ON — ignore library downgrades */ },
+      });
+    } catch (_e) {
+      try { wasmEnv.proxy = true; } catch (__e) { /* frozen env */ }
+    }
+    try { wasmEnv.wasmPaths = '/onnx/'; } catch (_e) { /* already initialized */ }
+
+    // Escape hatch: rvmMatting disables the proxy only when it had to fall
+    // back to a cross-origin CDN for the wasm binaries (a CDN worker would
+    // be blocked). With the local /onnx/ assets this always stays enabled.
+    (window as any).__ortWasmProxyControl = (on: boolean) => { proxyOn = !!on; };
   }
 }
 
@@ -759,7 +784,11 @@ async function runClipBackgroundAnalysisInternal(
         // No skin-heuristic gating: RVM handles empty scenes gracefully
         // (near-zero alpha), so gating would only introduce mask holes.
         const rvmMaxDim = 512;
-        const res = await segmentWithRVM(segmentationSource as any, clipId, targetTime - startTime, rvmMaxDim).catch((e) => {
+        // Pass ABSOLUTE media time (targetTime, not targetTime - startTime):
+        // the interactive preview passes video.currentTime (absolute), and RVM's
+        // recurrent state compares lastVideoTime to detect seeks — mixed time
+        // bases forced a state reset on every alternating caller (flicker).
+        const res = await segmentWithRVM(segmentationSource as any, clipId, targetTime, rvmMaxDim).catch((e) => {
           console.warn('[aiBackground] RVM keyframe error:', e);
           return null;
         });
@@ -1073,43 +1102,31 @@ export function applyPreRenderedMaskIfAvailable(
   const targetKey = timeToKey(currentVideoTime);
   let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
 
-  // If exact frame isn't ready yet, look for closest analyzed frame within +-6 frames (~300ms)
-  const maxSearchOffset = extraOptions?.isExporting ? 10 : 6;
+  // If exact frame isn't ready yet, look for closest analyzed frame within +-10 frames (~500ms)
+  const maxSearchOffset = 10;
   if (!preMask) {
     for (let offset = 1; offset <= maxSearchOffset; offset++) {
       preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
       if (preMask) break;
     }
   }
-  // During export only, if keyframe falls slightly outside, allow nearest-key fallback within max 10 frames (~500ms).
-  // CRITICAL: NEVER do an unbounded search (minDiff = Infinity) across the entire video, which previously
-  // grabbed key 0 (0.0s) when previewing at 7.54s, destroying the live cutout!
-  if (!preMask && extraOptions?.isExporting && clipPreRendered.size > 0) {
-    let closestKey = -1;
-    let minDiff = 10;
-    for (const k of clipPreRendered.keys()) {
-      const diff = Math.abs(k - targetKey);
-      if (diff <= minDiff) {
-        minDiff = diff;
-        closestKey = k;
-      }
-    }
-    if (closestKey >= 0) {
-      preMask = clipPreRendered.get(closestKey);
-    }
+  if (!preMask) {
+    // FIX (flicker): Once a clip has ANY pre-rendered analysis data, that cache is
+    // the SINGLE source of truth for the interactive preview. Falling back to the
+    // live per-frame pipeline here composited masks from a DIFFERENT inference
+    // engine/resolution — the alternating edges are exactly the CapCut-style
+    // "flickering cutout" bug. Show the nearest available analyzed mask instead;
+    // if the playhead is still ahead of the analysis, leave the original frame
+    // (it will be replaced on the next repaint once analysis catches up).
+    if (extraOptions?.isExporting) return false;
+    const status = analysisProgressMap.get(clipId);
+    if (status && status.status === 'analyzing') return true; // untouched frame, analysis in flight
+    return false;
   }
-  if (!preMask) return false;
 
-  // Analyzed-but-no-subject frame:
-  // In interactive preview, NEVER return true on an empty sentinel — seeking/decoding artifacts
-  // or false negatives in background analysis must not cancel live GPU cutout. Return false so
-  // live MediaPipe can segment the visible frame on canvas.
-  if (isEmptyMaskMarker(preMask)) {
-    if (extraOptions?.isExporting) {
-      return true; // Keep original frame during export
-    }
-    return false; // Fall back to live segmentation in interactive preview
-  }
+  // Analyzed-but-no-subject frame → show the ORIGINAL frame. Never fall through
+  // to the live pipeline (source alternation = flicker).
+  if (isEmptyMaskMarker(preMask)) return true;
 
   // Temporal Alpha Blending: smoothly interpolate between adjacent keyframe masks to eliminate popping/flicker
   const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
@@ -1136,8 +1153,15 @@ export function applyPreRenderedMaskIfAvailable(
   }
 
   // Instant GPU texture composite with Choke and Feather
+  // PERF (flicker/jank): refine at the MASK's native resolution (512-row RVM
+  // output) instead of the full display canvas. The default cutout has
+  // choke=-1 which previously forced a per-frame getImageData pixel loop at
+  // 1080p+ on the main thread; running it at mask res is ~10x cheaper and
+  // visually identical after the bilinear upscale during compositing.
+  const maskW = (preMask as any)?.width || width;
+  const maskH = (preMask as any)?.height || height;
   const refinedMask = (choke !== 0 || feather > 0)
-    ? refineMaskEdges(preMask!, width, height, choke, feather, `${clipId}_pre`)
+    ? refineMaskEdges(preMask!, maskW, maskH, choke, feather, `${clipId}_pre`)
     : preMask;
 
   const mode = extraOptions?.mode || 'remove';

@@ -1583,7 +1583,11 @@ export async function renderCanvasEngine({
 
             // AI Background Removal — always non-blocking during interactive preview.
             // Only awaits during export to guarantee frame-accurate masks.
-            if (clip.aiBackground?.enabled && (isExporting || previewMode !== 'fast')) {
+            // NOTE: intentionally NOT gated behind previewMode/skipExpensiveFX —
+            // the pre-rendered temporal mask composite is a pure drawImage (<1ms),
+            // so dropping it in 'fast' mode made the cutout appear broken during
+            // playback (CapCut keeps the cutout visible at all preview qualities).
+            if (clip.aiBackground?.enabled) {
               const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur'], clip.expressions?.['aiBackground.edgeBlur']);
               const smartOpts = {
                 playbackQuality: clip.aiBackground.playbackQuality ?? 'balanced',

@@ -428,8 +428,12 @@ function compositeMask(
   clipId: string = '_smart',
   cutoutOptions?: IntegrationOptions
 ): void {
+  // PERF: refine at the MASK's native resolution, not the full display canvas —
+  // same result after compositing's bilinear upscale, 10x fewer pixels scanned.
+  const maskW = (maskCanvas as any)?.width || width;
+  const maskH = (maskCanvas as any)?.height || height;
   const refinedMask = (choke !== 0 || feather > 0)
-    ? refineMaskEdges(maskCanvas, width, height, choke, feather, `${clipId}_smart`)
+    ? refineMaskEdges(maskCanvas, maskW, maskH, choke, feather, `${clipId}_smart`)
     : maskCanvas;
 
   const mode = cutoutOptions?.mode || 'remove';

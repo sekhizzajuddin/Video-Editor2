@@ -179,12 +179,20 @@ export function loadRVMSession(forceWasm = false): Promise<any | null> {
     try {
       const ort: any = (ortModule as any).default || ortModule;
       const wasmPath = await getBestWasmPath();
+      // OFF-MAIN-THREAD INFERENCE: with the wasm binaries served same-origin
+      // from /onnx/, ONNX Runtime's proxy worker can be re-enabled — this is
+      // what keeps 60 FPS playback smooth (inference on the main thread blocks
+      // the RAF loop for 50-300 ms per frame, which is the "janky / not smooth"
+      // behaviour). Cross-origin CDN wasm CANNOT be used from a worker, so the
+      // proxy stays disabled in that fallback case only.
+      const isLocalWasm = wasmPath === RVM_LOCAL_WASM_PATH;
       try {
         if (ort?.env?.wasm) {
-          ort.env.wasm.proxy = false; // Never use cross-origin Web Worker from CDN
+          ort.env.wasm.proxy = isLocalWasm;
           ort.env.wasm.wasmPaths = wasmPath;
         }
-      } catch { /* already initialized */ }
+      } catch { /* proxy already pinned by aiBackground.ts */ }
+      (window as any).__ortWasmProxyControl?.(isLocalWasm);
 
       const modelBuf = await getOrFetchModelBuffer();
       const allowWebGPU = !forceWasm && (await canUseWebGPUF16());
@@ -330,11 +338,14 @@ export async function segmentWithRVM(
   videoTime: number,
   maxDim: number = 512
 ): Promise<RVMSegmentResult | null> {
-  // Canonicalize the inference size to fixed tiers. Different call sites used
-  // to pass 384/512/768 for the same clip, which changed infW/infH and forced
-  // a recurrent-state reset on every alternating call — silently defeating
-  // RVM's temporal coherence.
-  const canonicalMaxDim = maxDim <= 448 ? 384 : maxDim <= 640 ? 512 : 768;
+  // Canonicalize the inference size to ONE stable tier per clip.
+  // Call sites used to pass 384/512/768 for the same clip, which changed
+  // infW/infH and forced a recurrent-state reset on every alternating call —
+  // silently defeating RVM's temporal coherence and causing matte flicker.
+  // 512 is the sweet spot for live preview (hair-level Phi output at 512px,
+  // ~30-80ms/frame in the ONNX WASM proxy worker). 768 remains available for
+  // export where callers explicitly request it and run sequentially.
+  const canonicalMaxDim = maxDim <= 640 ? 512 : 768;
 
   const prev = rvmInFlight.get(clipId) || Promise.resolve();
   const run = prev.then(() =>
@@ -394,9 +405,12 @@ async function segmentWithRVMInner(
     }
     const ort: any = (ortModule as any).default || ortModule;
     const srcTensor = createFloat16Tensor(ort, srcF32, [1, 3, infH, infW]);
-    // Downsample ratio must be a pure function of the canonical tier so the
-    // recurrent state stays compatible across calls from different pipelines.
-    const dRatio = new ort.Tensor('float32', new Float32Array([maxDim === 768 ? 0.25 : 0.375]), [1]);
+    // Downsample ratio is a pure function of the canonical tier so recurrent
+    // state dims stay compatible across all pipelines. Accuracy: 0.375 on a
+    // 512px input made the network's internal feature resolution ~192px —
+    // the direct cause of mushy/"inaccurate" mattes. 0.5 → 256px internal
+    // (better hair/finger edges) while staying real-time in the WASM worker.
+    const dRatio = new ort.Tensor('float32', new Float32Array([maxDim === 768 ? 0.375 : 0.5]), [1]);
 
     // State validation: reset on seek, backward time or resolution change
     const state = getRVMClipState(clipId);
