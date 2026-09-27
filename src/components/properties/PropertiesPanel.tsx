@@ -2832,6 +2832,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       {selectedClip.aiBackground?.enabled && (
                         <span className="text-[9px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-medium">ACTIVE</span>
                       )}
+                      {selectedClip.aiBackground?.enabled && bgAnalysisStatus?.status === 'analyzing' && (
+                        <span className="text-[9px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 px-1.5 py-0.5 rounded font-medium">
+                          Caching {bgAnalysisStatus.progress}%
+                        </span>
+                      )}
                     </h4>
                     <p className="text-[10px] text-[var(--theme-text-muted)]">1-Tap background cutout & trending creator styles</p>
                   </div>

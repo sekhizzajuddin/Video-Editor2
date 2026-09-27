@@ -12,18 +12,45 @@
  *   6. Pre-rendered cache & professional edge refinement: Full Choke, Feather, Spill Suppression support
  */
 
-import {
-  detectHumanPresence,
-  computeROICrop,
-  detectSceneChange,
-  shouldDetectSceneChange,
-  shouldUseCachedMask,
-  mustForceResegment,
-  getCachedMaskCanvas,
-  cacheMaskCanvas,
-  markInferencePerformed,
-  invalidateMaskCache,
-} from './humanDetection';
+// ── Direct Live Mask Cache (Decoupled from humanDetection heuristics) ──
+interface CachedMaskEntry {
+  canvas: HTMLCanvasElement;
+  width: number;
+  height: number;
+  timestamp: number;
+}
+const liveMaskMap = new Map<string, CachedMaskEntry>();
+
+export function getCachedMaskCanvas(clipId: string, _width?: number, _height?: number): HTMLCanvasElement | null {
+  const entry = liveMaskMap.get(clipId);
+  if (!entry) return null;
+  return entry.canvas;
+}
+
+export function cacheMaskCanvas(clipId: string, mask: HTMLCanvasElement | null): void {
+  if (!mask) {
+    liveMaskMap.delete(clipId);
+    return;
+  }
+  liveMaskMap.set(clipId, {
+    canvas: mask,
+    width: mask.width,
+    height: mask.height,
+    timestamp: performance.now(),
+  });
+}
+
+export function invalidateMaskCache(clipId?: string): void {
+  if (clipId) {
+    liveMaskMap.delete(clipId);
+  } else {
+    liveMaskMap.clear();
+  }
+}
+
+export function markInferencePerformed(_clipId: string): void {
+  // Decoupled from heuristic counters
+}
 
 import {
   segmentSourceWithMediaPipe,
@@ -84,6 +111,7 @@ export interface IntegrationOptions {
   strokeWidth?: number;
   strokeGlow?: boolean;
   bgColor?: string;
+  isExporting?: boolean;
 }
 
 const DEFAULT_OPTS: IntegrationOptions = {
@@ -102,6 +130,7 @@ const DEFAULT_OPTS: IntegrationOptions = {
   strokeWidth: 4,
   strokeGlow: false,
   bgColor: '#1e1e24',
+  isExporting: false,
 };
 
 /**
@@ -155,86 +184,72 @@ export async function applyAiBackgroundSmart(
           strokeWidth: options.strokeWidth,
           strokeGlow: options.strokeGlow,
           bgColor: options.bgColor,
+          isExporting: options.isExporting ?? false,
         }
       )
     ) {
       return;
     }
 
-    // ── STEP 1: Human Presence Check (Used as ROI hint, never as a hard gatekeeper) ──
-    const human = detectHumanPresence(sourceElement, clipId, options.skinThreshold);
+    // ── STEP 1: Determine Model Selection ─────────────────────────────────
+    const chosenModel: 'general' | 'landscape' =
+      (options.modelSelection === 0 || options.modelSelection === 1 || options.modelSelection === 2 || options.modelSelection === 3)
+        ? 'landscape'
+        : 'general';
 
-    // ── STEP 2: Scene Change & Cache Validity ────────────────────────────
-    let sceneChanged = false;
-    if (shouldDetectSceneChange(clipId, options.isPlaying ? 12 : 6)) {
-      sceneChanged = detectSceneChange(clipId, sourceElement, 0.12);
-    }
-
-    const cacheValid = shouldUseCachedMask(clipId, options.playbackQuality);
-    const forceStale = mustForceResegment(clipId, options.playbackQuality);
-
-    if (!sceneChanged && cacheValid && !forceStale) {
+    // ── STEP 2: Segmentation Execution ────────────────────────────────────
+    if (options.isPlaying) {
+      // PLAYBACK (Interactive):
+      // Composite whatever we have cached immediately (never drops frames / never blocks 60 FPS)
       const cached = getCachedMaskCanvas(clipId, width, height);
       if (cached) {
         compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
-        return;
       }
-    }
 
-    // ── STEP 3: Determine Best Model from Bbox ───────────────────────────
-    let chosenModel: 'general' | 'landscape' = 'general';
-    let useMediaPipe = true;
-
-    if (human.bbox && options.modelSelection === 0) {
-      // Auto-select: if bbox is wider than tall, use landscape model
-      const bboxAspect = human.bbox.w / human.bbox.h;
-      if (bboxAspect > 1.3) {
-        chosenModel = 'landscape';
-      }
-    } else if (options.modelSelection === 2 || options.modelSelection === 3) {
-      chosenModel = 'landscape';
-    }
-
-    // MediaPipe GPU is always allowed as high-speed 5ms fallback (prevents export timeouts)
-    useMediaPipe = true;
-
-    // ── STEP 4: Segmentation ─────────────────────────────────────────────
-    if (options.isPlaying) {
-      // INTERACTIVE: Fire-and-forget async
+      // Fire async inference on current frame (5ms MediaPipe GPU)
       runSegmentationAsync(
         sourceElement,
         sourceW,
         sourceH,
         clipId,
-        human,
         chosenModel,
-        useMediaPipe,
-        options.useROI,
+        true, // useMediaPipe
         width,
         height
       );
-      // Composite whatever we have cached (might be stale — that's OK)
-      const cached = getCachedMaskCanvas(clipId, width, height);
-      if (cached) {
-        compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
+
+      // If no cached mask yet (first playback frame), await sync segmentation so it doesn't show uncut frame
+      if (!cached) {
+        const firstMask = await runSegmentationSync(
+          sourceElement,
+          sourceW,
+          sourceH,
+          clipId,
+          chosenModel,
+          true,
+          width,
+          height
+        );
+        if (firstMask) {
+          cacheMaskCanvas(clipId, firstMask);
+          compositeMask(ctx, sourceElement, firstMask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
+        }
       }
     } else {
-      // EXPORT / PAUSED: Await synchronous high-quality mask
+      // PAUSED / SCRUBBING / EXPORT:
+      // Await synchronous high-quality mask directly from GPU
       const mask = await runSegmentationSync(
         sourceElement,
         sourceW,
         sourceH,
         clipId,
-        human,
         chosenModel,
         options.modelSelection !== 2, // Use MediaPipe GPU unless Ultra Studio IS-Net is selected
-        options.useROI,
         width,
         height
       );
       if (mask) {
         cacheMaskCanvas(clipId, mask);
-        markInferencePerformed(clipId);
         compositeMask(ctx, sourceElement, mask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
       }
     }
@@ -251,10 +266,8 @@ async function runSegmentationAsync(
   sourceW: number,
   sourceH: number,
   clipId: string,
-  human: { hasHuman: boolean; bbox?: { x: number; y: number; w: number; h: number } },
   modelType: 'general' | 'landscape',
   tryMediaPipe: boolean,
-  useROI: boolean,
   targetW: number,
   targetH: number
 ): Promise<void> {
@@ -266,13 +279,16 @@ async function runSegmentationAsync(
   try {
     let maskCanvas: any = null;
 
-    const videoTime = source && 'currentTime' in source ? (source as HTMLVideoElement).currentTime : 0;
+    const videoTime = source && 'currentTime' in source ? (source as any).currentTime : 0;
 
     // Try 0: MediaPipe GPU on full frame (ultra-fast ~5ms, zero network lag)
     if (tryMediaPipe) {
       const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
       if (mpBitmap) {
-        maskCanvas = getPooledCanvas(`${clipId}_async_mp`, targetW, targetH);
+        const bufKey = `${clipId}_async_idx`;
+        const bufIdx = ((window as any)[bufKey] || 0) ^ 1;
+        (window as any)[bufKey] = bufIdx;
+        maskCanvas = getPooledCanvas(`${clipId}_async_mp_${bufIdx}`, targetW, targetH);
         const mCtx = maskCanvas.getContext('2d');
         if (mCtx) {
           mCtx.clearRect(0, 0, targetW, targetH);
@@ -297,38 +313,7 @@ async function runSegmentationAsync(
       }
     }
 
-    // Try 2: ONNX with ROI crop (higher effective resolution)
-    if (!maskCanvas && human.bbox && useROI) {
-      const crop = computeROICrop(sourceW, sourceH, human.bbox, 0.25, null);
-      const roiCanvas = getPooledCanvas(`${clipId}_async_roi`, crop.sw, crop.sh);
-      const roiCtx = roiCanvas.getContext('2d');
-      if (roiCtx) {
-        roiCtx.clearRect(0, 0, crop.sw, crop.sh);
-        roiCtx.drawImage(
-          source as CanvasImageSource,
-          crop.sx, crop.sy, crop.sw, crop.sh, // source sub-rect
-          0, 0, crop.sw, crop.sh              // dest full
-        );
-      }
-
-      const snap = await captureSnapshotBlob(roiCanvas as any, crop.sw, crop.sh, 384);
-      if (snap) {
-        const roiMask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
-        if (roiMask) {
-          // Composite ROI mask back to full-frame canvas
-          maskCanvas = document.createElement('canvas');
-          maskCanvas.width = targetW;
-          maskCanvas.height = targetH;
-          const mCtx = maskCanvas.getContext('2d');
-          if (mCtx) {
-            mCtx.clearRect(0, 0, targetW, targetH);
-            mCtx.drawImage(roiMask, crop.sx, crop.sy, crop.sw, crop.sh);
-          }
-        }
-      }
-    }
-
-    // Try 3: ONNX full frame fallback
+    // Try 2: ONNX full frame fallback
     if (!maskCanvas) {
       const snap = await captureSnapshotBlob(source, sourceW, sourceH, 384);
       if (snap) {
@@ -345,7 +330,6 @@ async function runSegmentationAsync(
 
     if (maskCanvas) {
       cacheMaskCanvas(clipId, maskCanvas);
-      markInferencePerformed(clipId);
       notifyMaskReady();
     }
   } catch (err) {
@@ -362,16 +346,14 @@ async function runSegmentationSync(
   sourceW: number,
   sourceH: number,
   clipId: string,
-  human: { hasHuman: boolean; bbox?: { x: number; y: number; w: number; h: number } },
   modelType: 'general' | 'landscape',
   tryMediaPipe: boolean,
-  useROI: boolean,
   targetW: number,
   targetH: number
 ): Promise<HTMLCanvasElement | null> {
   let maskCanvas: HTMLCanvasElement | null = null;
 
-  const videoTime = (source as HTMLVideoElement).currentTime || 0;
+  const videoTime = (source as any).currentTime || 0;
 
   // Try 0: MediaPipe GPU (instant ~5ms high-accuracy segmentation)
   if (tryMediaPipe) {
@@ -405,33 +387,7 @@ async function runSegmentationSync(
     }
   }
 
-  // Export: always use ONNX for quality. Optionally with ROI.
-  if (!maskCanvas && human.bbox && useROI) {
-    const crop = computeROICrop(sourceW, sourceH, human.bbox, 0.25, null);
-    const roiCanvas = getPooledCanvas(`${clipId}_sync_roi`, crop.sw, crop.sh);
-    const roiCtx = roiCanvas.getContext('2d');
-    if (roiCtx) {
-      roiCtx.clearRect(0, 0, crop.sw, crop.sh);
-      roiCtx.drawImage(source as CanvasImageSource, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
-    }
-
-    // Export uses full isnet (not fp16) for maximum edge quality
-    const snap = await captureSnapshotBlob(roiCanvas as any, crop.sw, crop.sh, 512);
-    if (snap) {
-      const roiMask = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
-      if (roiMask) {
-        maskCanvas = document.createElement('canvas');
-        maskCanvas.width = targetW;
-        maskCanvas.height = targetH;
-        const mCtx = maskCanvas.getContext('2d');
-        if (mCtx) {
-          mCtx.clearRect(0, 0, targetW, targetH);
-          mCtx.drawImage(roiMask, crop.sx, crop.sy, crop.sw, crop.sh);
-        }
-      }
-    }
-  }
-
+  // Try 2: ONNX full frame fallback
   if (!maskCanvas) {
     const snap = await captureSnapshotBlob(source, sourceW, sourceH, 512);
     if (snap) {
@@ -448,7 +404,6 @@ async function runSegmentationSync(
 
   if (maskCanvas) {
     cacheMaskCanvas(clipId, maskCanvas);
-    markInferencePerformed(clipId);
   }
 
   return maskCanvas;
@@ -584,7 +539,6 @@ export {
   ensureClipMasksReady,
   cleanupAiBackgroundResources,
   cleanupClipBackgroundState,
-  invalidateMaskCache,
   applySubjectNeonOutlineFlash,
 };
 

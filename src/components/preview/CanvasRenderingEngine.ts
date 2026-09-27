@@ -1588,6 +1588,7 @@ export async function renderCanvasEngine({
               const smartOpts = {
                 playbackQuality: clip.aiBackground.playbackQuality ?? 'balanced',
                 isPlaying: isPlaying && !isExporting,
+                isExporting: !!isExporting,
                 edgeBlur: animEdgeBlur,
                 modelSelection: (clip.aiBackground.modelSelection ?? 1) as 0 | 1 | 2 | 3,
                 useROI: true,        // Enable smart ROI cropping for high effective resolution

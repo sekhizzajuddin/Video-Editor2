@@ -678,6 +678,14 @@ async function runClipBackgroundAnalysisInternal(
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 360;
 
+      // Draw video frame to an offscreen canvas to guarantee rasterization before WebGL inference
+      const frameCanvas = getPooledCanvas(`_bg_analysis_frame_${clipId}`, w, h);
+      const fCtx = frameCanvas.getContext('2d');
+      if (fCtx) {
+        fCtx.drawImage(video, 0, 0, w, h);
+      }
+      const segmentationSource = fCtx ? frameCanvas : video;
+
       let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
       let noSubject = false;
 
@@ -686,47 +694,47 @@ async function runClipBackgroundAnalysisInternal(
         // No skin-heuristic gating: RVM handles empty scenes gracefully
         // (near-zero alpha), so gating would only introduce mask holes.
         const rvmMaxDim = modelSelection === 2 ? 768 : 512;
-        const res = await segmentWithRVM(video, clipId, targetTime - startTime, rvmMaxDim).catch(() => null);
+        const res = await segmentWithRVM(segmentationSource as any, clipId, targetTime - startTime, rvmMaxDim).catch(() => null);
         if (res && res.coverage >= RVM_EMPTY_COVERAGE) {
           bitmap = res.bitmap;
         } else if (res) {
           // RVM (person-focused) sees no subject — could be an object clip.
           // Try the general-purpose IS-Net model for this keyframe.
           const maxDim = modelSelection === 2 ? 768 : 512;
-          const snap = await captureSnapshotBlob(video, w, h, maxDim);
+          const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
           if (snap) {
             bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
           }
           if (!bitmap) noSubject = true;
-        } else {
-          // RVM failed this frame — treat as empty (never erase the frame)
-          noSubject = true;
         }
       } else {
         // ── FALLBACK (no RVM): MediaPipe / IS-Net legacy pipeline ──
-        // NOTE: skin-tone human gating was REMOVED here — it skipped keyframes
-        // on non-skin subjects (pets, products, dark scenes), leaving mask
-        // holes that flickered during playback.
         if (modelSelection === 0 || modelSelection === 1) {
           const mpType = modelSelection === 0 ? 'general' : 'landscape';
-          bitmap = await segmentSourceWithMediaPipe(video, mpType);
+          bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime);
         }
 
         if (!bitmap && modelSelection === 2) {
           const maxDim = 768;
-          const snap = await captureSnapshotBlob(video, w, h, maxDim);
+          const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
           if (snap) {
             bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
           }
         }
-        if (!bitmap) noSubject = true;
       }
 
-      // Fill this keyframe AND neighboring cache slots with the SAME reference
-      // (zero extra memory, O(1) lookup). For no-subject frames, store the empty
-      // sentinel so consumers show the ORIGINAL frame instead of erasing pixels.
-      const fillValue = noSubject ? getEmptyMaskSentinel() : bitmap;
-      if (fillValue) {
+      // If segmentation succeeded with a valid bitmap, cache it.
+      // If segmentation returned null (seeking glitch / timeout), do NOT store an empty sentinel
+      // which would poison the cache and suppress live preview cutout.
+      if (bitmap) {
+        for (let f = 0; f < fillRatio; f++) {
+          const fillKey = keyframeKey + f;
+          if (fillKey < totalCacheSlots + timeToKey(startTime)) {
+            maskMap.set(fillKey, bitmap);
+          }
+        }
+      } else if (noSubject) {
+        const fillValue = getEmptyMaskSentinel();
         for (let f = 0; f < fillRatio; f++) {
           const fillKey = keyframeKey + f;
           if (fillKey < totalCacheSlots + timeToKey(startTime)) {
@@ -743,7 +751,11 @@ async function runClipBackgroundAnalysisInternal(
         processedFrames: processed,
         totalFrames: totalKeyframes,
       });
-      notifyMaskReady(); // Repaint preview if paused on this frame
+
+      // Throttle preview repaints to avoid RAF storms
+      if (processed % 6 === 0 || processed === 1) {
+        notifyMaskReady();
+      }
 
       // Yield to main thread every 2 keyframes to maintain smooth 60 FPS UI
       if (processed % 2 === 0) {
@@ -952,6 +964,7 @@ export interface AiCutoutCompositeOptions {
   strokeWidth?: number;
   strokeGlow?: boolean;
   bgColor?: string;
+  isExporting?: boolean;
 }
 
 export function applyPreRenderedMaskIfAvailable(
@@ -977,20 +990,23 @@ export function applyPreRenderedMaskIfAvailable(
   const targetKey = timeToKey(currentVideoTime);
   let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
 
-  // If exact frame isn't ready yet, look for closest analyzed frame within +-15 frames (~750ms)
+  // If exact frame isn't ready yet, look for closest analyzed frame within +-6 frames (~300ms)
+  const maxSearchOffset = extraOptions?.isExporting ? 10 : 6;
   if (!preMask) {
-    for (let offset = 1; offset <= 15; offset++) {
+    for (let offset = 1; offset <= maxSearchOffset; offset++) {
       preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
       if (preMask) break;
     }
   }
-  // If still not found, find the closest available key in the cache so no export frame is dropped
-  if (!preMask && clipPreRendered.size > 0) {
+  // During export only, if keyframe falls slightly outside, allow nearest-key fallback within max 10 frames (~500ms).
+  // CRITICAL: NEVER do an unbounded search (minDiff = Infinity) across the entire video, which previously
+  // grabbed key 0 (0.0s) when previewing at 7.54s, destroying the live cutout!
+  if (!preMask && extraOptions?.isExporting && clipPreRendered.size > 0) {
     let closestKey = -1;
-    let minDiff = Infinity;
+    let minDiff = 10;
     for (const k of clipPreRendered.keys()) {
       const diff = Math.abs(k - targetKey);
-      if (diff < minDiff) {
+      if (diff <= minDiff) {
         minDiff = diff;
         closestKey = k;
       }
@@ -1001,8 +1017,16 @@ export function applyPreRenderedMaskIfAvailable(
   }
   if (!preMask) return false;
 
-  // Analyzed-but-no-subject frame → show the original frame (never erase pixels)
-  if (isEmptyMaskMarker(preMask)) return true;
+  // Analyzed-but-no-subject frame:
+  // In interactive preview, NEVER return true on an empty sentinel — seeking/decoding artifacts
+  // or false negatives in background analysis must not cancel live GPU cutout. Return false so
+  // live MediaPipe can segment the visible frame on canvas.
+  if (isEmptyMaskMarker(preMask)) {
+    if (extraOptions?.isExporting) {
+      return true; // Keep original frame during export
+    }
+    return false; // Fall back to live segmentation in interactive preview
+  }
 
   // Temporal Alpha Blending: smoothly interpolate between adjacent keyframe masks to eliminate popping/flicker
   const inferenceFps = (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
