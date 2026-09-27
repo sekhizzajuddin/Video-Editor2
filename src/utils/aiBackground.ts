@@ -33,6 +33,8 @@ import type { AiCutoutMode } from '@/types';
 // ── MediaPipe Ultra-Fast GPU Selfie Segmenter Engine (Primary) ────────────────
 let mediaPipeGeneralSegmenter: any = null;
 let mediaPipeLandscapeSegmenter: any = null;
+let mediaPipeGeneralPromise: Promise<any> | null = null;
+let mediaPipeLandscapePromise: Promise<any> | null = null;
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
@@ -45,42 +47,66 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
  * 'general' uses 256x256 square model.
  */
 export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' = 'landscape'): Promise<any> {
-  if (modelType === 'landscape' && mediaPipeLandscapeSegmenter) return mediaPipeLandscapeSegmenter;
-  if (modelType === 'general' && mediaPipeGeneralSegmenter) return mediaPipeGeneralSegmenter;
-
-  try {
-    // Pinned to exact installed version (1.0.1) to avoid breaking on CDN upstream updates
-    const vision = await FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
-    );
-    const modelAssetPath = modelType === 'landscape'
-      ? 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite'
-      : 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
-
-    const createOpts: any = {
-      baseOptions: {
-        modelAssetPath,
-        delegate: 'GPU',
-      },
-      runningMode: 'IMAGE',
-      outputCategoryMask: false,
-      outputConfidenceMasks: true,
-    };
-
-    // Automatic GPU -> CPU fallback if WebGL context or shader delegate fails
-    const segmenter = await ImageSegmenter.createFromOptions(vision, createOpts).catch(async (gpuErr: any) => {
-      console.warn('[aiBackground] MediaPipe GPU delegate failed, falling back to CPU delegate:', gpuErr);
-      createOpts.baseOptions.delegate = 'CPU';
-      return ImageSegmenter.createFromOptions(vision, createOpts);
-    });
-
-    if (modelType === 'landscape') mediaPipeLandscapeSegmenter = segmenter;
-    else mediaPipeGeneralSegmenter = segmenter;
-
-    return segmenter;
-  } catch (err) {
-    console.warn('[aiBackground] MediaPipe Segmenter load failed, falling back to @imgly:', err);
-    return null;
+  if (modelType === 'landscape') {
+    if (mediaPipeLandscapeSegmenter) return mediaPipeLandscapeSegmenter;
+    if (mediaPipeLandscapePromise) return mediaPipeLandscapePromise;
+    mediaPipeLandscapePromise = (async () => {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+        );
+        const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite';
+        const createOpts: any = {
+          baseOptions: { modelAssetPath, delegate: 'GPU' },
+          runningMode: 'IMAGE',
+          outputCategoryMask: false,
+          outputConfidenceMasks: true,
+        };
+        const segmenter = await ImageSegmenter.createFromOptions(vision, createOpts).catch(async (gpuErr: any) => {
+          console.warn('[aiBackground] MediaPipe GPU delegate failed, falling back to CPU delegate:', gpuErr);
+          createOpts.baseOptions.delegate = 'CPU';
+          return ImageSegmenter.createFromOptions(vision, createOpts);
+        });
+        mediaPipeLandscapeSegmenter = segmenter;
+        return segmenter;
+      } catch (err) {
+        console.warn('[aiBackground] MediaPipe landscape segmenter load failed:', err);
+        return null;
+      } finally {
+        mediaPipeLandscapePromise = null;
+      }
+    })();
+    return mediaPipeLandscapePromise;
+  } else {
+    if (mediaPipeGeneralSegmenter) return mediaPipeGeneralSegmenter;
+    if (mediaPipeGeneralPromise) return mediaPipeGeneralPromise;
+    mediaPipeGeneralPromise = (async () => {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+        );
+        const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+        const createOpts: any = {
+          baseOptions: { modelAssetPath, delegate: 'GPU' },
+          runningMode: 'IMAGE',
+          outputCategoryMask: false,
+          outputConfidenceMasks: true,
+        };
+        const segmenter = await ImageSegmenter.createFromOptions(vision, createOpts).catch(async (gpuErr: any) => {
+          console.warn('[aiBackground] MediaPipe GPU delegate failed, falling back to CPU delegate:', gpuErr);
+          createOpts.baseOptions.delegate = 'CPU';
+          return ImageSegmenter.createFromOptions(vision, createOpts);
+        });
+        mediaPipeGeneralSegmenter = segmenter;
+        return segmenter;
+      } catch (err) {
+        console.warn('[aiBackground] MediaPipe general segmenter load failed:', err);
+        return null;
+      } finally {
+        mediaPipeGeneralPromise = null;
+      }
+    })();
+    return mediaPipeGeneralPromise;
   }
 }
 
@@ -94,6 +120,11 @@ export async function segmentSourceWithMediaPipe(
   clipId?: string,
   videoTime = 0
 ): Promise<ImageBitmap | null> {
+  if (!source) return null;
+  if ('videoWidth' in source && (source as HTMLVideoElement).videoWidth === 0) return null;
+  if ('naturalWidth' in source && (source as HTMLImageElement).naturalWidth === 0) return null;
+  if ('width' in source && typeof (source as any).width === 'number' && (source as any).width === 0) return null;
+
   const segmenter = await loadMediaPipeSegmenter(modelType);
   if (!segmenter) return null;
 

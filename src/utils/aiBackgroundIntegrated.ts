@@ -268,30 +268,8 @@ async function runSegmentationAsync(
 
     const videoTime = source && 'currentTime' in source ? (source as HTMLVideoElement).currentTime : 0;
 
-    // Try 0: RVM (CapCut-grade) — recurrent temporal memory, best quality.
-    // Skipped while the pre-analysis job runs: it feeds RVM states sequentially
-    // across keyframes, and concurrent live inference would seek-jump the
-    // shared per-clip state, degrading the pre-computed mattes.
-    const analysisActive = getClipAnalysisStatus(clipId).status === 'analyzing';
-    if (!analysisActive) {
-      const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 384).catch(() => null);
-      if (rvmRes) {
-        if (rvmRes.coverage < RVM_EMPTY_COVERAGE) {
-          // No subject in frame — cache nothing so the frame stays original
-          return;
-        }
-        maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
-        const mCtx = maskCanvas.getContext('2d');
-        if (mCtx) {
-          mCtx.clearRect(0, 0, targetW, targetH);
-          mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
-        }
-        rvmRes.bitmap.close();
-      }
-    }
-
-    // Try 1: MediaPipe on full frame (fastest fallback)
-    if (!maskCanvas && tryMediaPipe) {
+    // Try 0: MediaPipe GPU on full frame (ultra-fast ~5ms, zero network lag)
+    if (tryMediaPipe) {
       const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
       if (mpBitmap) {
         maskCanvas = getPooledCanvas(`${clipId}_async_mp`, targetW, targetH);
@@ -301,6 +279,21 @@ async function runSegmentationAsync(
           mCtx.drawImage(mpBitmap, 0, 0, targetW, targetH);
         }
         mpBitmap.close();
+      }
+    }
+
+    // Try 1: RVM (CapCut-grade recurrent memory fallback)
+    const analysisActive = getClipAnalysisStatus(clipId).status === 'analyzing';
+    if (!maskCanvas && !analysisActive) {
+      const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 384).catch(() => null);
+      if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
+        maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
+        const mCtx = maskCanvas.getContext('2d');
+        if (mCtx) {
+          mCtx.clearRect(0, 0, targetW, targetH);
+          mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
+        }
+        rvmRes.bitmap.close();
       }
     }
 
@@ -380,21 +373,8 @@ async function runSegmentationSync(
 
   const videoTime = (source as HTMLVideoElement).currentTime || 0;
 
-  // Try 0: RVM (CapCut-grade) — recurrent temporal memory, best quality
-  const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, targetW >= 768 ? 768 : 512).catch(() => null);
-  if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
-    maskCanvas = document.createElement('canvas');
-    maskCanvas.width = targetW;
-    maskCanvas.height = targetH;
-    const mCtx = maskCanvas.getContext('2d');
-    if (mCtx) {
-      mCtx.clearRect(0, 0, targetW, targetH);
-      mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
-    }
-    rvmRes.bitmap.close();
-  }
-
-  if (!maskCanvas && tryMediaPipe) {
+  // Try 0: MediaPipe GPU (instant ~5ms high-accuracy segmentation)
+  if (tryMediaPipe) {
     const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime);
     if (mpBitmap) {
       maskCanvas = document.createElement('canvas');
@@ -406,6 +386,22 @@ async function runSegmentationSync(
         mCtx.drawImage(mpBitmap, 0, 0, targetW, targetH);
       }
       mpBitmap.close();
+    }
+  }
+
+  // Try 1: RVM (CapCut-grade recurrent memory fallback)
+  if (!maskCanvas) {
+    const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, targetW >= 768 ? 768 : 512).catch(() => null);
+    if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
+      maskCanvas = document.createElement('canvas');
+      maskCanvas.width = targetW;
+      maskCanvas.height = targetH;
+      const mCtx = maskCanvas.getContext('2d');
+      if (mCtx) {
+        mCtx.clearRect(0, 0, targetW, targetH);
+        mCtx.drawImage(rvmRes.bitmap, 0, 0, targetW, targetH);
+      }
+      rvmRes.bitmap.close();
     }
   }
 
@@ -448,6 +444,11 @@ async function runSegmentationSync(
   // the original frame (CapCut behavior: no subject → no cutout applied).
   if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
     return null;
+  }
+
+  if (maskCanvas) {
+    cacheMaskCanvas(clipId, maskCanvas);
+    markInferencePerformed(clipId);
   }
 
   return maskCanvas;

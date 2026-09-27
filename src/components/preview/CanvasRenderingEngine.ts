@@ -1587,7 +1587,7 @@ export async function renderCanvasEngine({
               const animEdgeBlur = getAnimatedValue(clip.aiBackground.edgeBlur ?? 0, currentTime, clip.startTime, clip.animations?.['aiBackground.edgeBlur'], clip.expressions?.['aiBackground.edgeBlur']);
               const smartOpts = {
                 playbackQuality: clip.aiBackground.playbackQuality ?? 'balanced',
-                isPlaying: !isExporting,
+                isPlaying: isPlaying && !isExporting,
                 edgeBlur: animEdgeBlur,
                 modelSelection: (clip.aiBackground.modelSelection ?? 1) as 0 | 1 | 2 | 3,
                 useROI: true,        // Enable smart ROI cropping for high effective resolution
