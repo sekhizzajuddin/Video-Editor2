@@ -12,8 +12,9 @@
  *
  * RUNTIME:
  *   onnxruntime-web (already a project dependency). WebGPU execution provider
- *   when available; otherwise WASM — forced into ONNX Runtime's internal proxy
- *   worker by aiBackground.ts so heavy inference never blocks the main thread.
+ *   when available; otherwise WASM on the calling thread (`env.wasm.proxy` is
+ *   false — ORT's proxy worker is cross-origin and cannot start under this
+ *   app's COOP/COEP headers).
  *
  * MODEL I/O (fp16, ~7.5 MB, all inputs float16):
  *   src [1,3,H,W], r1i–r4i (float16, zeros on first frame), downsample_ratio [1]
@@ -146,7 +147,12 @@ export function loadRVMSession(): Promise<any | null> {
   rvmSessionPromise = (async () => {
     try {
       const ort: any = (ortModule as any).default || ortModule;
-      try { ort.env.wasm.wasmPaths = RVM_WASM_CDN; } catch { /* already initialized */ }
+      try {
+        if (ort?.env?.wasm) {
+          ort.env.wasm.proxy = false; // Never use cross-origin Web Worker from CDN
+          ort.env.wasm.wasmPaths = RVM_WASM_CDN;
+        }
+      } catch { /* already initialized */ }
 
       const modelBuf = await fetchModelBuffer();
 

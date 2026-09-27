@@ -1,25 +1,25 @@
 /**
  * aiBackground.ts
  *
- * AI background removal using @imgly/background-removal with forced ONNX WASM proxy.
+ * AI background removal. IS-Net (@imgly/background-removal) is the last-resort
+ * rung; the primary matte comes from RVM (see rvmMatting.ts) with MediaPipe in
+ * between.
  *
- * ── ROOT CAUSE OF PLAYHEAD HANG (NOW FIXED) ──────────────────────────────────
+ * ── ON ort.env.wasm.proxy ────────────────────────────────────────────────────
  *
- * @imgly/background-removal line 1008:
- *   `const proxyToWorker = useWebGPU && config.proxyToWorker;`
+ * @imgly/background-removal only enables its own proxy worker when WebGPU is
+ * present (`const proxyToWorker = useWebGPU && config.proxyToWorker;`), so an
+ * earlier revision pinned `ort.env.wasm.proxy = true` via Object.defineProperty
+ * to force inference off the main thread.
  *
- * The library ONLY enables its ONNX proxy worker when WebGPU is available.
- * On the vast majority of systems (no WebGPU), the entire IS-Net neural network
- * (500ms–3000ms of WASM execution) runs synchronously on the main thread,
- * monopolizing the CPU and freezing the RAF render loop, playhead, and UI.
+ * That is now deliberately `false`. ORT's proxy worker is created from the CDN
+ * origin serving the WASM, and under the COOP/COEP headers this app sets (see
+ * vite.config.ts / vercel.json) that cross-origin worker fails to start — which
+ * killed inference outright rather than merely making it synchronous.
  *
- * FIX: We use Object.defineProperty to force `ort.env.wasm.proxy = true` so the
- * library's attempt to set it to `false` is silently ignored. This makes ONNX
- * Runtime Web create its own internal proxy worker for WASM execution, moving
- * the heavy neural network computation off the main thread automatically.
- *
- * The remaining main-thread work (image resize, tensor prep, pixel loop at 384px)
- * takes < 10ms total, well within a single frame budget.
+ * Main-thread cost is kept acceptable instead by the pre-render analysis pass
+ * (which yields between keyframes) and the adaptive quality governor, so the
+ * IS-Net rung is rarely reached during live playback.
  */
 
 import * as ortModule from 'onnxruntime-web';
@@ -154,10 +154,9 @@ export async function segmentSourceWithMediaPipe(
   }
 }
 
-// ── CRITICAL FIX: Force ONNX WASM proxy ON ──────────────────────────────────
-// This intercepts the library's `ort.env.wasm.proxy = false` assignment and
-// keeps it pinned to `true`, so ONNX runs inference in its internal Web Worker
-// regardless of WebGPU availability.
+// ── ONNX Runtime bootstrap ──────────────────────────────────────────────────
+// `proxy = false`: ORT would otherwise spawn its proxy worker from the CDN
+// origin, which cannot start under this app's COOP/COEP headers.
 if (typeof window !== 'undefined') {
   const ortObj: any = (ortModule as any).default || ortModule;
 
@@ -167,20 +166,8 @@ if (typeof window !== 'undefined') {
   }
   (window as any).ort = ortObj;
 
-  // Force ort.env.wasm.proxy = true — make it read-only so the library can't
-  // override it to false when WebGPU is unavailable.
-  try {
-    const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-    if (!hasWebGPU && ortObj?.env?.wasm) {
-      Object.defineProperty(ortObj.env.wasm, 'proxy', {
-        get: () => true,
-        set: () => {}, // Silently ignore @imgly's `ort.env.wasm.proxy = false`
-        configurable: true,
-        enumerable: true,
-      });
-    }
-  } catch (_e) {
-    console.warn('[aiBackground] Could not force ONNX WASM proxy — playback may lag during AI background removal');
+  if (ortObj?.env?.wasm) {
+    ortObj.env.wasm.proxy = false;
   }
 }
 
@@ -296,8 +283,8 @@ export const loadBackgroundRemover = (): Promise<void> => {
         await preloadFn({
           model: 'isnet_fp16',
           publicPath: PUBLIC_PATH,
-          proxyToWorker: true, // Library ignores this without WebGPU, but our
-                               // Object.defineProperty override forces it anyway
+          // Only honoured when WebGPU is present; harmless otherwise.
+          proxyToWorker: true,
         });
       }
       isLoaded = true;
@@ -317,8 +304,9 @@ export const loadBackgroundRemover = (): Promise<void> => {
  * and converting it to a Blob BEFORE calling this function. This ensures the
  * snapshot is frozen (Blobs are immutable) and immune to canvas overwrite races.
  *
- * With the forced ONNX proxy, the heavy WASM inference runs in ONNX Runtime's
- * internal Web Worker. Main-thread cost: ~5-10ms (image resize + pixel loop).
+ * This is the slowest rung of the matte ladder and blocks the main thread when
+ * WebGPU is unavailable, so it is only reached when RVM and MediaPipe both
+ * decline to produce a matte.
  */
 export async function segmentBlob(
   inputBlob: Blob,
@@ -635,7 +623,9 @@ export async function startClipBackgroundAnalysis(
   updateClipAnalysisStatus(clipId, { status: 'analyzing', progress: 0, processedFrames: 0, totalFrames: 1 });
 
   const video = document.createElement('video');
-  video.crossOrigin = 'anonymous';
+  if (!videoUrl.startsWith('blob:') && !videoUrl.startsWith('data:')) {
+    video.crossOrigin = 'anonymous';
+  }
   video.preload = 'auto';
   video.muted = true;
   video.playsInline = true;
@@ -791,8 +781,8 @@ export async function startClipBackgroundAnalysis(
           bitmap = await segmentSourceWithMediaPipe(video, mpType, clipId, targetTime - startTime);
         }
 
-        if (!bitmap) {
-          const maxDim = modelSelection === 2 ? 768 : 512;
+        if (!bitmap && modelSelection === 2) {
+          const maxDim = 768;
           const snap = await captureSnapshotBlob(video, w, h, maxDim);
           if (snap) {
             bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
@@ -841,10 +831,9 @@ export async function startClipBackgroundAnalysis(
       });
       notifyMaskReady(); // Repaint preview if paused on this frame
 
-      // Yield to main thread every 4th keyframe (1ms) to keep UI responsive.
-      // Old: 8ms × 200 frames = 1.6s wasted. New: 1ms × 10 yields = 10ms total.
-      if (processed % 4 === 0) {
-        await new Promise(r => setTimeout(r, 1));
+      // Yield to main thread every 2 keyframes to maintain smooth 60 FPS UI
+      if (processed % 2 === 0) {
+        await new Promise(r => setTimeout(r, 4));
       }
     }
 

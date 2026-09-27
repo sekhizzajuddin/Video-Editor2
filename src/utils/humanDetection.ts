@@ -190,33 +190,47 @@ export function setCachedMask(clipId: string, mask: HTMLCanvasElement | null): v
  * 60 times a second, all immediately garbage. The resulting GC churn showed up
  * as periodic hitches during playback with the cutout enabled.
  *
- * Keyed by size so the (rare) non-default request doesn't thrash the default one.
+ * Keyed by size so the (rare) non-default request doesn't thrash the default
+ * one, and OffscreenCanvas-first so this stays usable off the main thread.
+ *
+ * Returns `null` rather than throwing: callers fail open, because a scratch
+ * surface we cannot allocate must never take the cutout down with it.
  */
 type SampleSurface = HTMLCanvasElement | OffscreenCanvas;
 
 const sampleSurfaces = new Map<string, { canvas: SampleSurface; ctx: CanvasRenderingContext2D }>();
 
-function createSampleCanvas(w: number, h: number): { canvas: SampleSurface; ctx: CanvasRenderingContext2D } {
+function getSampleCanvas(w: number, h: number): { canvas: SampleSurface; ctx: CanvasRenderingContext2D } | null {
   const key = `${w}x${h}`;
   const existing = sampleSurfaces.get(key);
   if (existing) return existing;
 
-  const canvas: SampleSurface =
-    typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(w, h)
-      : Object.assign(document.createElement('canvas'), { width: w, height: h });
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
+  try {
+    let canvas: SampleSurface;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      canvas = new OffscreenCanvas(w, h);
+    } else if (typeof document !== 'undefined') {
+      canvas = Object.assign(document.createElement('canvas'), { width: w, height: h });
+    } else {
+      return null;
+    }
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | null;
+    if (!ctx) return null;
+
+    const entry = { canvas, ctx };
+    if (sampleSurfaces.size > 6) {
+      const oldest = sampleSurfaces.keys().next().value;
+      if (oldest) sampleSurfaces.delete(oldest);
+    }
+    sampleSurfaces.set(key, entry);
+    return entry;
+  } catch {
+    return null;
   }
-  const ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
-  const entry = { canvas, ctx };
-  if (sampleSurfaces.size > 6) {
-    const oldest = sampleSurfaces.keys().next().value;
-    if (oldest) sampleSurfaces.delete(oldest);
-  }
-  sampleSurfaces.set(key, entry);
-  return entry;
 }
 
 function computeLuminanceHistogram(
@@ -224,18 +238,29 @@ function computeLuminanceHistogram(
   sampleW: number = 64,
   sampleH: number = 36
 ): Uint32Array {
-  const { ctx } = createSampleCanvas(sampleW, sampleH);
-  // The scratch surface is reused across calls — clear it so a source with
-  // alpha can't be read on top of the previous frame's pixels.
-  ctx.clearRect(0, 0, sampleW, sampleH);
-  ctx.drawImage(source as CanvasImageSource, 0, 0, sampleW, sampleH);
-  const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
-  const data = imageData.data;
   const histogram = new Uint32Array(16);
-  for (let i = 0; i < data.length; i += 4) {
-    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const bin = Math.min(15, (lum / 256) * 16 | 0);
-    histogram[bin]++;
+  if (!source) return histogram;
+  if ('readyState' in source && (source as HTMLVideoElement).readyState < 2) {
+    return histogram;
+  }
+
+  try {
+    const sample = getSampleCanvas(sampleW, sampleH);
+    if (!sample) return histogram;
+    const { ctx } = sample;
+    // The scratch surface is reused across calls — clear it so a source with
+    // alpha can't be read on top of the previous frame's pixels.
+    ctx.clearRect(0, 0, sampleW, sampleH);
+    ctx.drawImage(source as CanvasImageSource, 0, 0, sampleW, sampleH);
+    const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      const bin = Math.min(15, (lum / 256) * 16 | 0);
+      histogram[bin]++;
+    }
+  } catch (_err) {
+    // Fail-open: ignore canvas tainting
   }
   return histogram;
 }
@@ -285,21 +310,38 @@ export interface DetectionResult {
 
 /**
  * Detect human presence using dual skin-tone detection.
- * Thread-safe: creates its own canvas internally.
+ * Thread-safe with pooled canvas and fail-open security guards.
  */
 export function detectHumanPresence(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   clipId: string,
   minSkinRatio: number = 0.008
 ): DetectionResult {
+  if (!source) {
+    return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+  }
+  if ('readyState' in source && (source as HTMLVideoElement).readyState < 2) {
+    return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+  }
+
   const SAMPLE_WIDTH = 64;
   const SAMPLE_HEIGHT = 36;
-  const { ctx } = createSampleCanvas(SAMPLE_WIDTH, SAMPLE_HEIGHT);
+  let data: Uint8ClampedArray;
 
-  ctx.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-  ctx.drawImage(source as CanvasImageSource, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-  const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-  const data = imageData.data;
+  try {
+    const sample = getSampleCanvas(SAMPLE_WIDTH, SAMPLE_HEIGHT);
+    if (!sample) {
+      return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+    }
+    const { ctx } = sample;
+    ctx.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+    ctx.drawImage(source as CanvasImageSource, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+    const imageData = ctx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+    data = imageData.data;
+  } catch (_err) {
+    // Fail-open on cross-origin or canvas read error
+    return { hasHuman: true, skinRatio: 0.05, bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } };
+  }
 
   let skinPixels = 0;
   const totalPixels = SAMPLE_WIDTH * SAMPLE_HEIGHT;

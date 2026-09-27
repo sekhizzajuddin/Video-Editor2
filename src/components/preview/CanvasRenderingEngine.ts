@@ -1603,28 +1603,16 @@ export async function renderCanvasEngine({
                 strokeGlow: clip.aiBackground.strokeGlow ?? false,
                 bgColor: clip.aiBackground.bgColor ?? '#1e1e24',
               };
-              if (isExporting) {
-                // Export: block until we have an exact synchronous mask for this frame
-                await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
-              } else {
-                // Interactive: we must NOT fire-and-forget onto `oCtx`.
-                //
-                // applyAiBackgroundSmart composites the matte with
-                // globalCompositeOperation='destination-in'. When left un-awaited it
-                // resolves on a later microtask/frame — by which point this clip has
-                // already been blitted and `oCtx` may have been recycled by the LRU
-                // canvas pool for a DIFFERENT clip. The late write then punches a
-                // hole in whatever now owns the buffer. That is the flicker seen when
-                // background removal and blending are used together (a partial blend
-                // adds another buffer, widening the race window).
-                //
-                // The mask pipeline is already async-cached internally: this call
-                // applies the newest cached matte synchronously and schedules
-                // re-segmentation in the background, notifying us via the
-                // mask-ready callback which flags the next repaint. So awaiting here
-                // costs a cache lookup, not an inference, and keeps every write to
-                // `oCtx` inside this clip's own draw pass.
-                await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+              try {
+                if (isExporting) {
+                  // Export: block until we have an exact synchronous mask for this frame
+                  await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+                } else {
+                  // Interactive: awaits cached mask lookup to prevent rAF buffer-reuse races
+                  await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+                }
+              } catch (aiErr) {
+                console.warn('[CanvasRenderingEngine] AI background render error:', aiErr);
               }
             }
 

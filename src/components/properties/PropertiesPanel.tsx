@@ -2852,7 +2852,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       strokeWidth: 4,
                       strokeGlow: false,
                       bgColor: '#121316',
-                      modelSelection: 2,
+                      modelSelection: 1,
                     };
                     updateClip(selectedClip.id, {
                       aiBackground: { ...existing, enabled }
@@ -2867,7 +2867,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           mediaItem.url || '',
                           selectedClip.trimStart || 0,
                           selectedClip.duration || 5,
-                          existing.modelSelection ?? 2
+                          existing.modelSelection ?? 1
                         );
                       }
                     } else {
