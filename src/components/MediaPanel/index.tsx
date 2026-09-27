@@ -3075,7 +3075,7 @@ export function MediaPanel() {
                               });
                               state.selectClip(targetClip.id);
                               state.saveSnapshot('Apply Custom FX to Clip');
-                              toast.success(`✨ Applied "${fx.name}" to ${(targetClip as any).name || targetClip.id}`);
+                              toast.success(`✨ Applied "${fx.name}" to ${targetClip.name || 'clip'}`);
                             } else {
                               toast.info('Select a video or image clip first to apply this FX');
                             }

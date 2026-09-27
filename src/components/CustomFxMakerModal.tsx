@@ -4,7 +4,6 @@ import { useShallow } from 'zustand/react/shallow';
 import type { CustomFxItem, TimelineClip } from '@/types';
 import { generateCustomFx, type CustomFxProgress } from '@/utils/customFxDirector';
 import { X, Sparkles, Music, Eye, RefreshCw, Check, AlertTriangle, Loader2, Film } from 'lucide-react';
-import { toast } from 'sonner';
 
 export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
   const { tracks, customFxTargetClipId, addCustomFx, pipWindows, mediaLibrary } = useEditorStore(
@@ -162,23 +161,49 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
 
     addCustomFx(fxItem);
 
-    // Apply directly onto the target clip as a semi-collapsible sub-track!
-    // Never creates a separate FX track — FX is permanently bound to this clip.
+    // Automatically connect and insert onto FX track directly above targetClip
     const state = useEditorStore.getState();
-    state.updateClip(targetClip.id, {
+    const fxTrackId = state.ensureFxTrackAbove(targetClip.trackId);
+    const fxClipId = `custom-fx-clip-${Date.now()}`;
+    const fxClip: TimelineClip = {
+      id: fxClipId,
+      mediaId: fxItem.id,
+      trackId: fxTrackId,
+      startTime: targetClip.startTime,
+      duration: targetClip.duration,
+      trimStart: 0,
+      trimEnd: 0,
+      opacity: 1,
+      speed: 1,
+      effects: [],
+      transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+      linkedClipId: targetClip.id,
       fxSettings: {
         type: 'custom_html',
         intensity: 100,
         customFxId: fxItem.id,
         customHtmlCss: fxItem.htmlCss,
         customFxName: fxItem.name,
-        enabled: true,
-        isCollapsed: false, // Expands initially so user sees the sub-track immediately over the clip!
       },
-    });
-    state.selectClip(targetClip.id);
+    };
+
+    // CRITICAL: Do NOT use insertClip() here — it performs a ripple insert that
+    // shifts ALL clips on ALL tracks forward by fxClip.duration, which pushes the
+    // original video clip off its position (the "clip disappears" bug).
+    // Instead, directly place the FX clip onto the FX track without rippling.
+    useEditorStore.setState((s) => ({
+      tracks: s.tracks.map((track) => {
+        if (track.id !== fxTrackId) return track;
+        return {
+          ...track,
+          clips: [...track.clips, fxClip as any].sort((a, b) => a.startTime - b.startTime),
+        };
+      }),
+      selectedClipId: fxClipId,
+      selectedClipIds: [fxClipId],
+    }));
+    state.updateClip(targetClip.id, { linkedClipId: fxClipId });
     state.saveSnapshot('Apply Custom FX to Clip');
-    toast.success(`✨ Applied "${fxItem.name}" to ${(targetClip as any).name || targetClip.id}`);
     onClose();
   }, [resultHtml, targetClip, resultName, resultDescription, resultThumbnail, audioBreakdown, visualBreakdown, resultReasoning, resultPrompt, addCustomFx, onClose]);
 

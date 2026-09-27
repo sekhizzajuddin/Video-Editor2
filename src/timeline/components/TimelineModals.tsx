@@ -324,40 +324,6 @@ export function TimelineModals({
                     </>
                   )}
 
-                  {/* ── Custom AI FX Sub-Track Option ── */}
-                  {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'image') && (() => {
-                    const targetClipInfo = findClipDeep(useEditorStore.getState(), contextMenu.clipId)?.clip;
-                    const hasFx = !!targetClipInfo?.fxSettings;
-                    return (
-                      <>
-                        <button
-                          className="w-full text-left px-3 py-2 text-xs text-rose-300 hover:bg-rose-950/30 flex items-center gap-2 transition-colors font-medium"
-                          onClick={() => {
-                            useEditorStore.getState().openCustomFxMaker(contextMenu.clipId);
-                            setContextMenu(null);
-                          }}
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                          {hasFx ? '✨ Re-Think Custom AI FX Sub-Track' : '✨ Add Custom AI FX Sub-Track'}
-                        </button>
-                        {hasFx && (
-                          <button
-                            className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors border-b border-[#3e3e3e] pb-2"
-                            onClick={() => {
-                              useEditorStore.getState().updateClip(contextMenu.clipId, { fxSettings: undefined });
-                              useEditorStore.getState().saveSnapshot('Remove FX from Clip');
-                              toast.success('Removed FX sub-track from clip');
-                              setContextMenu(null);
-                            }}
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                            Remove FX Sub-Track
-                          </button>
-                        )}
-                      </>
-                    );
-                  })()}
-
                    {/* Extract Audio */}
                   {contextMenu.mediaType === 'video' && !findClipDeep(useEditorStore.getState(), contextMenu.clipId)?.clip?.linkedClipId && (
                     <button

@@ -297,7 +297,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
           if (!targetClip) {
             for (const t of state.tracks) {
-              if (t.type === 'video' || t.type === 'text') {
+              if (t.type === 'video' || t.type === 'image' || t.type === 'text') {
                 const c = t.clips.find((clip) => dropTime >= clip.startTime && dropTime < clip.startTime + clip.duration);
                 if (c) { targetClip = c; break; }
               }
@@ -320,7 +320,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
             state.saveSnapshot('Apply Custom FX to Clip');
             setHoveredTrackId(null);
             setDropPreview(null);
-            toast.success(`✨ Applied "${customFx.name}" to ${(targetClip as any).name || targetClip.id}`);
+            toast.success(`✨ Applied "${customFx.name}" to ${targetClip.name || 'clip'}`);
             return;
           } else {
             toast.info('Drop onto a video or image clip to attach this FX');

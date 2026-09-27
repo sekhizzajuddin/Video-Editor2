@@ -330,8 +330,6 @@ export interface ClipFxSettings {
   customFxId?: string;       // Reference to CustomFxItem.id
   customHtmlCss?: string;    // Inline HTML/CSS/SVG code (denormalized for render perf)
   customFxName?: string;     // Display label
-  enabled?: boolean;         // Active vs bypassed toggle
-  isCollapsed?: boolean;     // Semi-collapsed (18px) vs expanded (36px) sub-track state
 }
 
 export type ParticleEffectType =
