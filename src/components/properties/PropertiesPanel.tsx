@@ -2982,6 +2982,37 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       </button>
                     </div>
                   )}
+
+                  {bgAnalysisStatus?.status === 'error' && (
+                    <div className="flex items-center justify-between bg-rose-950/30 border border-rose-500/30 rounded-lg px-2.5 py-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-rose-400" />
+                        <span className="text-[10px] font-medium text-rose-300">
+                          Analysis paused (tap Retry to re-run)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId || m.url === selectedClip.mediaId);
+                          const clipUrl = mediaItem?.url || (selectedClip as any).url || (selectedClip as any).sourceUrl || '';
+                          if (clipUrl) {
+                            startClipBackgroundAnalysis(
+                              selectedClip.id,
+                              clipUrl,
+                              selectedClip.trimStart || 0,
+                              selectedClip.duration || 5,
+                              2,
+                              true
+                            );
+                          }
+                        }}
+                        className="text-[9px] text-rose-400 hover:text-rose-300 hover:underline font-medium"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
                   {/* Mode Selector Chips */}
                   <div>
                     <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium mb-1.5">Cutout Style</label>

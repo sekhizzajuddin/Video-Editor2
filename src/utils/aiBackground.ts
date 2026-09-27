@@ -638,16 +638,41 @@ async function runClipBackgroundAnalysisInternal(
     }
 
     await new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => reject(new Error('Video load timeout')), 8000);
-      video.onloadeddata = () => {
+      if (video.readyState >= 1 && isFinite(video.duration) && video.duration > 0) {
+        resolve();
+        return;
+      }
+      const timeoutId = setTimeout(() => {
+        if (video.readyState >= 1 && isFinite(video.duration) && video.duration > 0) {
+          resolve();
+        } else {
+          reject(new Error('Video load timeout'));
+        }
+      }, 10000);
+
+      const onReady = () => {
         clearTimeout(timeoutId);
+        cleanup();
         resolve();
       };
-      video.onerror = () => {
+      const onError = () => {
         clearTimeout(timeoutId);
-        reject(new Error('Video failed to load for background analysis'));
+        cleanup();
+        reject(new Error('Video failed to load for background analysis: ' + (video.error?.message || 'unknown error')));
       };
+      const cleanup = () => {
+        video.removeEventListener('loadeddata', onReady);
+        video.removeEventListener('loadedmetadata', onReady);
+        video.removeEventListener('canplay', onReady);
+        video.removeEventListener('error', onError);
+      };
+
+      video.addEventListener('loadeddata', onReady);
+      video.addEventListener('loadedmetadata', onReady);
+      video.addEventListener('canplay', onReady);
+      video.addEventListener('error', onError);
       video.src = videoUrl;
+      video.load();
     });
 
     const actualDuration = Math.min(isFinite(video.duration) ? Math.max(0.1, video.duration - startTime) : duration, duration);
@@ -661,6 +686,14 @@ async function runClipBackgroundAnalysisInternal(
     const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
     const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
     const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
+
+    // Update status immediately so UI displays accurate total frames (e.g. 0 / 50 frames)
+    updateClipAnalysisStatus(clipId, {
+      status: 'analyzing',
+      progress: 0,
+      processedFrames: 0,
+      totalFrames: totalKeyframes,
+    });
 
     if (!preRenderedMaskCache.has(clipId)) {
       preRenderedMaskCache.set(clipId, new Map());
@@ -689,21 +722,23 @@ async function runClipBackgroundAnalysisInternal(
         continue;
       }
 
-      // Seek to keyframe timestamp
-      await new Promise<void>((resolve) => {
-        video.currentTime = targetTime;
-        let fallback: any;
-        const onSeek = () => {
-          clearTimeout(fallback);
-          video.removeEventListener('seeked', onSeek);
-          resolve();
-        };
-        video.addEventListener('seeked', onSeek);
-        fallback = setTimeout(() => {
-          video.removeEventListener('seeked', onSeek);
-          resolve();
-        }, 1500);
-      });
+      // Seek to keyframe timestamp only if needed
+      if (Math.abs(video.currentTime - targetTime) > 0.03) {
+        await new Promise<void>((resolve) => {
+          let fallback: any;
+          const onSeek = () => {
+            clearTimeout(fallback);
+            video.removeEventListener('seeked', onSeek);
+            resolve();
+          };
+          video.addEventListener('seeked', onSeek);
+          fallback = setTimeout(() => {
+            video.removeEventListener('seeked', onSeek);
+            resolve();
+          }, 800);
+          video.currentTime = targetTime;
+        });
+      }
 
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 360;
@@ -724,7 +759,10 @@ async function runClipBackgroundAnalysisInternal(
         // No skin-heuristic gating: RVM handles empty scenes gracefully
         // (near-zero alpha), so gating would only introduce mask holes.
         const rvmMaxDim = 512;
-        const res = await segmentWithRVM(segmentationSource as any, clipId, targetTime - startTime, rvmMaxDim).catch(() => null);
+        const res = await segmentWithRVM(segmentationSource as any, clipId, targetTime - startTime, rvmMaxDim).catch((e) => {
+          console.warn('[aiBackground] RVM keyframe error:', e);
+          return null;
+        });
         if (res && res.coverage >= RVM_EMPTY_COVERAGE) {
           bitmap = res.bitmap;
         } else if (res) {
@@ -733,7 +771,7 @@ async function runClipBackgroundAnalysisInternal(
           const maxDim = 512;
           const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
           if (snap) {
-            bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
+            bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16').catch(() => null);
           }
           if (!bitmap) noSubject = true;
         }

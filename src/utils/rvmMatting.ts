@@ -39,9 +39,6 @@ export const RVM_EMPTY_COVERAGE = 0.0008;
 
 // ── float16 helpers ──────────────────────────────────────────────────────────
 
-const NativeFloat16Array: any = typeof window !== 'undefined' ? (window as any).Float16Array : typeof globalThis !== 'undefined' ? (globalThis as any).Float16Array : undefined;
-const HasNativeFloat16 = typeof NativeFloat16Array !== 'undefined';
-
 const _f32 = new Float32Array(1);
 const _u32 = new Uint32Array(_f32.buffer);
 
@@ -78,24 +75,56 @@ function float32ToFloat16Bulk(src: Float32Array): Uint16Array {
   return out;
 }
 
+const GlobalFloat16: any =
+  typeof globalThis !== 'undefined'
+    ? (globalThis as any).Float16Array
+    : typeof window !== 'undefined'
+      ? (window as any).Float16Array
+      : undefined;
+
+function getFloat16ArrayConstructor(): any {
+  if (GlobalFloat16 && GlobalFloat16.from) {
+    return GlobalFloat16;
+  }
+  return Uint16Array;
+}
+
 function createFloat16Tensor(ort: any, dataF32: Float32Array, dims: number[]): any {
-  if (HasNativeFloat16 && NativeFloat16Array) {
-    return new ort.Tensor('float16', new NativeFloat16Array(dataF32), dims);
+  const F16Ctor = getFloat16ArrayConstructor();
+  if (F16Ctor === GlobalFloat16 && GlobalFloat16) {
+    return new ort.Tensor('float16', new GlobalFloat16(dataF32), dims);
   }
   return new ort.Tensor('float16', float32ToFloat16Bulk(dataF32), dims);
 }
 
 function createZeroStateTensor(ort: any): any {
-  if (HasNativeFloat16 && NativeFloat16Array) {
-    return new ort.Tensor('float16', new NativeFloat16Array(1), [1, 1, 1, 1]);
-  }
-  return new ort.Tensor('float16', new Uint16Array(1), [1, 1, 1, 1]);
+  const F16Ctor = getFloat16ArrayConstructor();
+  return new ort.Tensor('float16', new F16Ctor(1), [1, 1, 1, 1]);
 }
 
 // ── Session management ───────────────────────────────────────────────────────
 
 export function isRVMSupported(): boolean {
   return typeof window !== 'undefined';
+}
+
+let isWebGPUDisabled = false;
+
+export function disableRVMWebGPU(): void {
+  isWebGPUDisabled = true;
+}
+
+async function canUseWebGPUF16(): Promise<boolean> {
+  if (isWebGPUDisabled) return false;
+  if (typeof navigator === 'undefined' || !('gpu' in navigator)) return false;
+  try {
+    const adapter = await (navigator as any).gpu.requestAdapter();
+    if (!adapter) return false;
+    // CRITICAL: FP16 model on WebGPU strictly requires the "shader-f16" feature!
+    return adapter.features?.has('shader-f16') === true;
+  } catch {
+    return false;
+  }
 }
 
 let resolvedWasmPath: string | null = null;
@@ -113,11 +142,39 @@ async function getBestWasmPath(): Promise<string> {
   return resolvedWasmPath;
 }
 
+let cachedModelBuffer: Uint8Array | null = null;
+
+async function getOrFetchModelBuffer(): Promise<Uint8Array> {
+  if (cachedModelBuffer) return cachedModelBuffer;
+
+  try {
+    const resp = await fetch(RVM_LOCAL_MODEL_URL);
+    const ct = resp.headers.get('content-type') || '';
+    if (resp.ok && !ct.includes('text/html')) {
+      const buf = new Uint8Array(await resp.arrayBuffer());
+      if (buf.length > 1000000) {
+        cachedModelBuffer = buf;
+        return cachedModelBuffer;
+      }
+    }
+  } catch (e) {
+    console.warn('[rvmMatting] Failed to load local RVM model, trying remote CDN...', e);
+  }
+
+  const resp = await fetch(RVM_REMOTE_MODEL_URL);
+  if (!resp.ok) throw new Error(`RVM model download failed: ${resp.status}`);
+  const buf = new Uint8Array(await resp.arrayBuffer());
+  if (buf.length < 1000000) throw new Error('Invalid RVM model buffer');
+  cachedModelBuffer = buf;
+  return cachedModelBuffer;
+}
+
 let rvmSessionPromise: Promise<any | null> | null = null;
 
-export function loadRVMSession(): Promise<any | null> {
+export function loadRVMSession(forceWasm = false): Promise<any | null> {
   if (!isRVMSupported()) return Promise.resolve(null);
-  if (rvmSessionPromise) return rvmSessionPromise;
+  if (rvmSessionPromise && !forceWasm) return rvmSessionPromise;
+
   rvmSessionPromise = (async () => {
     try {
       const ort: any = (ortModule as any).default || ortModule;
@@ -129,36 +186,28 @@ export function loadRVMSession(): Promise<any | null> {
         }
       } catch { /* already initialized */ }
 
-      let modelBuf: Uint8Array | null = null;
-      try {
-        const resp = await fetch(RVM_LOCAL_MODEL_URL);
-        const ct = resp.headers.get('content-type') || '';
-        if (resp.ok && !ct.includes('text/html')) {
-          const buf = new Uint8Array(await resp.arrayBuffer());
-          if (buf.length > 1000000) {
-            modelBuf = buf;
-          }
+      const modelBuf = await getOrFetchModelBuffer();
+      const allowWebGPU = !forceWasm && (await canUseWebGPUF16());
+
+      if (allowWebGPU) {
+        try {
+          return await ort.InferenceSession.create(modelBuf, {
+            executionProviders: ['webgpu', 'wasm'],
+            graphOptimizationLevel: 'all',
+          });
+        } catch (gpuErr) {
+          console.warn('[rvmMatting] WebGPU session creation failed, falling back to pure WASM:', gpuErr);
+          isWebGPUDisabled = true;
         }
-      } catch (e) {
-        console.warn('[rvmMatting] Failed to load local RVM model, trying remote CDN...', e);
       }
 
-      if (!modelBuf) {
-        const resp = await fetch(RVM_REMOTE_MODEL_URL);
-        if (!resp.ok) throw new Error(`RVM model download failed: ${resp.status}`);
-        const buf = new Uint8Array(await resp.arrayBuffer());
-        if (buf.length < 1000000) throw new Error('Invalid RVM model buffer');
-        modelBuf = buf;
-      }
-
-      const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+      // Pure WASM execution provider (Universal SIMD, zero GPU shader incompatibilities)
       try {
         return await ort.InferenceSession.create(modelBuf, {
-          executionProviders: hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'],
+          executionProviders: ['wasm'],
           graphOptimizationLevel: 'all',
         });
-      } catch (epErr) {
-        console.warn('[rvmMatting] WebGPU session failed, retrying with pure WASM:', epErr);
+      } catch (wasmErr) {
         // Fallback to CDN wasm if local wasm threw
         try {
           if (ort?.env?.wasm) {
@@ -249,12 +298,9 @@ export interface RVMSegmentResult {
 }
 
 async function tensorFloat16Array(t: any): Promise<F16> {
-  if (t.location === 'gpu-buffer') {
-    const buf = await t.getData();
-    if (HasNativeFloat16 && NativeFloat16Array) {
-      return new NativeFloat16Array(buf.buffer, buf.byteOffset, buf.byteLength >> 1);
-    }
-    return new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength >> 1);
+  if (!t) return null;
+  if (typeof t.getData === 'function' && t.location !== 'cpu') {
+    return await t.getData();
   }
   return t.data as F16;
 }
@@ -310,7 +356,7 @@ async function segmentWithRVMInner(
   videoTime: number,
   maxDim: number
 ): Promise<RVMSegmentResult | null> {
-  const session = await loadRVMSession();
+  let session = await loadRVMSession();
   if (!session) return null;
 
   try {
@@ -373,7 +419,23 @@ async function segmentWithRVMInner(
       }
     }
 
-    const out = await session.run(feeds);
+    let out: any;
+    try {
+      out = await session.run(feeds);
+    } catch (runErr: any) {
+      console.warn('[rvmMatting] RVM session.run failed with current EP, switching to WASM:', runErr?.message || runErr);
+      if (!isWebGPUDisabled) {
+        isWebGPUDisabled = true;
+        session = await loadRVMSession(true);
+        if (session) {
+          out = await session.run(feeds);
+        } else {
+          throw runErr;
+        }
+      } else {
+        throw runErr;
+      }
+    }
 
     // Persist new recurrent states (copy — output memory may be reused)
     const newStates: RVMStateTensor[] = [];
@@ -390,12 +452,14 @@ async function segmentWithRVMInner(
     // pha [1,1,H,W] float16 → white-RGB + alpha ImageBitmap
     const pha = out['pha'];
     const phaHalf = await tensorFloat16Array(pha);
+    if (!phaHalf || phaHalf.length === 0) return null;
+
     const pw = pha.dims[3];
     const ph = pha.dims[2];
     const maskData = new ImageData(pw, ph);
     const data32 = new Uint32Array(maskData.data.buffer);
     let sum = 0;
-    const isNativeF16 = HasNativeFloat16 && (phaHalf instanceof (window as any).Float16Array || phaHalf.constructor?.name === 'Float16Array');
+    const isNativeF16 = (GlobalFloat16 && phaHalf instanceof GlobalFloat16) || phaHalf.constructor?.name === 'Float16Array';
     for (let i = 0; i < phaHalf.length; i++) {
       const a = isNativeF16 ? (phaHalf as any)[i] : halfToFloat(phaHalf[i]);
       sum += a;
@@ -405,8 +469,8 @@ async function segmentWithRVMInner(
     const coverage = sum / phaHalf.length;
     const bitmap = await createImageBitmap(maskData);
     return { bitmap, coverage, width: pw, height: ph };
-  } catch (err) {
-    console.warn('[rvmMatting] RVM segmentation error:', err);
+  } catch (err: any) {
+    console.warn('[rvmMatting] RVM segmentation error:', err?.message || err);
     resetRVMState(clipId);
     return null;
   }
