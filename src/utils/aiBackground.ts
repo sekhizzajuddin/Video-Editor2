@@ -417,6 +417,7 @@ const MASK_CACHE_FPS = 20; // Cache key granularity: 20 keys/sec for smooth play
 export const preRenderedMaskCache = new Map<string, Map<number, ImageBitmap | HTMLCanvasElement>>();
 const analysisProgressMap = new Map<string, MaskAnalysisStatus>();
 const progressListeners = new Map<string, Set<(status: MaskAnalysisStatus) => void>>();
+const activeAnalysisPromises = new Map<string, Promise<void>>();
 
 function timeToKey(time: number): number {
   return Math.round(time * MASK_CACHE_FPS);
@@ -479,9 +480,71 @@ export async function startClipBackgroundAnalysis(
   duration: number,
   modelSelection: 0 | 1 | 2 = 1  // Default 1: HD Landscape 16:9 High-Accuracy MediaPipe
 ): Promise<void> {
+  const inFlight = activeAnalysisPromises.get(clipId);
+  if (inFlight) {
+    return inFlight;
+  }
+
   const existing = analysisProgressMap.get(clipId);
-  if (existing && existing.status === 'analyzing') {
-    return; // Analysis job is already running for this clip
+  if (existing && existing.status === 'completed') {
+    return;
+  }
+
+  const job = runClipBackgroundAnalysisInternal(clipId, videoUrl, startTime, duration, modelSelection);
+  activeAnalysisPromises.set(clipId, job);
+  try {
+    await job;
+  } finally {
+    activeAnalysisPromises.delete(clipId);
+  }
+}
+
+async function runClipBackgroundAnalysisInternal(
+  clipId: string,
+  videoUrl: string,
+  startTime: number,
+  duration: number,
+  modelSelection: 0 | 1 | 2 = 1
+): Promise<void> {
+  // If it's an image clip or data URL, run instant static image segmentation (5ms)
+  const isImage = videoUrl.match(/\.(png|jpe?g|webp|gif|bmp|svg)$/i) || videoUrl.startsWith('data:image/');
+  if (isImage) {
+    updateClipAnalysisStatus(clipId, { status: 'analyzing', progress: 0, processedFrames: 0, totalFrames: 1 });
+    try {
+      const img = new Image();
+      if (!videoUrl.startsWith('blob:') && !videoUrl.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Image failed to load for background analysis'));
+        img.src = videoUrl;
+      });
+      const bmp = await segmentSourceWithMediaPipe(img, 'landscape', clipId, 0);
+      if (bmp) {
+        if (!preRenderedMaskCache.has(clipId)) {
+          preRenderedMaskCache.set(clipId, new Map());
+        }
+        const maskMap = preRenderedMaskCache.get(clipId)!;
+        const totalCacheSlots = Math.max(1, Math.ceil(duration * MASK_CACHE_FPS));
+        const startKey = timeToKey(startTime);
+        for (let f = 0; f <= totalCacheSlots; f++) {
+          maskMap.set(startKey + f, bmp);
+        }
+      }
+      updateClipAnalysisStatus(clipId, {
+        status: 'completed',
+        progress: 100,
+        processedFrames: 1,
+        totalFrames: 1,
+      });
+      notifyMaskReady();
+      return;
+    } catch (e) {
+      console.warn('[aiBackground] Image analysis failed:', e);
+      updateClipAnalysisStatus(clipId, { status: 'error', progress: 0, processedFrames: 0, totalFrames: 0 });
+      return;
+    }
   }
 
   updateClipAnalysisStatus(clipId, { status: 'analyzing', progress: 0, processedFrames: 0, totalFrames: 1 });
@@ -883,11 +946,26 @@ export function applyPreRenderedMaskIfAvailable(
   const targetKey = timeToKey(currentVideoTime);
   let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
 
-  // If exact frame isn't ready yet, look for closest analyzed frame within +-3 frames (~150ms)
+  // If exact frame isn't ready yet, look for closest analyzed frame within +-15 frames (~750ms)
   if (!preMask) {
-    for (let offset = 1; offset <= 3; offset++) {
+    for (let offset = 1; offset <= 15; offset++) {
       preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
       if (preMask) break;
+    }
+  }
+  // If still not found, find the closest available key in the cache so no export frame is dropped
+  if (!preMask && clipPreRendered.size > 0) {
+    let closestKey = -1;
+    let minDiff = Infinity;
+    for (const k of clipPreRendered.keys()) {
+      const diff = Math.abs(k - targetKey);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestKey = k;
+      }
+    }
+    if (closestKey >= 0) {
+      preMask = clipPreRendered.get(closestKey);
     }
   }
   if (!preMask) return false;

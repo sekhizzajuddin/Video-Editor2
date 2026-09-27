@@ -161,16 +161,8 @@ export async function applyAiBackgroundSmart(
       return;
     }
 
-    // ── STEP 1: Human Presence Check (< 1ms) ─────────────────────────────
+    // ── STEP 1: Human Presence Check (Used as ROI hint, never as a hard gatekeeper) ──
     const human = detectHumanPresence(sourceElement, clipId, options.skinThreshold);
-
-    if (!human.hasHuman) {
-      // No subject in frame → show the ORIGINAL frame. Never erase pixels:
-      // the previous behavior multiplied the frame alpha via destination-in,
-      // which faded the ENTIRE frame (subject + background) to transparent —
-      // the "vanishing video" bug on clips without people.
-      return;
-    }
 
     // ── STEP 2: Scene Change & Cache Validity ────────────────────────────
     let sceneChanged = false;
@@ -203,10 +195,8 @@ export async function applyAiBackgroundSmart(
       chosenModel = 'landscape';
     }
 
-    // For export (isPlaying=false), always use ONNX for best quality
-    if (!options.isPlaying) {
-      useMediaPipe = false;
-    }
+    // MediaPipe GPU is always allowed as high-speed 5ms fallback (prevents export timeouts)
+    useMediaPipe = true;
 
     // ── STEP 4: Segmentation ─────────────────────────────────────────────
     if (options.isPlaying) {

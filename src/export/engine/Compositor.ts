@@ -680,11 +680,9 @@ export class Compositor {
           // silently vanished on export.
           const sourceTime = layer.sourceMediaTime ?? ((layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
           
-          const mockElement = {
-            currentTime: sourceTime,
-            videoWidth: dw,
-            videoHeight: dh,
-          };
+          // Attach currentTime to drawable so getVideoCurrentTime can look up the temporal mask,
+          // and so applyPreRenderedMaskIfAvailable can draw real frame pixels in blur/color/outline modes.
+          (drawable as any).currentTime = sourceTime;
           
           const extraOptions = {
             mode: layer.aiBackground.mode ?? 'remove',
@@ -700,7 +698,7 @@ export class Compositor {
             tempCtx,
             tempCanvas.width,
             tempCanvas.height,
-            mockElement as any,
+            drawable as any,
             clipId,
             false, // isPlaying = false for export
             modelSelection,
