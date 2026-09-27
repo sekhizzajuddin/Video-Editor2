@@ -98,6 +98,21 @@ export function isRVMSupported(): boolean {
   return typeof window !== 'undefined';
 }
 
+let resolvedWasmPath: string | null = null;
+async function getBestWasmPath(): Promise<string> {
+  if (resolvedWasmPath) return resolvedWasmPath;
+  try {
+    const resp = await fetch('/onnx/ort-wasm-simd-threaded.jsep.mjs', { method: 'HEAD' });
+    const ct = resp.headers.get('content-type') || '';
+    if (resp.ok && !ct.includes('text/html')) {
+      resolvedWasmPath = RVM_LOCAL_WASM_PATH;
+      return resolvedWasmPath;
+    }
+  } catch {}
+  resolvedWasmPath = RVM_WASM_CDN;
+  return resolvedWasmPath;
+}
+
 let rvmSessionPromise: Promise<any | null> | null = null;
 
 export function loadRVMSession(): Promise<any | null> {
@@ -106,18 +121,23 @@ export function loadRVMSession(): Promise<any | null> {
   rvmSessionPromise = (async () => {
     try {
       const ort: any = (ortModule as any).default || ortModule;
+      const wasmPath = await getBestWasmPath();
       try {
         if (ort?.env?.wasm) {
           ort.env.wasm.proxy = false; // Never use cross-origin Web Worker from CDN
-          ort.env.wasm.wasmPaths = RVM_LOCAL_WASM_PATH;
+          ort.env.wasm.wasmPaths = wasmPath;
         }
       } catch { /* already initialized */ }
 
       let modelBuf: Uint8Array | null = null;
       try {
         const resp = await fetch(RVM_LOCAL_MODEL_URL);
-        if (resp.ok) {
-          modelBuf = new Uint8Array(await resp.arrayBuffer());
+        const ct = resp.headers.get('content-type') || '';
+        if (resp.ok && !ct.includes('text/html')) {
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          if (buf.length > 1000000) {
+            modelBuf = buf;
+          }
         }
       } catch (e) {
         console.warn('[rvmMatting] Failed to load local RVM model, trying remote CDN...', e);
@@ -126,7 +146,9 @@ export function loadRVMSession(): Promise<any | null> {
       if (!modelBuf) {
         const resp = await fetch(RVM_REMOTE_MODEL_URL);
         if (!resp.ok) throw new Error(`RVM model download failed: ${resp.status}`);
-        modelBuf = new Uint8Array(await resp.arrayBuffer());
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        if (buf.length < 1000000) throw new Error('Invalid RVM model buffer');
+        modelBuf = buf;
       }
 
       const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;

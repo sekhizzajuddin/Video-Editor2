@@ -400,7 +400,40 @@ export async function segmentBlobToImageBitmap(
  * @param maxDimOverride  Override the max dimension for inference. Default 384.
  *                        Use 256 for pre-analysis (faster, mask-only — no detail needed).
  */
-export function captureSnapshotBlob(
+/**
+ * Universal canvas-to-blob helper supporting both HTMLCanvasElement (.toBlob)
+ * and OffscreenCanvas (.convertToBlob).
+ */
+export async function canvasToBlob(canvas: any, type: string = 'image/jpeg', quality: number = 0.85): Promise<Blob | null> {
+  if (!canvas) return null;
+  if (typeof canvas.convertToBlob === 'function') {
+    try {
+      return await canvas.convertToBlob({ type, quality });
+    } catch {
+      try {
+        return await canvas.convertToBlob({ type: 'image/png' });
+      } catch {
+        return null;
+      }
+    }
+  }
+  if (typeof canvas.toBlob === 'function') {
+    return new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((blob: Blob | null) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          canvas.toBlob((pngBlob: Blob | null) => {
+            resolve(pngBlob || null);
+          }, 'image/png');
+        }
+      }, type, quality);
+    });
+  }
+  return null;
+}
+
+export async function captureSnapshotBlob(
   source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   targetWidth: number,
   targetHeight: number,
@@ -413,24 +446,14 @@ export function captureSnapshotBlob(
 
   const snapCanvas = getPooledCanvas('_snap_capture', inferW, inferH);
   const snapCtx = snapCanvas.getContext('2d');
-  if (!snapCtx) return Promise.resolve(null);
+  if (!snapCtx) return null;
   snapCtx.clearRect(0, 0, inferW, inferH);
   snapCtx.drawImage(source, 0, 0, inferW, inferH);
 
-  // Freeze the snapshot into an immutable Blob immediately.
-  // toBlob is async but fires synchronously from the current canvas state.
-  return new Promise<{ blob: Blob; w: number; h: number } | null>((resolve) => {
-    (snapCanvas as any).toBlob((blob: any) => {
-      if (blob) {
-        resolve({ blob, w: inferW, h: inferH });
-      } else {
-        // Fallback to PNG if JPEG fails
-        (snapCanvas as any).toBlob((pngBlob: any) => {
-          resolve(pngBlob ? { blob: pngBlob, w: inferW, h: inferH } : null);
-        }, 'image/png');
-      }
-    }, 'image/jpeg', 0.85);
-  });
+  // Freeze the snapshot into an immutable Blob immediately (supports OffscreenCanvas)
+  const blob = await canvasToBlob(snapCanvas, 'image/jpeg', 0.85);
+  if (!blob) return null;
+  return { blob, w: inferW, h: inferH };
 }
 
 // ── Pre-rendered Mask Cache & Analysis Job Engine ────────────────────────────
