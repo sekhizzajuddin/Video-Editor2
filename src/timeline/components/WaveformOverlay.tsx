@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import type { MediaItem } from '@/types';
 import type { SpeedFrameSegment } from '@/utils/speedRamp';
+import { getWaveformFromDisk } from '@/utils/diskMediaCache';
 
 interface WaveformOverlayProps {
   media: MediaItem | null;
@@ -20,21 +21,27 @@ interface WaveformOverlayProps {
 
 /**
  * Downsample a high-density peak array to screen pixels using windowed maximum peak sampling.
- * Unlike linear interpolation (which blurs zero-silence gaps into neighboring peaks),
- * windowed max sampling preserves exact sharp dialogue transients and clean zero-level silences.
+ * Directly indexes into [srcStart, srcEnd] range without allocating intermediate sliced arrays.
  */
-function resamplePeaksWindowed(src: number[], targetCount: number): number[] {
+function resamplePeaksWindowed(
+  src: number[],
+  targetCount: number,
+  srcStart = 0,
+  srcEnd = src.length
+): number[] {
   if (src.length === 0 || targetCount <= 0) return [];
+  const safeStart = Math.max(0, Math.min(src.length - 1, srcStart));
+  const safeEnd = Math.max(safeStart + 1, Math.min(src.length, srcEnd));
+  const rangeLen = safeEnd - safeStart;
   const result = new Float32Array(targetCount);
-  const srcLen = src.length;
-  const ratio = srcLen / targetCount;
+  const ratio = rangeLen / targetCount;
 
   for (let i = 0; i < targetCount; i++) {
-    const startIdx = Math.floor(i * ratio);
-    const endIdx = Math.max(startIdx + 1, Math.ceil((i + 1) * ratio));
+    const startIdx = Math.min(safeEnd - 1, safeStart + Math.floor(i * ratio));
+    const endIdx = Math.min(safeEnd, Math.max(startIdx + 1, safeStart + Math.ceil((i + 1) * ratio)));
     
     let max = 0;
-    for (let k = startIdx; k < endIdx && k < srcLen; k++) {
+    for (let k = startIdx; k < endIdx; k++) {
       const val = src[k];
       if (val > max) max = val;
     }
@@ -71,8 +78,27 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
 }: WaveformOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const [diskPeaks, setDiskPeaks] = useState<number[] | null>(null);
+
+  useEffect(() => {
+    if (!media) return;
+    if (media.waveformPeaks && media.waveformPeaks.length > 0) return;
+    let cancelled = false;
+    getWaveformFromDisk(media.id).then((p) => {
+      if (!cancelled && p && p.length > 0) {
+        setDiskPeaks(p);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [media?.id, media?.waveformPeaks]);
+
   // ── One sample per CSS pixel — zero gap — solid DaVinci silhouette ─────
-  const waveformPeaks = media?.waveformPeaks;
+  const waveformPeaks = (media?.waveformPeaks && media.waveformPeaks.length > 0)
+    ? media.waveformPeaks
+    : (diskPeaks && diskPeaks.length > 0) ? diskPeaks : undefined;
+
   const barCount = useMemo(() => {
     // P2 PERF (LOD): 1 sample/px up to 4000 bars; for wider clips the peaks are
     // downsampled and the bars are widened (barW = W / barCount in the painter)
@@ -84,9 +110,6 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
   const peaks = useMemo(() => {
     const src = waveformPeaks && waveformPeaks.length > 0
       ? waveformPeaks
-      // P4 FIX: the fake fallback waveform (plausible speech cadence) was
-      // visually indistinguishable from real audio — actively misleading.
-      // Honest flatline instead; the probe-failure toast tells the user why.
       : new Array(Math.max(4, barCount)).fill(0);
         
     // ── Speed-frame-aware rendering: per-segment source→timeline mapping ──
@@ -114,11 +137,8 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
         const srcStartIdx = Math.max(0, Math.min(totalLen - 1, Math.floor(srcStartRatio * totalLen)));
         const srcEndIdx = Math.max(srcStartIdx + 1, Math.min(totalLen, Math.ceil(srcEndRatio * totalLen)));
 
-        let segSrc = src.slice(srcStartIdx, srcEndIdx);
-        if (segSrc.length === 0) {
-          segSrc = src.slice(0, Math.max(1, Math.floor(totalLen / 10)));
-        }
-        const segPeaks = resamplePeaksWindowed(segSrc, segPixels);
+        // Slice-free direct windowed sampling
+        const segPeaks = resamplePeaksWindowed(src, segPixels, srcStartIdx, srcEndIdx);
         result.push(...segPeaks);
       }
 
@@ -128,7 +148,6 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       return result;
     }
 
-    let finalSrc = src;
     if (trimStart !== undefined && clipDuration !== undefined) {
       const mediaDuration = Math.max(0.01, media?.duration || clipDuration || 1);
       const effectiveSpeed = Math.max(0.01, speed || 1);
@@ -143,11 +162,11 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       const startIdx = Math.max(0, Math.min(totalLen - 1, Math.floor(startRatio * totalLen)));
       const endIdx = Math.max(startIdx + 1, Math.min(totalLen, Math.ceil(endRatio * totalLen)));
       
-      const sliced = src.slice(startIdx, endIdx);
-      finalSrc = sliced.length > 0 ? sliced : src;
+      // Slice-free direct windowed sampling
+      return resamplePeaksWindowed(src, barCount, startIdx, endIdx);
     }
     
-    return resamplePeaksWindowed(finalSrc, barCount);
+    return resamplePeaksWindowed(src, barCount);
   }, [waveformPeaks, barCount, trimStart, clipDuration, speed, media?.duration, speedFrameSegments]);
 
   const [r, g, b] = useMemo(() => parseRGB(color ?? 'rgba(255,255,255,1)'), [color]);
@@ -219,6 +238,14 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       ? `rgba(${r},${g},${b},0.45)`
       : `rgba(${r},${g},${b},0.15)`;
     ctx.fillRect(0, cy - 0.5, W, 1);
+
+    return () => {
+      // Free canvas GPU surface immediately when unmounted (virtualization)
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    };
   }, [peaks, width, height, small, r, g, b]);
 
   return (

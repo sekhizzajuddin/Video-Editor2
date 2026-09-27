@@ -104,4 +104,34 @@ describe('Speed Frame editing before export', () => {
     }
     expect(useEditorStore.getState().history).toHaveLength(6); // initial + add + four drags
   });
+
+  it('splitting a clip with speed frames cleanly partitions speed frames and speedFrameSourceEnd', () => {
+    const store = useEditorStore.getState();
+    // Add speed frame at offset 4 (clip starts at 2, so timeline position 6, duration 10)
+    store.addSpeedFrame('clip', 4);
+    expect(currentClip().speedFrames).toHaveLength(1);
+
+    // Split clip at timeline time 8 (which is relative offset 6s, after the speed frame at 4s)
+    store.splitClip('clip', 8);
+
+    const trackClips = useEditorStore.getState().tracks[0].clips;
+    expect(trackClips).toHaveLength(2);
+    const left = trackClips[0];
+    const right = trackClips[1];
+
+    // Left clip: duration is 6s (from 2 to 8). Contains the speed frame at offset 4.
+    expect(left.duration).toBeCloseTo(6);
+    expect(left.speedFrames).toBeDefined();
+    expect(left.speedFrames).toHaveLength(1);
+    expect(left.speedFrames![0].timelineOffset).toBeCloseTo(4);
+    // Left clip's speedFrameSourceEnd must be splitMediaTime, NOT original 12 or undefined
+    expect(left.speedFrameSourceEnd).toBeDefined();
+    expect(Number.isFinite(left.speedFrameSourceEnd!)).toBe(true);
+
+    // Right clip: duration is 4s (from 8 to 12). Contains NO speed frames.
+    expect(right.duration).toBeCloseTo(4);
+    expect(right.speedFrames).toBeUndefined();
+    // Right clip has no speed frames, so speedFrameSourceEnd must be cleared to undefined!
+    expect(right.speedFrameSourceEnd).toBeUndefined();
+  });
 });

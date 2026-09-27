@@ -49,6 +49,26 @@ if (typeof window !== 'undefined') {
   (window as any).procutTrackAnalysers = trackAnalysers;
 }
 
+/**
+ * Strict teardown of HTMLVideoElement / HTMLAudioElement.
+ * Calling removeAttribute('src') and load() forces Chromium to immediately
+ * release the hardware video decoder, Direct3D11 context, and uncompressed frame buffers.
+ */
+function releaseMediaElement(el: HTMLVideoElement | HTMLAudioElement) {
+  try {
+    el.pause();
+    el.removeAttribute('src');
+    el.load();
+  } catch (_e) {
+    // ignore
+  }
+  try {
+    el.remove();
+  } catch (_e) {
+    // ignore
+  }
+}
+
 function getMasterAudioCtx() {
   if (!masterAudioCtx) {
     const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -1136,7 +1156,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   }, []);
 
   // ---- Pool management (create/remove elements) ----
-  const VIDEO_PROXIMITY_WINDOW = 5;
+  const VIDEO_PROXIMITY_WINDOW = 2.5;
   const AUDIO_PROXIMITY_WINDOW = 15;
   const MAX_GLOBAL_FRAME_CACHE = 30;
 
@@ -1199,38 +1219,62 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
     }
 
-    // ── NON-CONTIGUOUS SPLIT GROUP DETECTION ──────────────────────────
-    // Split segments sharing a <video> element must be time-contiguous.
-    // If the user deleted the middle segment, the remaining clips have a
-    // gap between them — sharing one element forces the browser to seek
-    // back and forth between distant media positions on every playback
-    // tick, causing severe decode stutter.  Detect this and fall back to
-    // per-clip elements for non-contiguous groups.
+    // ── SEQUENTIAL SPLIT GROUP SHARING ────────────────────────────────
+    // Split segments of the same source media share a single <video> element
+    // across cuts, gaps, and trims. Crossing a split boundary simply seeks
+    // currentTime on the shared element rather than instantiating a new decoder.
+    // They only need dedicated elements if two instances actively OVERLAP in time.
     {
       const splitGroups = new Map<string, { clipId: string; start: number; end: number }[]>();
       for (const [clipId, info] of neededClips) {
         if (!info.shareKey.includes('::clip:')) {
-          // This is a split-group shared key
           let group = splitGroups.get(info.shareKey);
           if (!group) { group = []; splitGroups.set(info.shareKey, group); }
           group.push({ clipId, start: info.start, end: info.end });
         }
       }
-      for (const [shareKey, members] of splitGroups) {
+      for (const [, members] of splitGroups) {
         if (members.length < 2) continue;
         members.sort((a, b) => a.start - b.start);
-        let hasGap = false;
+        let hasOverlap = false;
         for (let i = 1; i < members.length; i++) {
-          if (members[i].start - members[i - 1].end > 0.1) {
-            hasGap = true;
+          if (members[i].start < members[i - 1].end - 0.001) {
+            hasOverlap = true;
             break;
           }
         }
-        if (hasGap) {
-          // Reassign each clip in this group to its own dedicated element
+        if (hasOverlap) {
+          // Reassign each clip in this group to its own dedicated element only if overlapping
           for (const m of members) {
             const info = neededClips.get(m.clipId)!;
             info.shareKey = `${info.mediaId}::clip:${m.clipId}`;
+          }
+        }
+      }
+    }
+
+    // ── HARD DECODER POOL CEILING (MAX 4 VIDEO ELEMENTS) ─────────────
+    // Chromium has a hard cap of 16 hardware video decoders across the whole browser.
+    // Capping our pool strictly to 4 video elements guarantees we never exhaust hardware
+    // decoders or crash the GPU process on multi-split/transition/speed-frame timelines.
+    const MAX_VIDEO_ELEMENTS = 4;
+    {
+      const videoKeyDistances = new Map<string, number>();
+      for (const [, info] of neededClips) {
+        if (info.type !== 'video') continue;
+        const isUnderPlayhead = ct >= info.start - 0.05 && ct <= info.end + 0.05;
+        const dist = isUnderPlayhead ? 0 : Math.abs(ct - info.start);
+        const curr = videoKeyDistances.get(info.shareKey);
+        if (curr === undefined || dist < curr) {
+          videoKeyDistances.set(info.shareKey, dist);
+        }
+      }
+      if (videoKeyDistances.size > MAX_VIDEO_ELEMENTS) {
+        const sorted = Array.from(videoKeyDistances.entries()).sort((a, b) => a[1] - b[1]);
+        const allowedKeys = new Set(sorted.slice(0, MAX_VIDEO_ELEMENTS).map((e) => e[0]));
+        for (const [clipId, info] of Array.from(neededClips.entries())) {
+          if (info.type === 'video' && !allowedKeys.has(info.shareKey)) {
+            neededClips.delete(clipId);
           }
         }
       }
@@ -1506,14 +1550,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             if (entry._onVisibilityChange) {
               document.removeEventListener('visibilitychange', entry._onVisibilityChange);
             }
-            el.src = '';
-            el.remove();
+            releaseMediaElement(el);
           } else {
             mediaVideoRefCount.set(entry._shareKey ?? entry.mediaId, remaining);
           }
         } else {
-          entry.el.src = '';
-          entry.el.remove();
+          releaseMediaElement(entry.el);
         }
         pool.delete(clipId);
         videoMap.delete(clipId);
@@ -1737,16 +1779,29 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // scrub/playback fallbacks. shareKey format is `${mediaId}::${groupId}`,
       // so the group id is the part after '::'.
       let splitGroupIdx: Map<string, MediaElement> | null = null;
-      const getSplitGroupEntry = (splitGroupId: string): MediaElement | null => {
+      let mediaIdIdx: Map<string, MediaElement> | null = null;
+      const getSplitGroupEntry = (splitGroupId?: string, mediaId?: string): MediaElement | null => {
         if (!splitGroupIdx) {
           splitGroupIdx = new Map();
+          mediaIdIdx = new Map();
           for (const [, e] of pool) {
-            if (e.type !== 'video' || !e._shareKey) continue;
-            const gid = e._shareKey.split('::')[1];
-            if (gid && !splitGroupIdx.has(gid)) splitGroupIdx.set(gid, e);
+            if (e.type !== 'video' || !e.el) continue;
+            if (e._shareKey) {
+              const gid = e._shareKey.split('::')[1];
+              if (gid && !splitGroupIdx.has(gid)) splitGroupIdx.set(gid, e);
+            }
+            if (e.mediaId && !mediaIdIdx.has(e.mediaId)) {
+              mediaIdIdx.set(e.mediaId, e);
+            }
           }
         }
-        return splitGroupIdx.get(splitGroupId) ?? null;
+        if (splitGroupId && splitGroupIdx && splitGroupIdx.has(splitGroupId)) {
+          return splitGroupIdx.get(splitGroupId)!;
+        }
+        if (mediaId && mediaIdIdx && mediaIdIdx.has(mediaId)) {
+          return mediaIdIdx.get(mediaId)!;
+        }
+        return null;
       };
       // SPEED FRAME FIX: consecutive-buffering-tick counter (hysteresis for the
       // isBuffering flag — see the buffering detection section below).
@@ -1900,8 +1955,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const scrubTime = ct;
         for (const clip of clips) {
         let entry = pool.get(clip.clipId);
-        if (!entry && clip.clip?.splitGroupId) {
-          entry = getSplitGroupEntry(clip.clip.splitGroupId) ?? undefined;
+        if (!entry) {
+          entry = getSplitGroupEntry(clip.clip?.splitGroupId, clip.mediaId) ?? undefined;
         }
         if (!entry || entry.type !== 'video') continue;
         const mediaItem = mediaMap.get(clip.mediaId);
@@ -1943,14 +1998,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // ---- 2. Sync each active element ----
       for (const clip of clips) {
         let entry = pool.get(clip.clipId);
-        // PERF (multi-split fix): the fallback must ONLY match elements of the
-        // same split group. The previous `|| e.type === 'video'` catch-all
-        // grabbed the FIRST video element in pool iteration order (any track,
-        // any media) whenever this clip's own entry was missing, then drove its
-        // currentTime/playbackRate with this clip's mediaTime — two clips
-        // fighting over one decoder produced frame stutter and black frames.
-        if (!entry && clip.clip?.splitGroupId) {
-          entry = getSplitGroupEntry(clip.clip.splitGroupId) ?? undefined;
+        // PERF (multi-split fix): the fallback matches elements of the same split
+        // group, or the same mediaId if no dedicated element is allocated.
+        if (!entry) {
+          entry = getSplitGroupEntry(clip.clip?.splitGroupId, clip.mediaId) ?? undefined;
         }
         if (!entry) continue;
 
@@ -2703,8 +2754,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
             if (entry.feedbackNode) { try { entry.feedbackNode.disconnect(); } catch(e) {} }
             if (entry.delayNode) { try { entry.delayNode.disconnect(); } catch(e) {} }
-            el.src = '';
-            el.remove();
+            releaseMediaElement(el);
           }
           pool.clear();
           videoMapRef.current.clear();

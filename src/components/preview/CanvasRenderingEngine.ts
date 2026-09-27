@@ -54,6 +54,7 @@ import {
   applyTransitionPostEffect,
   applyFeatheredRectMask,
   applyNoiseRevealMask,
+  applyNoiseBandMask,
   type ActiveTransition,
   type LayerDraw,
   type OverlayDraw,
@@ -163,7 +164,7 @@ export interface RenderCanvasParams {
   };
 }
 
-const MAX_POOL_CANVASES = 16;
+const MAX_POOL_CANVASES = 8;
 
 /**
  * Buffers that must never be evicted by the LRU while a frame is in flight.
@@ -217,6 +218,11 @@ export function getOrCreateCanvas(
       // we maintain by delete-then-set below). Reserved buffers are skipped.
       for (const k of offscreenPool.keys()) {
         if (!RESERVED_POOL_KEYS.has(k)) {
+          const evicted = offscreenPool.get(k);
+          if (evicted) {
+            evicted.width = 0;
+            evicted.height = 0;
+          }
           offscreenPool.delete(k);
           break;
         }
@@ -1458,12 +1464,12 @@ export async function renderCanvasEngine({
 
       if (mediaItem.type === 'video') {
         videoEl = videoElements.get(clip.id) || null;
-        if ((!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) && clip.splitGroupId) {
+        if (!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) {
           // Sibling fallback (multi-split fix): O(1) lookup via the per-render
           // indexes built above — was a full videoElements iteration plus a
           // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
           videoEl =
-            splitSiblingEl.get(clip.splitGroupId) ||
+            (clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
             mediaTrackSiblingEl.get(`${clip.mediaId}::${clip.trackId}`) ||
             null;
           if (videoEl) {
@@ -2784,10 +2790,29 @@ export async function renderCanvasEngine({
       applyFeatheredRectMask(bctx, layer.clipRect!, layer.clipFeather!, buf.width, buf.height);
     }
 
+    // Particle trail MUST snapshot the buffer BEFORE the erosion mask below
+    // punches the detached cells out of it — otherwise the flying particles
+    // would have no pixels. The masked main layer + drifting band copies on
+    // top is what makes pixels visibly flow through the air.
+    const trailBufs: HTMLCanvasElement[] = [];
+    if (layer.noiseTrail && layer.noiseTrail.center > 0.02 && layer.noiseTrail.center < 0.98) {
+      const tr = layer.noiseTrail;
+      for (let k = 1; k <= 2; k++) {
+        const trailBuf = getOrCreateCanvas(offscreenCanvasPool.current, bufferKey + '_trail' + k, bufW, bufH);
+        const tctx = trailBuf.getContext('2d');
+        if (!tctx) break;
+        tctx.setTransform(1, 0, 0, 1, 0, 0);
+        tctx.clearRect(0, 0, trailBuf.width, trailBuf.height);
+        tctx.drawImage(buf, 0, 0);
+        applyNoiseBandMask(tctx, tr.center, 0.09, tr.cell, trailBuf.width, trailBuf.height);
+        trailBufs.push(trailBuf);
+      }
+    }
+
     // Particle dissolve reveal: punch the deterministic hash-noise mask out of
     // the layer buffer (shared worker-safe helper — identical mask in export).
     if (layer.noiseReveal) {
-      applyNoiseRevealMask(bctx, layer.noiseReveal.amount, layer.noiseReveal.cell, buf.width, buf.height);
+      applyNoiseRevealMask(bctx, layer.noiseReveal.amount, layer.noiseReveal.cell, buf.width, buf.height, !!layer.noiseReveal.invert);
     }
 
     // Blit the finished layer with the transition's geometry + alpha. `blitCtx`
@@ -2853,6 +2878,28 @@ export async function renderCanvasEngine({
       outCtx.drawImage(buf, 0, 0, buf.width, buf.height, 0, 0, W, H);
     }
     outCtx.restore();
+
+    // ── In-air particle trail (particleDissolve) ───────────────────────────
+    // The cells at the dissolve FRONT detach and fly with the wind: two extra
+    // passes draw band-masked copies of the layer, offset by wind×k and fading,
+    // so the pixels visibly travel through the air before disappearing.
+    if (layer.noiseTrail && trailBufs.length > 0) {
+      const tr = layer.noiseTrail;
+      for (let k = 1; k <= trailBufs.length; k++) {
+        outCtx.save();
+        outCtx.globalAlpha = Math.max(0, Math.min(1, layer.opacity)) * (k === 1 ? 0.8 : 0.45);
+        outCtx.translate(tr.windX * k * W, tr.windY * k * H);
+        if (k === 2) {
+          const shrink = 0.96;
+          outCtx.translate(cxF, cyF);
+          outCtx.scale(shrink, shrink);
+          outCtx.translate(-cxF, -cyF);
+        }
+        const trailBuf = trailBufs[k - 1];
+        outCtx.drawImage(trailBuf, 0, 0, trailBuf.width, trailBuf.height, 0, 0, W, H);
+        outCtx.restore();
+      }
+    }
   };
 
   /** Draw a transition overlay (flat colour OR directional gradient band). */
@@ -3154,9 +3201,33 @@ export async function renderCanvasEngine({
   // the full canvas — matching the export Compositor's full-frame FX pass.
   if (!skipExpensiveFX) {
     for (const track of fxTracks) {
+      if (track.hidden) continue;
+      // If this FX track is linked to a video track, respect the host track's hidden/muted state
+      if (track.linkedTrackId) {
+        const hostTrack = tracks.find((t) => t.id === track.linkedTrackId);
+        if (hostTrack && (hostTrack.hidden || hostTrack.muted)) {
+          continue;
+        }
+      }
       for (const clip of track.clips) {
         if (clip.disabled || !clip.fxSettings) continue;
         if (currentTime < clip.startTime || currentTime >= clip.startTime + clip.duration + 0.001) continue;
+        // If the FX clip is linked to a specific clip, skip if that host clip is disabled
+        if (clip.linkedClipId) {
+          let hostClipFound = false;
+          let hostClipDisabled = false;
+          for (const t of tracks) {
+            const hc = t.clips.find((c) => c.id === clip.linkedClipId);
+            if (hc) {
+              hostClipFound = true;
+              hostClipDisabled = !!hc.disabled;
+              break;
+            }
+          }
+          if (hostClipFound && hostClipDisabled) {
+            continue;
+          }
+        }
         const fxIntensity = clip.fxSettings.intensity ?? 100;
         const fxRelTime = Math.max(0, currentTime - clip.startTime);
         // Custom HTML/CSS FX: render via cached SceneStage pipeline

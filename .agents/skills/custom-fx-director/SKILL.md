@@ -165,4 +165,15 @@ The better of the two attempts is used.
 ### Co-Reasoning Agent (Groq + Gemini)
 1. `openai/gpt-oss-120b` via Groq (preferred reasoning model)
 2. `llama-3.3-70b-versatile` via Groq (fallback)
-3. Gemini Flash cascade (final fallback)
+3. Gemini Flash cascade (`gemini-3.5-flash-lite` -> `gemini-3.8-flash` -> `gemini-2.5-flash`)
+
+---
+
+## Scan Caching & Deep-Thinking Re-generation
+
+To prevent redundant API calls and deliver deeper reasoning on iteration:
+1. **In-Memory Scan Cache**: Clip audio transcripts (Whisper) and scene keyframe breakdowns (Gemini Vision) are cached in `_clipScanCache` keyed by clip ID, media ID, and trim bounds.
+2. **Instant Re-generation**: Clicking "Regenerate" bypasses audio and vision extraction completely, skipping straight to the Co-Reasoning phase with zero re-scan delay.
+3. **Deep Thinking Directives**: On re-generation passes, the temperature is elevated to `0.65` and the AI is instructed to diverge creatively from prior designs, exploring more complex SVG geometries, multi-stage CSS keyframes, and deeper thematic metaphors.
+4. **Enforced Transparency**: All generated HTML passes through `enforceHtmlTransparency()` which forces `background: transparent !important;` on the root container and neutralizes any full-screen opaque rectangles or divs.
+

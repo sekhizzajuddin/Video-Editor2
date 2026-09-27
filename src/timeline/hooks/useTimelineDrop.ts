@@ -40,9 +40,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
         }
       }
-      if (!track && !e.dataTransfer.types.includes('application/procut-media') && !e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/procut-media-sequence')) {
-        // Only return early if track is missing AND we are dropping something that strictly requires a track (like transitions, FX, etc.)
-        // Media items, files, and templates can be dropped on empty space to auto-create tracks.
+      if (!track && !e.dataTransfer.types.includes('application/procut-media') && !e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/procut-media-sequence') && !e.dataTransfer.types.includes('application/procut-effect') && !e.dataTransfer.types.includes('application/procut-custom-fx')) {
+        // Only return early if track is missing AND we are dropping something that strictly requires a track (like transitions)
+        // Media items, files, templates, and FX can be dropped on empty space to auto-create tracks.
         const hasTemplate = e.dataTransfer.getData('application/procut-template');
         if (!hasTemplate) {
           // P3 FIX: clear the stale ghost/highlight — the drop ended here but the
@@ -281,59 +281,181 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         return;
       }
 
-      // ── VFX Effect Drop ──
-      const effectName = e.dataTransfer.getData('application/procut-effect');
-      if (effectName) {
-        let targetTrack = track?.type === 'fx' ? track : useEditorStore.getState().tracks.find((t) => t.type === 'fx');
-        if (!targetTrack) {
-          useEditorStore.getState().addTrack('fx');
-          targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'fx');
-        }
-        if (targetTrack) {
+      // ── Custom AI FX Drop ──
+      const customFxRaw = e.dataTransfer.getData('application/procut-custom-fx');
+      if (customFxRaw) {
+        try {
+          const customFx = JSON.parse(customFxRaw);
+          const state = useEditorStore.getState();
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
           const x = e.clientX - rect.left;
-          const startTime = Math.max(0, x / zoomLevel);
+          const dropTime = Math.max(0, x / zoomLevel);
 
-          const matchedFx = FX_EFFECTS.find(
-            (fx) => fx.name.toLowerCase() === effectName.toLowerCase() || fx.type.toLowerCase() === effectName.toLowerCase()
-          );
-          const fxType = matchedFx?.type ?? effectName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          const fxMediaId = generateId();
-          useEditorStore.getState().addMedia({
-            id: fxMediaId,
-            name: matchedFx?.name || effectName,
-            type: 'fx',
-            duration: 5,
-            url: '',
-            createdAt: Date.now(),
-            fxType,
-          });
+          let targetTrackId: string;
+          let targetClip: TimelineClip | null = null;
+
+          if (track) {
+            if (track.type === 'video' || track.type === 'text') {
+              // Dropped onto a video/text track: snap to clip under cursor, ensure FX track directly above
+              targetClip = track.clips.find((c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration) || null;
+              targetTrackId = state.ensureFxTrackAbove(track.id);
+            } else if (track.type === 'fx') {
+              targetTrackId = track.id;
+              if (track.linkedTrackId) {
+                const hostTrack = state.tracks.find((t) => t.id === track.linkedTrackId);
+                if (hostTrack) {
+                  targetClip = hostTrack.clips.find((c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration) || null;
+                }
+              }
+            } else {
+              const existingFx = state.tracks.find((t) => t.type === 'fx');
+              if (existingFx) {
+                targetTrackId = existingFx.id;
+              } else {
+                const firstVideo = state.tracks.find((t) => t.type === 'video');
+                targetTrackId = firstVideo
+                  ? state.ensureFxTrackAbove(firstVideo.id)
+                  : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+              }
+            }
+          } else {
+            const firstVideo = state.tracks.find((t) => t.type === 'video');
+            targetTrackId = firstVideo
+              ? state.ensureFxTrackAbove(firstVideo.id)
+              : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+          }
+
+          const startTime = targetClip ? targetClip.startTime : dropTime;
+          const duration = targetClip ? targetClip.duration : (customFx.duration || 5);
+          const fxClipId = `fx_clip_${Math.random().toString(36).substr(2, 9)}`;
+
           const fxClip: TimelineClip = {
-            id: generateId(),
-            mediaId: fxMediaId,
-            trackId: targetTrack.id,
+            id: fxClipId,
+            mediaId: customFx.id,
+            trackId: targetTrackId,
             startTime,
-            duration: 5,
+            duration,
             trimStart: 0,
             trimEnd: 0,
             transform: { x: 0, y: 0, scale: 100, rotation: 0 },
             opacity: 1,
             speed: 1,
             effects: [],
+            linkedClipId: targetClip ? targetClip.id : undefined,
             fxSettings: {
-              type: fxType as any,
-              intensity: matchedFx?.defaultSettings?.intensity ?? 100,
-              ...(matchedFx?.defaultSettings || {}),
+              type: 'custom_html' as any,
+              intensity: 100,
+              customFxId: customFx.id,
+              customHtmlCss: customFx.htmlCss,
+              customFxName: customFx.name,
             },
           };
-          useEditorStore.getState().addClip(fxClip);
-          useEditorStore.getState().selectClip(fxClip.id);
-          useEditorStore.getState().saveSnapshot('Add FX Clip');
+
+          state.addClip(fxClip);
+          if (targetClip) {
+            state.updateClip(targetClip.id, { linkedClipId: fxClipId });
+          }
+          state.selectClip(fxClipId);
+          state.saveSnapshot('Add Custom FX Clip');
           setHoveredTrackId(null);
           setDropPreview(null);
-          toast.success(`Added FX clip "${matchedFx?.name || effectName}" to FX track`);
+          toast.success(targetClip ? `Connected "${customFx.name}" with video clip` : `Added "${customFx.name}" to FX track`);
           return;
+        } catch (err) {
+          console.error('Failed to parse custom fx drop', err);
         }
+      }
+
+      // ── VFX Effect Drop ──
+      const effectName = e.dataTransfer.getData('application/procut-effect');
+      if (effectName) {
+        const state = useEditorStore.getState();
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const dropTime = Math.max(0, x / zoomLevel);
+
+        let targetTrackId: string;
+        let targetClip: TimelineClip | null = null;
+
+        if (track) {
+          if (track.type === 'video' || track.type === 'text') {
+            // Dropped onto a video/text track: snap to clip under cursor, ensure FX track directly above
+            targetClip = track.clips.find((c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration) || null;
+            targetTrackId = state.ensureFxTrackAbove(track.id);
+          } else if (track.type === 'fx') {
+            targetTrackId = track.id;
+            if (track.linkedTrackId) {
+              const hostTrack = state.tracks.find((t) => t.id === track.linkedTrackId);
+              if (hostTrack) {
+                targetClip = hostTrack.clips.find((c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration) || null;
+              }
+            }
+          } else {
+            const existingFx = state.tracks.find((t) => t.type === 'fx');
+            if (existingFx) {
+              targetTrackId = existingFx.id;
+            } else {
+              const firstVideo = state.tracks.find((t) => t.type === 'video');
+              targetTrackId = firstVideo
+                ? state.ensureFxTrackAbove(firstVideo.id)
+                : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+            }
+          }
+        } else {
+          const firstVideo = state.tracks.find((t) => t.type === 'video');
+          targetTrackId = firstVideo
+            ? state.ensureFxTrackAbove(firstVideo.id)
+            : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+        }
+
+        const startTime = targetClip ? targetClip.startTime : dropTime;
+        const duration = targetClip ? targetClip.duration : 5;
+
+        const matchedFx = FX_EFFECTS.find(
+          (fx) => fx.name.toLowerCase() === effectName.toLowerCase() || fx.type.toLowerCase() === effectName.toLowerCase()
+        );
+        const fxType = matchedFx?.type ?? effectName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const fxMediaId = generateId();
+        state.addMedia({
+          id: fxMediaId,
+          name: matchedFx?.name || effectName,
+          type: 'fx',
+          duration,
+          url: '',
+          createdAt: Date.now(),
+          fxType,
+        });
+
+        const fxClipId = generateId();
+        const fxClip: TimelineClip = {
+          id: fxClipId,
+          mediaId: fxMediaId,
+          trackId: targetTrackId,
+          startTime,
+          duration,
+          trimStart: 0,
+          trimEnd: 0,
+          transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+          opacity: 1,
+          speed: 1,
+          effects: [],
+          linkedClipId: targetClip ? targetClip.id : undefined,
+          fxSettings: {
+            type: fxType as any,
+            intensity: matchedFx?.defaultSettings?.intensity ?? 100,
+            ...(matchedFx?.defaultSettings || {}),
+          },
+        };
+        state.addClip(fxClip);
+        if (targetClip) {
+          state.updateClip(targetClip.id, { linkedClipId: fxClipId });
+        }
+        state.selectClip(fxClipId);
+        state.saveSnapshot('Add FX Clip');
+        setHoveredTrackId(null);
+        setDropPreview(null);
+        toast.success(targetClip ? `Connected "${matchedFx?.name || effectName}" with clip` : `Added FX clip "${matchedFx?.name || effectName}" to FX track`);
+        return;
       }
 
       // ── NEW: Sequence Drop (Multi-Image) ──
@@ -507,13 +629,14 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
 
       const hasMedia = e.dataTransfer.types.includes('application/procut-media');
       const hasEffect = e.dataTransfer.types.includes('application/procut-effect');
+      const hasCustomFx = e.dataTransfer.types.includes('application/procut-custom-fx');
       const hasColorPreset = e.dataTransfer.types.includes('application/procut-color-preset');
       const hasParticle = e.dataTransfer.types.includes('application/procut-particle');
       const hasTransition = e.dataTransfer.types.includes('application/procut-transition');
       const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
       const hasFiles = e.dataTransfer.types.includes('Files');
 
-      if ((hasMedia || hasEffect || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && (trackIdx >= 0 || hasMedia || hasFiles || hasTemplate)) {
+      if ((hasMedia || hasEffect || hasCustomFx || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && (trackIdx >= 0 || hasMedia || hasFiles || hasTemplate || hasEffect || hasCustomFx)) {
         const dropTime = Math.max(0, x / zoomLevel);
 
         let approxDuration = 5;
@@ -538,9 +661,9 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           mediaType = 'file';
           mediaName = 'Drop file(s)';
           approxDuration = 5;
-        } else if (hasEffect) {
+        } else if (hasEffect || hasCustomFx) {
           mediaType = 'fx';
-          mediaName = 'VFX Effect';
+          mediaName = hasCustomFx ? 'Custom AI FX' : 'VFX Effect';
           approxDuration = 5;
         } else if (hasTemplate) {
           mediaType = 'text';

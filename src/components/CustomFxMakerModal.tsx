@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
-import type { CustomFxItem } from '@/types';
+import type { CustomFxItem, TimelineClip } from '@/types';
 import { generateCustomFx, type CustomFxProgress } from '@/utils/customFxDirector';
-import { X, Sparkles, Music, Eye, RefreshCw, Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { X, Sparkles, Music, Eye, RefreshCw, Check, AlertTriangle, Loader2, Film } from 'lucide-react';
 
 export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
   const { tracks, customFxTargetClipId, addCustomFx, pipWindows, mediaLibrary } = useEditorStore(
@@ -32,6 +32,9 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
   const [visualBreakdown, setVisualBreakdown] = useState<CustomFxItem['visualBreakdown']>(null);
   const [customPrompt, setCustomPrompt] = useState('');
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [iterationCount, setIterationCount] = useState(1);
+  const [previewBgMode, setPreviewBgMode] = useState<'video' | 'checkerboard'>('video');
+  const [videoFrameSnapshot, setVideoFrameSnapshot] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -49,21 +52,32 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
     return mediaItem?.url || mediaItem?.thumbnail || null;
   }, [targetClip, mediaLibrary]);
 
-  const startGeneration = useCallback(async () => {
+  const startGeneration = useCallback(async (isRegen = false) => {
     if (!targetClip || !mediaUrl) {
       setError('No clip selected or media not found');
       return;
     }
 
     setError(null);
-    setPhase('scanning');
-    setMessage('Starting multimodal scan...');
-    setPercent(5);
+    if (isRegen) {
+      setPhase('reasoning');
+      setMessage('⚡ Reusing analyzed scene data • AI thinking deeper...');
+      setPercent(40);
+    } else {
+      setPhase('scanning');
+      setMessage('Starting multimodal scan (Groq Whisper + Gemini Vision)...');
+      setPercent(5);
+    }
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
+      const nextIteration = isRegen ? iterationCount + 1 : 1;
+      if (isRegen) {
+        setIterationCount(nextIteration);
+      }
+
       const result = await generateCustomFx(
         targetClip,
         mediaUrl,
@@ -74,7 +88,13 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
           setMessage(progress.message);
           setPercent(progress.percent);
         },
-        controller.signal
+        controller.signal,
+        {
+          cachedScan: isRegen ? { audioBreakdown, visualBreakdown } : undefined,
+          isRegenerate: isRegen,
+          iteration: nextIteration,
+          previousReasoning: resultReasoning || undefined,
+        }
       );
 
       setResultHtml(result.htmlCss);
@@ -85,6 +105,9 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
       setResultThumbnail(result.thumbnail);
       setAudioBreakdown(result.audioBreakdown);
       setVisualBreakdown(result.visualBreakdown);
+      if (result.videoFrameSnapshot) {
+        setVideoFrameSnapshot(result.videoFrameSnapshot);
+      }
       setPhase('done');
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
@@ -94,14 +117,14 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
     } finally {
       setIsRegenerating(false);
     }
-  }, [targetClip, mediaUrl, customPrompt]);
+  }, [targetClip, mediaUrl, customPrompt, audioBreakdown, visualBreakdown, iterationCount, resultReasoning]);
 
   // Auto-start generation when modal opens and clip is available
   const startedRef = useRef(false);
   useEffect(() => {
     if (targetClip && mediaUrl && phase === 'idle' && !startedRef.current) {
       startedRef.current = true;
-      startGeneration();
+      startGeneration(false);
     }
   }, [targetClip, mediaUrl, phase, startGeneration]);
 
@@ -115,8 +138,7 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
     abortRef.current?.abort();
     setIsRegenerating(true);
     setResultHtml(null);
-    setPhase('idle');
-    setTimeout(() => startGeneration(), 100);
+    setTimeout(() => startGeneration(true), 50);
   }, [startGeneration]);
 
   const handleConfirm = useCallback(() => {
@@ -138,6 +160,37 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
     };
 
     addCustomFx(fxItem);
+
+    // Automatically connect and insert onto FX track directly above targetClip
+    const state = useEditorStore.getState();
+    const fxTrackId = state.ensureFxTrackAbove(targetClip.trackId);
+    const fxClipId = `custom-fx-clip-${Date.now()}`;
+    const fxClip: TimelineClip = {
+      id: fxClipId,
+      mediaId: fxItem.id,
+      trackId: fxTrackId,
+      startTime: targetClip.startTime,
+      duration: targetClip.duration,
+      trimStart: 0,
+      trimEnd: 0,
+      opacity: 1,
+      speed: 1,
+      effects: [],
+      transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+      linkedClipId: targetClip.id,
+      fxSettings: {
+        type: 'custom_html',
+        intensity: 100,
+        customFxId: fxItem.id,
+        customHtmlCss: fxItem.htmlCss,
+        customFxName: fxItem.name,
+      },
+    };
+
+    state.insertClip(fxClip as any, targetClip.startTime, fxTrackId);
+    state.updateClip(targetClip.id, { linkedClipId: fxClipId });
+    state.selectClip(fxClipId);
+    state.saveSnapshot('Apply Custom FX to Clip');
     onClose();
   }, [resultHtml, targetClip, resultName, resultDescription, resultThumbnail, audioBreakdown, visualBreakdown, resultReasoning, resultPrompt, addCustomFx, onClose]);
 
@@ -146,12 +199,14 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
     if (resultHtml && previewRef.current) {
       const container = previewRef.current;
       container.innerHTML = '';
+      const w = container.clientWidth || 600;
+      const scale = w / 1920;
       const wrapper = document.createElement('div');
-      wrapper.style.cssText = 'transform:scale(0.15);transform-origin:top left;width:1920px;height:1080px;position:relative;pointer-events:none;';
+      wrapper.style.cssText = `transform:scale(${scale});transform-origin:top left;width:1920px;height:1080px;position:absolute;top:0;left:0;pointer-events:none;overflow:hidden;`;
       wrapper.innerHTML = resultHtml;
       container.appendChild(wrapper);
     }
-  }, [resultHtml]);
+  }, [resultHtml, previewBgMode]);
 
   const isProcessing = phase !== 'idle' && phase !== 'done' && phase !== 'error';
   const clipName = React.useMemo(() => {
@@ -332,32 +387,84 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
                 <p className="text-[9px] text-[var(--theme-text-muted)] leading-relaxed">{resultReasoning}</p>
               </div>
 
-              {/* Animation Preview */}
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-[var(--theme-text-primary)]">Animation Preview</span>
-                <div
-                  ref={previewRef}
-                  className="w-full h-[108px] rounded-xl border border-[var(--theme-border)] bg-black/50 overflow-hidden relative"
-                />
+              {/* Cached Scan Indicator & Deep-Thinking Status */}
+              <div className="flex items-center justify-between px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[9px]">
+                <div className="flex items-center gap-1.5 text-emerald-300">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span><strong>Clip Data Cached & Locked:</strong> Audio & Vision scan preserved — regenerating thinks deeper without re-scanning.</span>
+                </div>
+                {iterationCount > 1 && (
+                  <span className="px-1.5 py-0.5 bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded font-mono font-bold text-[8px] shrink-0">
+                    Iteration #{iterationCount}
+                  </span>
+                )}
               </div>
 
-              {/* Editable Prompt */}
-              <div className="space-y-1">
+              {/* Animation Preview with Transparency Verification */}
+              <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-[var(--theme-text-primary)]">Custom Prompt (optional)</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-[var(--theme-text-primary)]">Transparent Overlay Preview</span>
+                    <span className="px-1.5 py-0.2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded text-[8px] font-semibold">100% Transparent</span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-[var(--theme-bg-panel)] p-0.5 rounded-lg border border-[var(--theme-border)] text-[9px]">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewBgMode('video')}
+                      className={`px-2 py-0.5 rounded transition-colors ${previewBgMode === 'video' ? 'bg-rose-500/20 text-rose-300 font-semibold' : 'text-[var(--theme-text-muted)] hover:text-white'}`}
+                    >
+                      Over Video Frame
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewBgMode('checkerboard')}
+                      className={`px-2 py-0.5 rounded transition-colors ${previewBgMode === 'checkerboard' ? 'bg-rose-500/20 text-rose-300 font-semibold' : 'text-[var(--theme-text-muted)] hover:text-white'}`}
+                    >
+                      Checkerboard
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative w-full aspect-video rounded-xl border border-[var(--theme-border)] overflow-hidden shadow-inner bg-black">
+                  {/* Background Plate */}
+                  {previewBgMode === 'video' ? (
+                    videoFrameSnapshot ? (
+                      <img src={videoFrameSnapshot} alt="Video Backdrop" className="absolute inset-0 w-full h-full object-cover" />
+                    ) : (
+                      <div className="absolute inset-0 bg-neutral-900 flex items-center justify-center">
+                        <Film className="w-8 h-8 text-neutral-700 animate-pulse" />
+                      </div>
+                    )
+                  ) : (
+                    <div className="absolute inset-0 bg-[radial-gradient(#404040_1.5px,transparent_1.5px)] [background-size:16px_16px] bg-[#121212]" />
+                  )}
+
+                  {/* Rendered Motion Graphics Overlay */}
+                  <div
+                    ref={previewRef}
+                    className="absolute inset-0 pointer-events-none"
+                  />
+                </div>
+              </div>
+
+              {/* Editable Prompt & Deep-Thinking Regenerate */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-[var(--theme-text-primary)]">Custom Prompt & Director Notes</span>
                   <button
                     onClick={handleRegenerate}
-                    disabled={isRegenerating}
-                    className="flex items-center gap-1 px-2 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 rounded-lg text-[9px] font-semibold transition-colors disabled:opacity-50"
+                    disabled={isRegenerating || isProcessing}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white rounded-lg text-[9px] font-bold shadow-md transition-all active:scale-95 disabled:opacity-50"
+                    title="Bypass scanning and prompt the AI to think deeper for a fresh, higher-fidelity design"
                   >
-                    <RefreshCw className={`w-3 h-3 ${isRegenerating ? 'animate-spin' : ''}`} />
-                    Regenerate
+                    <Sparkles className={`w-3 h-3 ${isRegenerating ? 'animate-spin' : ''}`} />
+                    {isRegenerating ? 'Thinking Deeper...' : '✨ Regenerate (Think Deeper)'}
                   </button>
                 </div>
                 <textarea
                   value={customPrompt}
                   onChange={(e) => setCustomPrompt(e.target.value)}
-                  placeholder="Add instructions to refine the animation (e.g. 'Add more neon glow effects', 'Make it more dramatic')..."
+                  placeholder="Optional notes to direct the AI (e.g. 'Emphasize the financial numbers with a neon chart', 'Use a futuristic radar HUD in top right', 'Make it more dramatic')..."
                   className="w-full h-16 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-lg p-2 text-[10px] text-[var(--theme-text-primary)] placeholder-[var(--theme-text-muted)] resize-none focus:outline-none focus:border-rose-500"
                 />
               </div>

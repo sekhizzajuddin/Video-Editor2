@@ -115,6 +115,8 @@ export interface RenderLayer {
   startTime?: number;
   /** Source clip id — used as a deterministic seed for particle simulation. */
   clipId?: string;
+  linkedTrackId?: string;
+  linkedClipId?: string;
   opacity: number;
   chromaKey?: {
     enabled: boolean;
@@ -195,7 +197,8 @@ export interface RenderLayer {
     clipCircle?: { x: number; y: number; r: number };
     clipWedge?: { cx: number; cy: number; angle: number };
     blur?: number;
-    noiseReveal?: { amount: number; cell: number };
+    noiseReveal?: { amount: number; cell: number; invert?: boolean };
+    noiseTrail?: { cell: number; center: number; windX: number; windY: number };
     slices?: { count: number; axis: 'x' | 'y'; spread: number };
   };
   isAdjustmentLayer?: boolean;
@@ -377,11 +380,34 @@ export class FrameScheduler {
       const track = tracks[trackIdx];
       if (track.hidden) continue;
 
+      // If this FX track is linked to a host track, respect host track hidden & muted state
+      if (track.type === 'fx' && track.linkedTrackId) {
+        const hostTrack = tracks.find((t: any) => t.id === track.linkedTrackId);
+        if (hostTrack && (hostTrack.hidden || hostTrack.muted)) {
+          continue;
+        }
+      }
+
       const activeTransition = findActiveTransition(track.clips || [], timestampSeconds);
       const plan = activeTransition ? buildTransitionPlan(activeTransition) : null;
 
       for (const clip of track.clips || []) {
         if (clip.disabled) continue;
+
+        // If this FX clip is linked to a host clip, skip if that host clip is disabled
+        if (track.type === 'fx' && clip.linkedClipId) {
+          let hostClipFound = false;
+          let hostClipDisabled = false;
+          for (const t of tracks) {
+            const hc = (t as any).clips?.find((c: any) => c.id === clip.linkedClipId);
+            if (hc) {
+              hostClipFound = true;
+              hostClipDisabled = !!hc.disabled;
+              break;
+            }
+          }
+          if (hostClipFound && hostClipDisabled) continue;
+        }
 
         const transitionRole = activeTransition
           ? (activeTransition.from.id === clip.id
@@ -451,6 +477,7 @@ export class FrameScheduler {
                 clipWedge: layerDraw.clipWedge,
                 blur: layerDraw.blur,
                 noiseReveal: layerDraw.noiseReveal,
+                noiseTrail: layerDraw.noiseTrail,
                 slices: layerDraw.slices,
               }
             : undefined;
@@ -693,6 +720,8 @@ export class FrameScheduler {
               timestampSeconds: t,
               startTime: st,
               clipId: clip.id,
+              linkedTrackId: track.linkedTrackId,
+              linkedClipId: clip.linkedClipId,
               opacity,
               transform,
               ...visualSettings,

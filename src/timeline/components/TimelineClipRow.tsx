@@ -28,6 +28,9 @@ const defaultMedia: MediaItem = {
   createdAt: 0,
 };
 
+// Stable empty array reference so clipPipWindows doesn't break React.memo equality
+const EMPTY_PIP_ARRAY: PipWindow[] = [];
+
 const VIDEO_WAVEFORM_HEIGHT = 18;
 const inFlightWaveformProbes = new Set<string>();
 const failedWaveformProbes = new Set<string>();
@@ -103,6 +106,7 @@ interface TimelineClipItemProps {
   selectedKeyframeLines: { clipId: string; time: number }[];
   hasOverlap: boolean;
   clipPipWindows: PipWindow[];
+  isVirtualVisible?: boolean;
   
   // Handlers
   handleClipMouseDown: (e: React.PointerEvent, clip: TimelineClip) => void;
@@ -131,6 +135,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   selectedKeyframeLines,
   hasOverlap,
   clipPipWindows,
+  isVirtualVisible = true,
   
   handleClipMouseDown,
   selectClip,
@@ -165,7 +170,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     !failedWaveformProbes.has(media.id);
 
   useEffect(() => {
-    if (!needsWaveformProbe) return;
+    if (!needsWaveformProbe || !isVirtualVisible) return;
     inFlightWaveformProbes.add(media.id);
     import('@/utils/mediaProbe')
       .then(({ extractWaveformFromUrl }) => extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration }))
@@ -348,69 +353,73 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         </div>
       )}
 
-      {/* ── Visual content layer ──────────────────── */}
+      {/* ── Visual content layer (virtualized for low RAM / GPU memory) ── */}
       <div className="absolute inset-0 overflow-hidden rounded pointer-events-none">
-        {(trackType === 'audio' || media.type === 'audio') ? (
-          <WaveformOverlay
-            media={media}
-            clipId={clip.id}
-            width={width}
-            height={clipHeight}
-            color="rgba(255,255,255,1)"
-            trimStart={clip.trimStart}
-            clipDuration={clip.duration}
-            speed={clip.speed}
-            speedFrameSegments={speedSegments}
-          />
-        ) : (
-          <>
-            {media.type === 'video' && (
-              <div style={{ height: mainVisualHeight }} className="relative">
-                <FrameStripOverlay
-                  media={media}
-                  clip={clip}
-                  width={width}
-                  height={mainVisualHeight}
-                  speedFrameSegments={speedSegments}
-                />
-              </div>
-            )}
-
-            {media.type === 'image' && (
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                {media.thumbnail ? (
-                  <img
-                    src={media.thumbnail}
-                    alt=""
-                    draggable={false}
-                    className="w-full h-full object-cover opacity-60"
+        {isVirtualVisible ? (
+          (trackType === 'audio' || media.type === 'audio') ? (
+            <WaveformOverlay
+              media={media}
+              clipId={clip.id}
+              width={width}
+              height={clipHeight}
+              color="rgba(255,255,255,1)"
+              trimStart={clip.trimStart}
+              clipDuration={clip.duration}
+              speed={clip.speed}
+              speedFrameSegments={speedSegments}
+            />
+          ) : (
+            <>
+              {media.type === 'video' && (
+                <div style={{ height: mainVisualHeight }} className="relative">
+                  <FrameStripOverlay
+                    media={media}
+                    clip={clip}
+                    width={width}
+                    height={mainVisualHeight}
+                    speedFrameSegments={speedSegments}
                   />
-                ) : (
-                  <div className="w-full h-full bg-amber-700/30" />
-                )}
-              </div>
-            )}
+                </div>
+              )}
 
-            {isVideoWithAudio && (
-              <div
-                className="relative overflow-hidden border-t border-white/10 bg-black/40 shadow-inner"
-                style={{ height: VIDEO_WAVEFORM_HEIGHT }}
-              >
-                <WaveformOverlay
-                  media={media}
-                  clipId={clip.id}
-                  width={width}
-                  height={VIDEO_WAVEFORM_HEIGHT}
-                  small
-                  color="rgba(219, 234, 254, 0.95)"
-                  trimStart={clip.trimStart}
-                  clipDuration={clip.duration}
-                  speed={clip.speed}
-                  speedFrameSegments={speedSegments}
-                />
-              </div>
-            )}
-          </>
+              {media.type === 'image' && (
+                <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                  {media.thumbnail ? (
+                    <img
+                      src={media.thumbnail}
+                      alt=""
+                      draggable={false}
+                      className="w-full h-full object-cover opacity-60"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-amber-700/30" />
+                  )}
+                </div>
+              )}
+
+              {isVideoWithAudio && (
+                <div
+                  className="relative overflow-hidden border-t border-white/10 bg-black/40 shadow-inner"
+                  style={{ height: VIDEO_WAVEFORM_HEIGHT }}
+                >
+                  <WaveformOverlay
+                    media={media}
+                    clipId={clip.id}
+                    width={width}
+                    height={VIDEO_WAVEFORM_HEIGHT}
+                    small
+                    color="rgba(219, 234, 254, 0.95)"
+                    trimStart={clip.trimStart}
+                    clipDuration={clip.duration}
+                    speed={clip.speed}
+                    speedFrameSegments={speedSegments}
+                  />
+                </div>
+              )}
+            </>
+          )
+        ) : (
+          <div className="w-full h-full opacity-10 bg-white/5" />
         )}
       </div>
 
@@ -705,7 +714,11 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 }: TimelineClipRowProps) {
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
   const allPipWindows = useEditorStore((s) => s.pipWindows);
+  const scrollLeft = useEditorStore((s) => s.scrollLeft);
   const dragCounter = useRef(0);
+
+  const visibleMinX = Math.max(0, scrollLeft - 600);
+  const visibleMaxX = scrollLeft + (typeof window !== 'undefined' ? window.innerWidth : 1920) + 600;
 
   // ── P0 FIX: Build O(1) lookup maps instead of O(N) .find() per clip ──────
   const mediaMap = useMemo(
@@ -874,7 +887,12 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 
         const hasOverlap = overlapIds ? overlapIds.has(clip.id) : false;
         // P0 FIX: O(1) map lookup instead of O(M) .filter() per clip per render
-        const clipPipWindows = pipByParent.get(clip.id) ?? [];
+        const clipPipWindows = pipByParent.get(clip.id) ?? EMPTY_PIP_ARRAY;
+
+        const clipLeft = Number.isFinite(clip.startTime) && Number.isFinite(zoomLevel) ? clip.startTime * zoomLevel : 0;
+        const clipWidth = Number.isFinite(clip.duration) && Number.isFinite(zoomLevel) ? clip.duration * zoomLevel : 16;
+        const clipRight = clipLeft + clipWidth;
+        const isVirtualVisible = clipRight >= visibleMinX && clipLeft <= visibleMaxX;
 
         return (
           <TimelineClipItem
@@ -894,6 +912,7 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
             selectedKeyframeLines={selectedKeyframeLines}
             hasOverlap={hasOverlap}
             clipPipWindows={clipPipWindows}
+            isVirtualVisible={isVirtualVisible}
             handleClipMouseDown={handleClipMouseDown}
             selectClip={selectClip}
             selectTransition={selectTransition}

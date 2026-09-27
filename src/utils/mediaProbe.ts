@@ -9,6 +9,12 @@
 import type { MediaItem, MediaType } from '@/types';
 import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 import { toast } from 'sonner';
+import {
+  saveWaveformToDisk,
+  getWaveformFromDisk,
+  saveFrameStripToDisk,
+  getFrameStripFromDisk,
+} from '@/utils/diskMediaCache';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -163,8 +169,33 @@ export async function probeVideo(
 export async function extractWaveformFromUrl(
   url: string,
   targetPeaks?: number,
-  opts?: { hintDuration?: number }
+  opts?: { hintDuration?: number; mediaId?: string }
 ): Promise<number[]> {
+  const cacheKey = opts?.mediaId || url;
+
+  // Check Temp SSD Storage (IndexedDB) first to avoid re-decoding
+  try {
+    const diskPeaks = await getWaveformFromDisk(cacheKey);
+    if (diskPeaks && diskPeaks.length > 0) {
+      const targetRamPeaks = targetPeaks ?? Math.min(4000, diskPeaks.length);
+      if (diskPeaks.length <= targetRamPeaks) return diskPeaks;
+      const step = diskPeaks.length / targetRamPeaks;
+      const ramPeaks: number[] = new Array(targetRamPeaks);
+      for (let i = 0; i < targetRamPeaks; i++) {
+        const startIdx = Math.floor(i * step);
+        const endIdx = Math.max(startIdx + 1, Math.ceil((i + 1) * step));
+        let m = 0;
+        for (let k = startIdx; k < endIdx && k < diskPeaks.length; k++) {
+          if (diskPeaks[k] > m) m = diskPeaks[k];
+        }
+        ramPeaks[i] = m;
+      }
+      return ramPeaks;
+    }
+  } catch {
+    // proceed to extract
+  }
+
   const hint = opts?.hintDuration ?? 0;
   const decodeRate = hint > 1800 ? 8000 : 16000;
   let audioBuffer: AudioBuffer | null = null;
@@ -197,16 +228,12 @@ export async function extractWaveformFromUrl(
   const rawData = audioBuffer.getChannelData(0);
   const duration = audioBuffer.duration || 1;
 
-  // P2 FIX (peak pyramid): 100 samples/sec of audio for ultra-accurate dialogue
-  // tracking on short clips, scaled down for long media to bound memory.
-  // The old 12,000-peak cap gave a 5-hour clip ≈ 0.67 peaks/sec (waveform was
-  // noise); an uncapped 100/sec gives 1.8M peaks (14MB/clip + multi-MB autosave
-  // payloads). 600k cap = 33 peaks/sec for 5h — sharp enough while bounded.
-  const actualTargetPeaks = targetPeaks ?? Math.min(600000, Math.max(2000, Math.floor(duration * 100)));
-  const samplesPerPeak = Math.max(1, Math.floor(rawData.length / actualTargetPeaks));
+  // High-fidelity peaks calculation (capped at 20,000 for Temp SSD storage)
+  const fullResolutionPeaks = Math.min(20000, Math.max(2000, Math.floor(duration * 100)));
+  const samplesPerPeak = Math.max(1, Math.floor(rawData.length / fullResolutionPeaks));
   const rawPeaks: number[] = [];
 
-  for (let i = 0; i < actualTargetPeaks; i++) {
+  for (let i = 0; i < fullResolutionPeaks; i++) {
     const start = i * samplesPerPeak;
     const end = Math.min(start + samplesPerPeak, rawData.length);
     let max = 0;
@@ -219,14 +246,37 @@ export async function extractWaveformFromUrl(
 
   const maxPeak = Math.max(...rawPeaks, 0.0001);
 
-  // Apply noise-floor thresholding (< 0.02 -> 0) so background room hiss or quiet gaps
+  // Apply noise-floor thresholding (< 0.025 -> 0) so background room hiss or quiet gaps
   // between spoken dialogue words collapse cleanly to 0, making word boundaries crisp.
-  return rawPeaks.map((p) => {
+  const normalizedPeaks = rawPeaks.map((p) => {
     const norm = p / maxPeak;
     if (norm < 0.025) return 0;
     // Mild contrast curve to make speech bursts pop relative to ambient noise
     return Math.min(1, Math.pow((norm - 0.02) / 0.98, 1.15));
   });
+
+  // Save full-fidelity waveform to Temp SSD Storage (IndexedDB)
+  saveWaveformToDisk(cacheKey, normalizedPeaks).catch(() => {});
+
+  // For RAM and in-memory Zustand store: cap to 4,000 samples LOD
+  // (4,000 samples spans a 4K screen at 1 sample/pixel, using only ~32 KB per clip instead of 15 MB)
+  const targetRamPeaks = targetPeaks ?? Math.min(4000, normalizedPeaks.length);
+  if (normalizedPeaks.length <= targetRamPeaks) {
+    return normalizedPeaks;
+  }
+
+  const step = normalizedPeaks.length / targetRamPeaks;
+  const ramPeaks: number[] = new Array(targetRamPeaks);
+  for (let i = 0; i < targetRamPeaks; i++) {
+    const startIdx = Math.floor(i * step);
+    const endIdx = Math.max(startIdx + 1, Math.ceil((i + 1) * step));
+    let m = 0;
+    for (let k = startIdx; k < endIdx && k < normalizedPeaks.length; k++) {
+      if (normalizedPeaks[k] > m) m = normalizedPeaks[k];
+    }
+    ramPeaks[i] = m;
+  }
+  return ramPeaks;
 }
 
 /**
@@ -337,13 +387,26 @@ export async function generateFrameStripOnDemand(
   count = 8,
   maxWidth = 120
 ): Promise<string[]> {
+  try {
+    const diskStrip = await getFrameStripFromDisk(url);
+    if (diskStrip && diskStrip.length > 0) {
+      return diskStrip;
+    }
+  } catch {
+    // proceed to generate
+  }
+
   const inFlight = inFlightStripGenerations.get(url);
   if (inFlight) return inFlight;
 
   const generation = generateFrameStripInternal(url, duration, count, maxWidth);
   inFlightStripGenerations.set(url, generation);
   try {
-    return await generation;
+    const strip = await generation;
+    if (strip && strip.length > 0) {
+      saveFrameStripToDisk(url, strip).catch(() => {});
+    }
+    return strip;
   } finally {
     if (inFlightStripGenerations.get(url) === generation) {
       inFlightStripGenerations.delete(url);

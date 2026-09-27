@@ -63,7 +63,7 @@ import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/edito
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 import { isKineticMediaId } from '@/utils/kineticSync';
 import { useShallow } from 'zustand/react/shallow';
-import type { MediaTab, MediaType, MediaItem } from '@/types';
+import type { MediaTab, MediaType, MediaItem, TimelineClip } from '@/types';
 import { probeFile } from '@/utils/mediaProbe';
 import { saveFileToDB } from '@/utils/projectPersistence';
 import { storeMediaHandle } from '@/utils/mediaFileHandle';
@@ -540,22 +540,57 @@ export function MediaPanel() {
   };
 
   const handleEffectClick = (effect: any) => {
-    let targetTrack = tracks.find((t) => t.type === 'fx');
-    if (!targetTrack) {
-      addTrack('fx');
-      targetTrack = useEditorStore.getState().tracks.find((t) => t.type === 'fx');
-    }
-    if (!targetTrack) return;
+    const state = useEditorStore.getState();
+    const { currentTime, selectedClipId, tracks } = state;
 
-    const { currentTime } = useEditorStore.getState();
-    let startTime = currentTime;
-    let attempts = 0;
-    const maxAttempts = 100;
-    const defaultDuration = 5;
-    while (attempts < maxAttempts && targetTrack.clips.some((c) => Math.max(0, Math.min(startTime + defaultDuration, c.startTime + c.duration) - Math.max(startTime, c.startTime)) > 0)) {
-       startTime += defaultDuration + 0.1;
-       attempts++;
+    // Find target video clip to connect with:
+    // 1. Explicitly selected clip
+    // 2. Or clip under playhead on any video/text track
+    let targetClip: TimelineClip | null = null;
+    let hostTrackId: string | null = null;
+
+    if (selectedClipId) {
+      for (const t of tracks) {
+        const c = t.clips.find((clip) => clip.id === selectedClipId);
+        if (c && (t.type === 'video' || t.type === 'text')) {
+          targetClip = c;
+          hostTrackId = t.id;
+          break;
+        }
+      }
     }
+
+    if (!targetClip) {
+      for (const t of tracks) {
+        if (t.type === 'video' || t.type === 'text') {
+          const c = t.clips.find((clip) => currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration);
+          if (c) {
+            targetClip = c;
+            hostTrackId = t.id;
+            break;
+          }
+        }
+      }
+    }
+
+    // Determine target FX track: directly above the host track if available/created
+    let targetTrackId: string;
+    if (hostTrackId) {
+      targetTrackId = state.ensureFxTrackAbove(hostTrackId);
+    } else {
+      const existingFx = state.tracks.find((t) => t.type === 'fx');
+      if (existingFx) {
+        targetTrackId = existingFx.id;
+      } else {
+        const firstVideo = state.tracks.find((t) => t.type === 'video');
+        targetTrackId = firstVideo
+          ? state.ensureFxTrackAbove(firstVideo.id)
+          : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+      }
+    }
+
+    const startTime = targetClip ? targetClip.startTime : currentTime;
+    const duration = targetClip ? targetClip.duration : 5;
 
     const matchedFx = FX_EFFECTS.find(
       (fx) => fx.name.toLowerCase() === effect.name.toLowerCase() || fx.type === effect.type
@@ -564,11 +599,11 @@ export function MediaPanel() {
     const fxMediaId = `fx_media_${Math.random().toString(36).substr(2, 9)}`;
     const fxClipId = `fx_clip_${Math.random().toString(36).substr(2, 9)}`;
     
-    addMedia({
+    state.addMedia({
       id: fxMediaId,
       name: effect.name,
       type: 'fx',
-      duration: defaultDuration,
+      duration,
       url: '',
       createdAt: Date.now(),
       fxType,
@@ -577,15 +612,16 @@ export function MediaPanel() {
     const fxClip: any = {
       id: fxClipId,
       mediaId: fxMediaId,
-      trackId: targetTrack.id,
+      trackId: targetTrackId,
       startTime,
-      duration: defaultDuration,
+      duration,
       trimStart: 0,
       trimEnd: 0,
       transform: { x: 0, y: 0, scale: 100, rotation: 0 },
       opacity: 1,
       speed: 1,
       effects: [],
+      linkedClipId: targetClip ? targetClip.id : undefined,
       fxSettings: {
         type: fxType as any,
         intensity: effect.defaultSettings?.intensity ?? matchedFx?.defaultSettings?.intensity ?? 100,
@@ -593,10 +629,13 @@ export function MediaPanel() {
         ...(effect.defaultSettings || {}),
       },
     };
-    addClip(fxClip);
-    selectClip(fxClipId);
-    saveSnapshot();
-    toast.success(`Added FX clip "${effect.name}" to FX track`);
+    state.addClip(fxClip);
+    if (targetClip) {
+      state.updateClip(targetClip.id, { linkedClipId: fxClipId });
+    }
+    state.selectClip(fxClipId);
+    state.saveSnapshot('Add FX Clip');
+    toast.success(targetClip ? `Connected "${effect.name}" with clip` : `Added FX clip "${effect.name}" to FX track`);
   };
 
   const handleColorPresetClick = (effect: any) => {
@@ -2991,26 +3030,69 @@ export function MediaPanel() {
                             e.dataTransfer.effectAllowed = 'copy';
                           }}
                           onClick={() => {
-                            // Add custom FX to the FX track at playhead
                             const state = useEditorStore.getState();
-                            const fxTrack = state.tracks.find((t: any) => t.type === 'fx');
-                            if (!fxTrack) {
-                              toast.info('Add an FX track first');
-                              return;
+                            const { currentTime, selectedClipId, tracks } = state;
+                            
+                            // Find target video clip to connect with:
+                            let targetClip: TimelineClip | null = null;
+                            let hostTrackId: string | null = null;
+
+                            if (selectedClipId) {
+                              for (const t of tracks) {
+                                const c = t.clips.find(clip => clip.id === selectedClipId);
+                                if (c && (t.type === 'video' || t.type === 'text')) {
+                                  targetClip = c;
+                                  hostTrackId = t.id;
+                                  break;
+                                }
+                              }
                             }
+
+                            if (!targetClip) {
+                              for (const t of tracks) {
+                                if (t.type === 'video' || t.type === 'text') {
+                                  const c = t.clips.find(clip => currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration);
+                                  if (c) {
+                                    targetClip = c;
+                                    hostTrackId = t.id;
+                                    break;
+                                  }
+                                }
+                              }
+                            }
+
+                            let targetTrackId: string;
+                            if (hostTrackId) {
+                              targetTrackId = state.ensureFxTrackAbove(hostTrackId);
+                            } else {
+                              const existingFx = state.tracks.find(t => t.type === 'fx');
+                              if (existingFx) {
+                                targetTrackId = existingFx.id;
+                              } else {
+                                const firstVideo = state.tracks.find(t => t.type === 'video');
+                                targetTrackId = firstVideo
+                                  ? state.ensureFxTrackAbove(firstVideo.id)
+                                  : (state.addTrack('fx'), useEditorStore.getState().tracks.find(t => t.type === 'fx')!.id);
+                              }
+                            }
+
+                            const startTime = targetClip ? targetClip.startTime : currentTime;
+                            const duration = targetClip ? targetClip.duration : (fx.duration || 3);
                             const clipId = `custom-fx-clip-${Date.now()}`;
+
                             state.insertClip({
                               id: clipId,
                               mediaId: fx.id,
-                              trackId: fxTrack.id,
-                              startTime: state.currentTime,
-                              duration: fx.duration || 3,
+                              trackId: targetTrackId,
+                              startTime,
+                              duration,
                               trimStart: 0,
                               trimEnd: 0,
                               opacity: 1,
                               speed: 1,
                               effects: [],
                               transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+                              linkedClipId: targetClip ? targetClip.id : undefined,
                               fxSettings: {
                                 type: 'custom_html',
                                 intensity: 100,
@@ -3018,8 +3100,14 @@ export function MediaPanel() {
                                 customHtmlCss: fx.htmlCss,
                                 customFxName: fx.name,
                               },
-                            } as any, state.currentTime, fxTrack.id);
-                            toast.success(`Added "${fx.name}" to FX track`);
+                            } as any, startTime, targetTrackId);
+
+                            if (targetClip) {
+                              state.updateClip(targetClip.id, { linkedClipId: clipId });
+                            }
+                            state.selectClip(clipId);
+                            state.saveSnapshot('Add Custom FX Clip');
+                            toast.success(targetClip ? `Connected "${fx.name}" with video clip` : `Added "${fx.name}" to FX track`);
                           }}
                           className="group relative flex items-center gap-3 p-2.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-xl cursor-pointer hover:border-amber-500/50 hover:bg-amber-500/5 transition-all hover:shadow-md active:scale-[0.98]"
                         >
@@ -3460,19 +3548,25 @@ export const TransitionCard = React.memo(function TransitionCard({ transition, o
           }
         }
         ctx.restore();
-      } else if (nameLower.includes('disassemble') || (nameLower.includes('assemble') && !nameLower.includes('disassemble'))) {
-        const dis = nameLower.includes('disassemble');
-        drawImageCover(dis ? imgB : imgA, 1);
-        // Slice illusion: alternating strips offset
+      } else if (nameLower.includes('slice') || nameLower.includes('assemble')) {
+        // Merged slice shift: A's strips slide apart WHILE B's converge.
         const n = 6;
-        const spread = dis ? t : 1 - t;
         for (let i = 0; i < n; i++) {
           const dir = i % 2 === 0 ? 1 : -1;
           ctx.save();
           ctx.beginPath();
           ctx.rect(0, (i * H) / n, W, H / n);
           ctx.clip();
-          drawImageCover(dis ? imgA : imgB, 1, 1, dir * spread * 20, 0);
+          drawImageCover(imgA, 1 - t * 0.45, 1, dir * t * 22, 0);
+          ctx.restore();
+        }
+        for (let i = 0; i < n; i++) {
+          const dir = i % 2 === 0 ? -1 : 1;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, (i * H) / n, W, H / n);
+          ctx.clip();
+          drawImageCover(imgB, 0.3 + 0.7 * t, 1, dir * (1 - t) * 22, 0);
           ctx.restore();
         }
       } else if (nameLower.includes('fold')) {

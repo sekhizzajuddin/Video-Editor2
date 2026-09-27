@@ -104,7 +104,7 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
         // (tab freeze). Also cap per-segment thumbs as a hard safety bound.
         const safeWidth = Number.isFinite(width) && width > 0 ? width : 1;
         const segPx = Math.max(1, (segTimelineDur / Math.max(clip.duration, 0.01)) * safeWidth);
-        const segThumbs = Math.min(64, Math.max(1, Math.ceil(segPx / thumbBaseWidth)));
+        const segThumbs = Math.min(16, Math.max(1, Math.ceil(segPx / thumbBaseWidth)));
         const segThumbW = segPx / segThumbs;
 
         // Source range → frame strip indices
@@ -134,6 +134,8 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
               src={t.src}
               alt=""
               draggable={false}
+              loading="lazy"
+              decoding="async"
               className="h-full object-cover shrink-0 border-r border-white/5"
               style={{ width: `${t.w}px` }}
             />
@@ -158,10 +160,9 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
     const thumbWidth = Math.max(32, Math.min(80, Math.round((height || 36) * 1.5)));
     // P1 FIX: guard NaN width (Math.max(1, NaN) === NaN → silent empty render)
     const safeWidth = Number.isFinite(width) && width > 0 ? width : 1;
-    // P2 PERF (progressive thumbs): cap at 64 and widen each thumb — a 5-hour
-    // clip at zoom 1 produced 450 <img> nodes (the same 8 frames repeated ~56×,
-    // each decoding a JPEG). Same frame boundaries, 64 nodes, one decode each.
-    const numThumbs = Math.min(64, Math.max(1, Math.ceil(safeWidth / thumbWidth)));
+    // P2 PERF (progressive thumbs): cap at min(renderFrames.length * 2, 24) and widen each thumb —
+    // avoids creating 64 redundant DOM nodes and decoding duplicate JPEG base64 strings repeatedly.
+    const numThumbs = Math.min(renderFrames.length * 2, Math.min(24, Math.max(1, Math.ceil(safeWidth / thumbWidth))));
     const singleThumbWidth = safeWidth / numThumbs;
 
     const displayThumbs: string[] = [];
@@ -178,6 +179,8 @@ export const FrameStripOverlay = React.memo(function FrameStripOverlay({
             src={src}
             alt=""
             draggable={false}
+            loading="lazy"
+            decoding="async"
             className="h-full object-cover shrink-0 border-r border-white/5"
             style={{ width: `${singleThumbWidth}px` }}
           />

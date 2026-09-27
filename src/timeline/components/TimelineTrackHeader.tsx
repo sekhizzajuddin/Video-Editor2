@@ -132,12 +132,37 @@ export function TimelineTrackHeader({
           </select>
         )}
 
+        {track.type === 'fx' && (
+          <div className="flex items-center gap-0.5 ml-1" onClick={(e) => e.stopPropagation()}>
+            <span className="text-[8px] text-rose-400 font-bold" title="Connected Video Track">🔗</span>
+            <select
+              value={track.linkedTrackId || ''}
+              onChange={(e) => {
+                e.stopPropagation();
+                const hostId = e.target.value || undefined;
+                useEditorStore.getState().setTrackLinkedHost(track.id, hostId);
+              }}
+              className="bg-[var(--theme-bg-card)] border border-rose-500/30 text-[9px] text-rose-300 font-medium rounded px-1 py-0.5 outline-none cursor-pointer max-w-[68px] truncate"
+              title={linkedTargetTrackName ? `Connected to ${linkedTargetTrackName}` : 'Affects all tracks below'}
+            >
+              <option value="">All Below</option>
+              {tracks
+                .filter((t) => (t.type === 'video' || t.type === 'text') && t.id !== track.id)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
+
         {linkedFxTrack && (
           <span
-            className="ml-1 px-1 py-0.5 bg-rose-500/15 text-rose-500 border border-rose-500/25 rounded text-[7px] font-bold uppercase tracking-wider scale-90"
-            title={`Affected by FX track ${linkedFxTrack.name}`}
+            className="ml-1 px-1 py-0.5 bg-rose-500/15 text-rose-400 border border-rose-500/30 rounded text-[7px] font-bold tracking-wider"
+            title={`Connected with ${linkedFxTrack.name}`}
           >
-            FX
+            FX 🔗
           </span>
         )}
       </div>

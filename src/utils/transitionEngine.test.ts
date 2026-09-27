@@ -332,24 +332,40 @@ describe('buildTransitionPlan', () => {
     expect(mid.from.opacity).toBeCloseTo(1); // A untouched underneath
   });
 
-  it('sliceShift disassembles A (out) or assembles B (in)', () => {
-    const dis = planAt({ type: 'sliceShift', name: 'Disassemble', duration: 1 }, 0.5);
-    expect(dis.from.slices).toBeDefined();
-    expect(dis.from.slices!.spread).toBeGreaterThan(0);
+  it('sliceShift disassembles A AND assembles B simultaneously (merged)', () => {
+    const mid = planAt({ type: 'sliceShift', name: 'Slice Shift', duration: 1 }, 0.5);
+    // Outgoing clip flies apart ...
+    expect(mid.from.slices).toBeDefined();
+    expect(mid.from.slices!.spread).toBeGreaterThan(0);
+    // ... while the incoming clip converges.
+    expect(mid.to.slices).toBeDefined();
+    expect(mid.to.slices!.spread).toBeGreaterThan(0);
+    // Seamless endpoints: at t=1 B is fully assembled, at t=0 A is intact.
+    const start = planAt({ type: 'sliceShift', name: 'Slice Shift', duration: 1 }, 0);
+    expect(start.from.slices!.spread).toBeCloseTo(0, 5);
+    const end = planAt({ type: 'sliceShift', name: 'Slice Shift', duration: 1 }, 1);
+    expect(end.to.slices!.spread).toBeCloseTo(0, 5);
+    // Legacy names still map onto the same merged transition
+    expect(normalizeTransition({ type: 'x', name: 'Disassemble', duration: 1 }).kind).toBe('sliceShift');
+    expect(normalizeTransition({ type: 'x', name: 'Assemble', duration: 1 }).kind).toBe('sliceShift');
+  });
 
-    const as = planAt({ type: 'sliceShift', name: 'Assemble', duration: 1 }, 0.5);
-    expect(as.to.slices).toBeDefined();
-    // Assemble converges: end-of-transition spread is zero
-    const asEnd = planAt({ type: 'sliceShift', name: 'Assemble', duration: 1 }, 1);
-    expect(asEnd.to.slices!.spread).toBeCloseTo(0, 5);
+  it('particleDissolve erodes A with inverted mask and emits in-air wind trails', () => {
+    const mid = planAt({ type: 'particleDissolve', name: 'Particle Dissolve', duration: 1 }, 0.5);
+    // B materialises ahead of the front
+    expect(mid.to.noiseReveal).toBeDefined();
+    // A erodes in the SAME cells (inverted mask)
+    expect(mid.from.noiseReveal?.invert).toBe(true);
+    // Detaching pixels flow with the wind (convection: up + sideways)
+    expect(mid.from.noiseTrail).toBeDefined();
+    expect(mid.from.noiseTrail!.windY).toBeLessThan(0);
+    expect(mid.from.noiseTrail!.windX).not.toBe(0);
   });
 
   it('premium preset display names map to the premium kinds', () => {
     expect(normalizeTransition({ type: 'x', name: 'Paper Fold Right', duration: 1 }).kind).toBe('paperFold');
     expect(normalizeTransition({ type: 'x', name: 'Particle Dissolve', duration: 1 }).kind).toBe('particleDissolve');
-    // "Disassemble" contains "assemble" — disassemble must win
-    expect(normalizeTransition({ type: 'x', name: 'Disassemble', duration: 1 }).zoomDirection).toBe('out');
-    expect(normalizeTransition({ type: 'x', name: 'Assemble', duration: 1 }).kind).toBe('sliceShift');
+    expect(normalizeTransition({ type: 'x', name: 'Slice Shift', duration: 1 }).kind).toBe('sliceShift');
     expect(normalizeTransition({ type: 'x', name: 'Paper Fold Top', duration: 1 }).direction).toBe('up');
   });
 });

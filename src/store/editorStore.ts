@@ -115,6 +115,40 @@ let _transactionTimeoutId: ReturnType<typeof setTimeout> | null = null;
 // Create empty tracks
 const createEmptyTracks = (): TimelineTrack[] => [];
 
+/**
+ * Automatically synchronizes each FX track's `linkedTrackId` with the visual track (video/text)
+ * positioned directly underneath it in the timeline stacking hierarchy.
+ */
+export const syncFxTrackLinkages = (tracks: TimelineTrack[]): TimelineTrack[] => {
+  let changed = false;
+  const updated = tracks.map((track, i) => {
+    if (track.type !== 'fx') return track;
+    // Look downwards first for the immediate visual track (video or text) directly underneath
+    let newLink: string | undefined = undefined;
+    for (let j = i + 1; j < tracks.length; j++) {
+      if (tracks[j].type === 'video' || tracks[j].type === 'text') {
+        newLink = tracks[j].id;
+        break;
+      }
+    }
+    // If not found downwards, look upwards
+    if (!newLink) {
+      for (let j = i - 1; j >= 0; j--) {
+        if (tracks[j].type === 'video' || tracks[j].type === 'text') {
+          newLink = tracks[j].id;
+          break;
+        }
+      }
+    }
+    if (track.linkedTrackId !== newLink) {
+      changed = true;
+      return { ...track, linkedTrackId: newLink };
+    }
+    return track;
+  });
+  return changed ? updated : tracks;
+};
+
 // Check if a clip overlaps with existing clips on a track
 function checkOverlap(
   clips: TimelineClip[],
@@ -286,6 +320,8 @@ interface EditorActions {
   addAdjustmentLayer: (duration?: number) => void;
   removeTrack: (trackId: string) => void;
   reorderTrack: (trackId: string, newIndex: number) => void;
+  setTrackLinkedHost: (fxTrackId: string, hostTrackId: string | undefined) => void;
+  ensureFxTrackAbove: (hostTrackId: string) => string;
 
   // UI
   setActiveMediaTab: (tab: MediaTab) => void;
@@ -2321,6 +2357,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             if (linkedTimingUpdates && clip.id === linkedClipId) {
               return { ...clip, ...linkedTimingUpdates };
             }
+            // Propagate mutual linkedClipId when linkedClipId is explicitly set or cleared
+            if (updates.linkedClipId && clip.id === updates.linkedClipId) {
+              return { ...clip, linkedClipId: clipId };
+            }
+            if (updates.linkedClipId === undefined && 'linkedClipId' in updates && clip.id === linkedClipId) {
+              const { linkedClipId: _, ...rest } = clip;
+              return rest as TimelineClip;
+            }
             if (isTargetTrack && durationDelta !== 0 && found) {
               if (clip.startTime >= found.clip.startTime + found.clip.duration - 0.001) {
                 return { ...clip, startTime: clip.startTime + durationDelta };
@@ -3262,6 +3306,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             transitionOut: undefined, // Clear transition on the first half of the split
             speedRamp: leftSpeedRamp,
             speedFrames: leftSpeedFrames,
+            speedFrameSourceEnd: leftSpeedFrames ? splitHalves.splitMediaTime : undefined,
             animations: leftAnimations,
             linkedClipId: newLinkedLeftId
           };
@@ -3277,6 +3322,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
             transitionIn: undefined, // Clear transition on the second half of the split
             speedRamp: rightSpeedRamp,
             speedFrames: rightSpeedFrames,
+            speedFrameSourceEnd: rightSpeedFrames ? clip.speedFrameSourceEnd : undefined,
             animations: rightAnimations,
             linkedClipId: newLinkedRightId
           };
@@ -3797,16 +3843,14 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         tracks = [...state.tracks, newTrack];
       }
 
-      return { tracks };
+      return { tracks: syncFxTrackLinkages(tracks) };
     });
     get().saveSnapshot('Add Track');
   },
   removeTrack: (trackId) => {
     set((state) => {
-      let updatedTracks = state.tracks.filter((t) => t.id !== trackId);
-      // Unlink any fx tracks that were linked to this track
-      updatedTracks = updatedTracks.map(t => t.linkedTrackId === trackId ? { ...t, linkedTrackId: undefined } : t);
-      return { tracks: updatedTracks };
+      const updatedTracks = state.tracks.filter((t) => t.id !== trackId);
+      return { tracks: syncFxTrackLinkages(updatedTracks) };
     });
     get().recalcTotalDuration();
     get().saveSnapshot('Delete Track');
@@ -3820,32 +3864,65 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const [track] = tracks.splice(oldIndex, 1);
       tracks.splice(newIndex, 0, track);
       
-      for (let i = 0; i < tracks.length; i++) {
-        if (tracks[i].type === 'fx') {
-          let newLink = undefined;
-          // Search downwards first
-          for (let j = i + 1; j < tracks.length; j++) {
-            if (tracks[j].type === 'video' || tracks[j].type === 'text') {
-              newLink = tracks[j].id;
-              break;
-            }
-          }
-          // Fallback: search upwards
-          if (!newLink) {
-            for (let j = i - 1; j >= 0; j--) {
-              if (tracks[j].type === 'video' || tracks[j].type === 'text') {
-                newLink = tracks[j].id;
-                break;
-              }
-            }
-          }
-          tracks[i] = { ...tracks[i], linkedTrackId: newLink };
-        }
-      }
-      
-      return { tracks };
+      return { tracks: syncFxTrackLinkages(tracks) };
     });
     get().saveSnapshot('Reorder Track');
+  },
+  setTrackLinkedHost: (fxTrackId, hostTrackId) => {
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === fxTrackId ? { ...t, linkedTrackId: hostTrackId } : t
+      ),
+    }));
+    get().saveSnapshot('Link FX Track');
+  },
+  ensureFxTrackAbove: (hostTrackId) => {
+    const state = get();
+    const hostIdx = state.tracks.findIndex((t) => t.id === hostTrackId);
+    if (hostIdx === -1) {
+      const existing = state.tracks.find((t) => t.type === 'fx');
+      if (existing) return existing.id;
+      get().addTrack('fx');
+      return get().tracks.find((t) => t.type === 'fx')!.id;
+    }
+
+    // Check if the track immediately above (hostIdx - 1) is already an FX track
+    const trackAbove = hostIdx > 0 ? state.tracks[hostIdx - 1] : null;
+    if (trackAbove && trackAbove.type === 'fx') {
+      if (trackAbove.linkedTrackId !== hostTrackId) {
+        set((s) => ({
+          tracks: s.tracks.map((t) => (t.id === trackAbove.id ? { ...t, linkedTrackId: hostTrackId } : t)),
+        }));
+      }
+      return trackAbove.id;
+    }
+
+    // Otherwise, create an FX track directly above this host track
+    const typeCount = state.tracks.filter((t) => t.type === 'fx').length;
+    const newFxId = `track_fx_${generateId()}`;
+    const newTrack: TimelineTrack = {
+      id: newFxId,
+      name: `FX${typeCount + 1}`,
+      type: 'fx',
+      linkedTrackId: hostTrackId,
+      clips: [],
+      locked: false,
+      muted: false,
+      hidden: false,
+      volume: 1,
+      pan: 0,
+      solo: false,
+    };
+
+    set((s) => {
+      const idx = s.tracks.findIndex((t) => t.id === hostTrackId);
+      const inserted = idx !== -1
+        ? [...s.tracks.slice(0, idx), newTrack, ...s.tracks.slice(idx)]
+        : [newTrack, ...s.tracks];
+      return { tracks: syncFxTrackLinkages(inserted) };
+    });
+    get().saveSnapshot('Add FX Track Above Video');
+    return newFxId;
   },
 
   // UI
@@ -4576,7 +4653,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }
 
       set({
-        tracks: loadedTracks,
+        tracks: syncFxTrackLinkages(loadedTracks),
         mediaLibrary: data.mediaLibrary,
         folders,
         subtitles,

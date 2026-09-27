@@ -105,8 +105,17 @@ export interface LayerDraw {
    * Particle/noise reveal: the layer is masked by a deterministic hash-noise
    * grid; cells with hash < amount are kept. Fully deterministic (preview ==
    * export, seek-safe). `cell` is the cell size as a fraction of frame height.
+   * `invert: true` keeps cells with hash >= amount instead (erosion mask).
    */
-  noiseReveal?: { amount: number; cell: number };
+  noiseReveal?: { amount: number; cell: number; invert?: boolean };
+  /**
+   * In-air particle flow: the cells of the layer that are CURRENTLY in the
+   * transition band (hash ≈ center) detach and drift with the wind — rendered
+   * as 2 fading trail passes offset by wind×k. This is what makes the pixels
+   * visibly fly through the air before they dissolve, instead of a static
+   * checkerboard swap.
+   */
+  noiseTrail?: { cell: number; center: number; windX: number; windY: number };
   /**
    * Slice disassembly: the layer is cut into `count` strips along `axis` and
    * adjacent strips are offset perpendicular by ±`spread` (fraction of frame).
@@ -683,16 +692,20 @@ export function buildTransitionPlan(active: ActiveTransition): TransitionPlan {
       break;
     }
 
-    // ── Whip pan: fast directional blur-like sweep ────────────────────────
+    // ── Whip pan: fast directional sweep WITH motion blur ─────────────────
+    // A bare geometric sweep reads as "slide"; real whip pans smear. Blur
+    // peaks at sweep maximum (mid-transition) — the same blurDissolve channel.
     case 'whipPan': {
-      // Both layers sweep hard in the same direction, crossing at the midpoint.
       const sweep = 1.15;
+      const smear = (0.015 + norm.intensity * 0.02) * (1 - Math.abs(t - 0.5) * 2);
       from.opacity = 1 - t;
       to.opacity = t;
       from.translateX = dx * t * sweep;
       from.translateY = dy * t * sweep;
       to.translateX = dx * (t - 1) * sweep;
       to.translateY = dy * (t - 1) * sweep;
+      from.blur = smear;
+      to.blur = smear;
       break;
     }
 
@@ -781,43 +794,51 @@ export function buildTransitionPlan(active: ActiveTransition): TransitionPlan {
     case 'paperFold': {
       from.opacity = 1;
       to.opacity = 1;
-      // Unfold squash: the page starts foreshortened (nearly edge-on) and
-      // flattens out as it opens.
-      const squash = 0.30 + 0.70 * t;
-      const lip = 0.04; // shadow band width (frame fraction)
-      // Shadow strongest while the fold is mid-air, gone when flat.
-      const shadowAlpha = (1 - t) * 0.5;
+      // Fast-flattening un-squash: foreshortened page flops flat quickly,
+      // which reads as a hinge rather than a conveyor belt.
+      const squash = 0.25 + 0.75 * (1 - Math.pow(1 - t, 2));
+      // Wavy flutter: decaying rotation wobble while the page is airborne.
+      const wob = Math.sin(t * Math.PI * 2.5) * (1 - t);
+      to.rotation = wob * 0.045; // ≈ ±2.6° at peak
+      // Perpendicular page bob: horizontal folds bob vertically and vice
+      // versa — a real page edge never travels in a straight line.
+      const bob = Math.sin(t * Math.PI * 3) * (1 - t) * 0.018;
+
+      const lip = 0.055; // shadow band width (frame fraction)
+      const shadowAlpha = (1 - t) * 0.55;
 
       if (norm.direction === 'right') {
         to.clipRect = { x: 1 - t, y: 0, w: t, h: 1 };
         to.scaleX = squash;
+        to.translateY = bob; // perpendicular to the fold travel
         overlay.type = 'edgeGradient';
         overlay.color = '#000000';
         overlay.alpha = shadowAlpha;
         overlay.rect = { x: Math.max(0, 1 - t), y: 0, w: lip, h: 1 };
         overlay.gradientDir = 'right';
-      } else if (norm.direction === 'up') {
-        to.clipRect = { x: 0, y: 0, w: 1, h: t };
-        to.scaleY = squash;
-        overlay.type = 'edgeGradient';
-        overlay.color = '#000000';
-        overlay.alpha = shadowAlpha;
-        overlay.rect = { x: 0, y: Math.max(0, t - lip), w: 1, h: lip };
-        overlay.gradientDir = 'up';
-      } else {
-        // 'left' (and a 'down' page turn reads as a left-style fold rotated)
+      } else if (norm.direction === 'up' || norm.direction === 'down') {
         const isDown = norm.direction === 'down';
         to.clipRect = isDown
           ? { x: 0, y: 1 - t, w: 1, h: t }
-          : { x: 0, y: 0, w: t, h: 1 };
-        if (isDown) to.scaleY = squash; else to.scaleX = squash;
+          : { x: 0, y: 0, w: 1, h: t };
+        to.scaleY = squash;
+        to.translateX = bob; // perpendicular to the fold travel
         overlay.type = 'edgeGradient';
         overlay.color = '#000000';
         overlay.alpha = shadowAlpha;
         overlay.rect = isDown
           ? { x: 0, y: 1 - t, w: 1, h: lip }
-          : { x: Math.max(0, t - lip), y: 0, w: lip, h: 1 };
-        overlay.gradientDir = isDown ? 'down' : 'left';
+          : { x: 0, y: Math.max(0, t - lip), w: 1, h: lip };
+        overlay.gradientDir = isDown ? 'down' : 'up';
+      } else {
+        to.clipRect = { x: 0, y: 0, w: t, h: 1 };
+        to.scaleX = squash;
+        to.translateY = bob;
+        overlay.type = 'edgeGradient';
+        overlay.color = '#000000';
+        overlay.alpha = shadowAlpha;
+        overlay.rect = { x: Math.max(0, t - lip), y: 0, w: lip, h: 1 };
+        overlay.gradientDir = 'left';
       }
       break;
     }
@@ -829,29 +850,36 @@ export function buildTransitionPlan(active: ActiveTransition): TransitionPlan {
     case 'particleDissolve': {
       from.opacity = 1;
       to.opacity = 1;
-      // Cell size: 4% → 1% of frame height as intensity rises (finer grain).
-      const cell = 0.04 - norm.intensity * 0.03;
-      to.noiseReveal = { amount: t, cell: Math.max(0.008, cell) };
+      const cell = Math.max(0.008, 0.04 - norm.intensity * 0.03);
+      // B materialises slightly AHEAD of the front (no holes ever appear).
+      to.noiseReveal = { amount: Math.min(1, t * 1.2), cell };
+      // A erodes behind the front: pixels vanish where they detach.
+      from.noiseReveal = { amount: Math.min(1, t * 1.05), cell, invert: true };
+      // The cells AT the front lift off and flow through the air with the
+      // wind (convection: up and sideways) before fading out.
+      from.noiseTrail = {
+        cell,
+        center: t,
+        windX: -(0.05 + norm.intensity * 0.07),
+        windY: -(0.03 + norm.intensity * 0.04),
+      };
       break;
     }
 
-    // ── Slice disassemble / assemble ──────────────────────────────────────
-    // Disassemble (out): A bursts into strips that slide apart, revealing B.
-    // Assemble (in): B's strips fly in from alternating sides and converge.
+    // ── Slice shift (MERGED disassemble + assemble) ───────────────────────
+    // A bursts into strips that slide apart WHILE B's strips fly in from
+    // alternating sides and converge into place — one continuous hand-off.
     case 'sliceShift': {
       const axis: 'x' | 'y' =
         norm.direction === 'left' || norm.direction === 'right' ? 'x' : 'y';
       const count = 8;
-      const spread = 0.18 + norm.intensity * 0.4;
-      if (norm.zoomDirection === 'out') {
-        from.opacity = 1 - t * 0.35;
-        from.slices = { count, axis, spread: t * spread };
-        to.opacity = 1;
-      } else {
-        from.opacity = 1;
-        to.opacity = 0.35 + 0.65 * t;
-        to.slices = { count, axis, spread: (1 - t) * spread };
-      }
+      const mag = 0.16 + norm.intensity * 0.35;
+      // Outgoing clip disassembles progressively.
+      from.opacity = 1 - t * 0.45;
+      from.slices = { count, axis, spread: t * mag };
+      // Incoming clip assembles: strips converge to a clean frame by t=1.
+      to.opacity = 0.3 + 0.7 * t;
+      to.slices = { count, axis, spread: (1 - t) * mag };
       break;
     }
 
@@ -1046,11 +1074,13 @@ export function applyNoiseRevealMask(
   amount: number,
   cellFrac: number,
   w: number,
-  h: number
+  h: number,
+  invert: boolean = false
 ): void {
   const a = clamp01(amount);
-  if (a >= 1) return; // fully revealed — nothing to mask
-  if (a <= 0) {
+  if (!invert && a >= 1) return; // fully revealed — nothing to mask
+  if (invert && a <= 0) return;  // nothing eroded yet — nothing to mask
+  if ((!invert && a <= 0) || (invert && a >= 1)) {
     ctx.save();
     ctx.globalCompositeOperation = 'destination-in';
     ctx.clearRect(0, 0, w, h); // destination-in with fully transparent = clear
@@ -1077,7 +1107,7 @@ export function applyNoiseRevealMask(
     for (let i = 0; i < cols; i++) {
       const s = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453123;
       const hash = s - Math.floor(s);
-      const v = (a - hash) / soft;
+      const v = invert ? (hash - a) / soft : (a - hash) / soft;
       cellAlpha[j * cols + i] = v <= 0 ? 0 : v >= 1 ? 255 : v * 255;
     }
   }
@@ -1105,6 +1135,55 @@ export function applyNoiseRevealMask(
 
 
 /**
+ * Keep only the noise cells in a BAND around `center` (hash within
+ * [center - halfWidth, center + halfWidth]) — i.e. the cells currently in the
+ * dissolve front. Combined with a draw offset this renders the "in-flight"
+ * particles of a particle dissolve.
+ */
+export function applyNoiseBandMask(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  center: number,
+  halfWidth: number,
+  cellFrac: number,
+  w: number,
+  h: number
+): void {
+  const mask = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(w, h)
+    : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const m = mask.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (!m) return;
+
+  const cellPx = Math.max(2, Math.round(cellFrac * h));
+  const cols = Math.ceil(w / cellPx);
+  const rows = Math.ceil(h / cellPx);
+  const lo = center - halfWidth;
+  const hi = center + halfWidth;
+
+  const img = m.createImageData(w, h);
+  const d = img.data;
+  for (let y = 0; y < h; y++) {
+    const j = Math.min(rows - 1, (y / cellPx) | 0);
+    const outRow = y * w;
+    for (let x = 0; x < w; x++) {
+      const i = Math.min(cols - 1, (x / cellPx) | 0);
+      const s = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453123;
+      const hash = s - Math.floor(s);
+      const idx = (outRow + x) * 4;
+      d[idx] = 255;
+      d[idx + 1] = 255;
+      d[idx + 2] = 255;
+      d[idx + 3] = hash >= lo && hash <= hi ? 255 : 0;
+    }
+  }
+  m.putImageData(img, 0, 0);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask as CanvasImageSource, 0, 0);
+  ctx.restore();
+}
+/**
  * The set of transition kinds the Properties panel can offer, with the parameters
  * each one actually respects. Used to build the control UI so we never show a
  * slider that does nothing.
@@ -1129,7 +1208,7 @@ export const TRANSITION_KIND_INFO: Array<{
   { kind: 'cardFlip', label: '3D Card Flip', supports: ['direction'] },
   { kind: 'paperFold', label: 'Paper Fold', supports: ['direction'] },
   { kind: 'particleDissolve', label: 'Particle Dissolve', supports: ['intensity'] },
-  { kind: 'sliceShift', label: 'Slice Assemble / Disassemble', supports: ['direction', 'zoomDirection', 'intensity'] },
+  { kind: 'sliceShift', label: 'Slice Shift (Disassemble → Assemble)', supports: ['direction', 'intensity'] },
   { kind: 'flash', label: 'Flash Cut', supports: [] },
   { kind: 'lightLeak', label: 'Light Leak', supports: ['intensity'] },
   { kind: 'shake', label: 'Camera Shake', supports: ['intensity'] },

@@ -9,7 +9,7 @@ import { applyLutToCanvas } from '@/utils/lutParser';
 import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCurveActive as isCurveOn } from '@/utils/curvesEngine';
 import { applyVectorMaskToContext, applyVectorMaskRaster, vectorMaskNeedsRaster } from '@/utils/vectorMaskEngine';
 import { applyGeometricMaskToCanvas } from './geometricMask';
-import { applyFeatheredRectMask, applyNoiseRevealMask } from '@/utils/transitionEngine';
+import { applyFeatheredRectMask, applyNoiseRevealMask, applyNoiseBandMask } from '@/utils/transitionEngine';
 import { renderParticlesDeterministic } from './exportEffects';
 import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { drawPerspectiveTexture, getProjectedCorners } from '@/utils/canvasEffects';
@@ -363,6 +363,7 @@ export class Compositor {
           (tg.clipFeather ?? 0) > 0.0005 ||
           (tg.blur ?? 0) > 0.0005 ||
           !!tg.noiseReveal ||
+          !!tg.noiseTrail ||
           (!!tg.slices && tg.slices.spread > 0.0005)
         );
         const outerTargetCtx = targetCtx;
@@ -415,6 +416,29 @@ export class Compositor {
                 vMaskBuffer.height
               );
             }
+            // Particle trail: snapshot band-masked copies of the layer BEFORE
+            // the erosion mask below removes those pixels (same order as the
+            // preview — otherwise flying particles would have no content).
+            const trailLayers: Array<{ bmp: ImageBitmap; alpha: number; dx: number; dy: number; scale: number }> = [];
+            if (tg?.noiseTrail) {
+              const tr = tg.noiseTrail;
+              if (tr.center > 0.02 && tr.center < 0.98) {
+                for (let k = 1; k <= 2; k++) {
+                  const tb = new OffscreenCanvas(vMaskBuffer.width, vMaskBuffer.height);
+                  const tc = tb.getContext('2d');
+                  if (!tc) break;
+                  tc.drawImage(vMaskBuffer, 0, 0);
+                  applyNoiseBandMask(tc, tr.center, 0.09, tr.cell, tb.width, tb.height);
+                  trailLayers.push({
+                    bmp: tb.transferToImageBitmap(),
+                    alpha: (layer.opacity ?? 1) * (k === 1 ? 0.8 : 0.45),
+                    dx: tr.windX * k * this.canvas.width,
+                    dy: tr.windY * k * this.canvas.height,
+                    scale: k === 2 ? 0.96 : 1,
+                  });
+                }
+              }
+            }
             // Particle dissolve: punch the deterministic noise grid out of the
             // layer (same hash mask the preview uses — frame-seek safe).
             if (tg?.noiseReveal) {
@@ -423,7 +447,8 @@ export class Compositor {
                 tg.noiseReveal.amount,
                 tg.noiseReveal.cell,
                 vMaskBuffer.width,
-                vMaskBuffer.height
+                vMaskBuffer.height,
+                !!tg.noiseReveal.invert
               );
             }
             if (vMask?.enabled && vMaskSoft) {
@@ -462,6 +487,21 @@ export class Compositor {
               outerTargetCtx.drawImage(vMaskBuffer, 0, 0);
             }
             outerTargetCtx.restore();
+
+            // In-air particle trail passes: band-masked layer copies drifting
+            // with the wind, fading out (mirrors the preview 1:1).
+            for (const tl of trailLayers) {
+              outerTargetCtx.save();
+              outerTargetCtx.globalAlpha = Math.min(1, tl.alpha);
+              if (tl.scale !== 1) {
+                outerTargetCtx.translate(this.canvas.width / 2, this.canvas.height / 2);
+                outerTargetCtx.scale(tl.scale, tl.scale);
+                outerTargetCtx.translate(-this.canvas.width / 2, -this.canvas.height / 2);
+              }
+              outerTargetCtx.drawImage(tl.bmp, tl.dx, tl.dy);
+              outerTargetCtx.restore();
+              try { tl.bmp.close(); } catch { /* ignore */ }
+            }
             targetCtx = outerTargetCtx;
           }
         };
