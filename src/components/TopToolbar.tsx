@@ -22,6 +22,7 @@ import {
   X,
   User,
   Film,
+  Eraser,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -44,6 +45,7 @@ export function TopToolbar() {
     setShowTeleprompter,
     setShowHelpMenu,
     setShowAiSpeedSyncModal,
+    openWatermarkRemover,
     resetProject,
     copyClip,
     pasteClip,
@@ -68,6 +70,7 @@ export function TopToolbar() {
     setShowTeleprompter: s.setShowTeleprompter,
     setShowHelpMenu: s.setShowHelpMenu,
     setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
+    openWatermarkRemover: s.openWatermarkRemover,
     resetProject: s.resetProject,
     copyClip: s.copyClip,
     pasteClip: s.pasteClip,
@@ -593,6 +596,19 @@ export function TopToolbar() {
         >
           <LinkIcon className="w-3.5 h-3.5 text-blue-500" />
           <span className="hidden sm:inline">AI Sync</span>
+        </button>
+
+        {/* Watermark Remover Button */}
+        <button
+          onClick={() => openWatermarkRemover()}
+          title="Remove Watermarks from Video (AI Inpaint & De-Logo)"
+          className="px-2.5 py-1.5 text-xs rounded-md border flex items-center gap-1.5 font-medium transition-all hover:bg-cyan-500/10 hover:border-cyan-500/40 text-cyan-600 dark:text-cyan-400"
+          style={{
+            borderColor: 'var(--theme-border)',
+          }}
+        >
+          <Eraser className="w-3.5 h-3.5 text-cyan-500" />
+          <span className="hidden sm:inline">Remove Watermark</span>
         </button>
 
         {/* Scopes Button */}

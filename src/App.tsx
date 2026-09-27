@@ -35,6 +35,7 @@ const HelpModal = React.lazy(() => import('@/components/HelpModal').then(m => ({
 const GenerativeWorkspace = React.lazy(() => import('@/components/GenerativeWorkspace').then(m => ({ default: m.GenerativeWorkspace })));
 const AiSpeedSyncModal = React.lazy(() => import('@/components/AiSpeedSyncModal').then(m => ({ default: m.AiSpeedSyncModal })));
 const CustomFxMakerModal = React.lazy(() => import('@/components/CustomFxMakerModal').then(m => ({ default: m.CustomFxMakerModal })));
+const WatermarkRemoverModal = React.lazy(() => import('@/components/WatermarkRemoverModal').then(m => ({ default: m.WatermarkRemoverModal })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -95,6 +96,8 @@ function DesktopApp() {
     setShowAiSpeedSyncModal,
     showCustomFxMakerModal,
     closeCustomFxMaker,
+    showWatermarkRemoverModal,
+    closeWatermarkRemover,
     projectId,
     selectedClipIds,
   } = useEditorStore(useShallow(s => ({
@@ -104,6 +107,8 @@ function DesktopApp() {
     setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
     showCustomFxMakerModal: s.showCustomFxMakerModal,
     closeCustomFxMaker: s.closeCustomFxMaker,
+    showWatermarkRemoverModal: s.showWatermarkRemoverModal,
+    closeWatermarkRemover: s.closeWatermarkRemover,
     togglePlayback: s.togglePlayback,
     activeTool: s.activeTool,
     setActiveTool: s.setActiveTool,
@@ -830,6 +835,11 @@ function DesktopApp() {
       {showCustomFxMakerModal && (
         <Suspense fallback={null}>
           <CustomFxMakerModal onClose={() => closeCustomFxMaker()} />
+        </Suspense>
+      )}
+      {showWatermarkRemoverModal && (
+        <Suspense fallback={null}>
+          <WatermarkRemoverModal onClose={() => closeWatermarkRemover()} />
         </Suspense>
       )}
       {showTeleprompter && (

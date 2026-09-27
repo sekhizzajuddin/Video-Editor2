@@ -5,6 +5,8 @@ import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { KeyframeControl } from '@/components/KeyframeControls';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 
+import { WATERMARK_PRESETS } from '@/utils/watermarkPresets';
+
 interface ObjectRemovalPanelProps {
   selectedClip: TimelineClip;
 }
@@ -31,6 +33,7 @@ const defaultSettings: ClipObjectRemovalSettings = {
 export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
   const updateClip = useEditorStore((state) => state.updateClip);
   const saveSnapshot = useEditorStore((state) => state.saveSnapshot);
+  const openWatermarkRemover = useEditorStore((state) => state.openWatermarkRemover);
   const currentTime = usePlaybackTime(10);
 
   const or = selectedClip.objectRemoval || defaultSettings;
@@ -53,6 +56,24 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
         ...patch,
       },
     });
+  };
+
+  const applyPreset = (preset: typeof WATERMARK_PRESETS[0]) => {
+    updateClip(selectedClip.id, {
+      objectRemoval: {
+        ...or,
+        enabled: true,
+        x: preset.x,
+        y: preset.y,
+        width: preset.width,
+        height: preset.height,
+        feather: preset.feather,
+        mode: preset.mode,
+        shape: preset.shape,
+        stretchStrength: preset.stretchStrength ?? 85,
+      },
+    });
+    saveSnapshot(`Apply ${preset.name} Watermark Preset`);
   };
 
   const setSliderValue = (propKey: string, propName: keyof ClipObjectRemovalSettings, value: number) => {
@@ -135,28 +156,58 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
 
   return (
     <div className="bg-[var(--theme-bg-card)] rounded-xl border border-cyan-500/30 p-3.5 space-y-4 shadow-sm">
-      {/* Header with Enable Switch */}
+      {/* Header with Enable Switch & Watermark Studio Button */}
       <div className="flex items-center justify-between pb-2.5 border-b border-[var(--theme-border)]">
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-[var(--theme-text-primary)]">
-            ✨ AI Object Remove & Inpainting
+            ✨ AI Watermark & Object Remover
           </span>
         </div>
-        <button
-          onClick={() => {
-            updateOR({ enabled: !or.enabled });
-            saveSnapshot();
-          }}
-          className={`w-8 h-4 rounded-full transition-all relative ${
-            or.enabled ? 'bg-cyan-500 shadow-sm' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]'
-          }`}
-        >
-          <div
-            className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${
-              or.enabled ? 'left-[17px]' : 'left-[1px]'
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openWatermarkRemover(selectedClip.id)}
+            className="px-2 py-0.5 text-[10px] font-bold bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-500 dark:text-cyan-300 border border-cyan-500/30 rounded-md transition-all shadow-sm"
+            title="Open large interactive Watermark Remover Studio"
+          >
+            Studio
+          </button>
+          <button
+            onClick={() => {
+              updateOR({ enabled: !or.enabled });
+              saveSnapshot();
+            }}
+            className={`w-8 h-4 rounded-full transition-all relative ${
+              or.enabled ? 'bg-cyan-500 shadow-sm' : 'bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]'
             }`}
-          />
-        </button>
+          >
+            <div
+              className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${
+                or.enabled ? 'left-[17px]' : 'left-[1px]'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* 1-Click Watermark Corner Presets */}
+      <div className="space-y-1.5 bg-[var(--theme-bg-subpanel)] p-2.5 rounded-lg border border-[var(--theme-border)]">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold text-[var(--theme-text-muted)] tracking-wider uppercase">
+            ⚡ Quick Watermark Presets
+          </span>
+        </div>
+        <div className="grid grid-cols-4 gap-1 pt-1">
+          {WATERMARK_PRESETS.slice(0, 4).map((p) => (
+            <button
+              key={p.id}
+              onClick={() => applyPreset(p)}
+              className="py-1 px-1.5 rounded bg-black/10 dark:bg-white/5 hover:bg-cyan-500/20 border border-[var(--theme-border)] hover:border-cyan-500/40 text-[10px] font-medium text-slate-300 hover:text-cyan-300 text-center transition-all truncate"
+              title={`${p.name}: ${p.description}`}
+            >
+              {p.icon} {p.name.replace(' ', '')}
+            </button>
+          ))}
+        </div>
       </div>
 
       {or.enabled && (

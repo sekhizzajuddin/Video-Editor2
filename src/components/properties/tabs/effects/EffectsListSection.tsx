@@ -71,11 +71,11 @@ export function EffectsListSection({ selectedClip }: EffectsListSectionProps) {
     });
   }
 
-  // 4. AI Object Removal / Inpainting
+  // 4. AI Watermark & Object Removal / Inpainting
   if (selectedClip.objectRemoval?.enabled) {
     activeEffects.push({
       id: 'object-removal',
-      name: `AI Object Removal (${selectedClip.objectRemoval.mode.replace(/_/g, ' ')})`,
+      name: `Watermark & Object Removal (${selectedClip.objectRemoval.mode.replace(/_/g, ' ')})`,
       onRemove: () => {
         updateClip(selectedClip.id, {
           objectRemoval: { ...selectedClip.objectRemoval!, enabled: false }

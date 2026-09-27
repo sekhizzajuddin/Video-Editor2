@@ -113,7 +113,8 @@ export function loadRVMSession(): Promise<any | null> {
       }
     } catch (err) {
       console.warn('[rvmMatting] RVM load failed, will fall back to MediaPipe/IS-Net:', err);
-      rvmSessionPromise = null; // Allow retry
+      // Cache the failure — do NOT reset to null. That causes infinite re-download
+      // of the 7.5MB model on every frame (~450 MB/sec network traffic).
       return null;
     }
   })();

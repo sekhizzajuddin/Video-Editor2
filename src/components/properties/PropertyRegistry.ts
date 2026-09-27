@@ -120,6 +120,6 @@ export const PROPERTY_REGISTRY: Record<string, any[]> = {
     { id: 'kinetic', label: 'Kinetic', component: KineticTypographySection },
     { id: 'beatsync', label: 'Beat Sync', component: BeatSyncSection },
     { id: 'sfx', label: 'SFX', component: AISFXSection },
-    { id: 'object_removal', label: 'Object Removal', component: ObjectRemovalPanel },
+    { id: 'object_removal', label: 'Watermark & Object Removal', component: ObjectRemovalPanel },
   ],
 };

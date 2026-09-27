@@ -611,6 +611,7 @@ export class FrameScheduler {
               stretchStrength: getAnimatedExportValue(clip.objectRemoval.stretchStrength ?? 80, t, st, clip.animations?.['objectRemoval.stretchStrength']),
               patchSourceX: getAnimatedExportValue(clip.objectRemoval.patchSourceX ?? 30, t, st, clip.animations?.['objectRemoval.patchSourceX']),
               patchSourceY: getAnimatedExportValue(clip.objectRemoval.patchSourceY ?? 30, t, st, clip.animations?.['objectRemoval.patchSourceY']),
+              regions: clip.objectRemoval.regions,
             } : undefined,
           };
 

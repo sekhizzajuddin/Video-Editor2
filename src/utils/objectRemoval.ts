@@ -491,24 +491,20 @@ function applyBlurConceal(
 }
 
 /**
- * ============================================
- * MAIN ENTRY: Apply AI Object Removal & Inpainting
- * ============================================
+ * Helper to execute a single removal/inpaint pass for one region
  */
-export function applyObjectRemoval(
+function applySingleRemovalPass(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   clipWidth: number,
   clipHeight: number,
   settings: ClipObjectRemovalSettings,
   currentTime: number,
   clipStartTime: number,
-  sourceCanvas: HTMLCanvasElement | CanvasImageSource,
+  sourceCanvas: HTMLCanvasElement | OffscreenCanvas | CanvasImageSource,
   animations?: any,
   isPlaying: boolean = false,
-  clipId: string = '_default'
+  cacheKey: string = '_default'
 ): void {
-  if (!settings || !settings.enabled) return;
-
   // Interpolate keyframes for fluid temporal motion tracking
   const interpolated = interpolateSettings(settings, currentTime, clipStartTime, animations);
 
@@ -525,9 +521,9 @@ export function applyObjectRemoval(
 
   if (isPlaying && settings.temporalSmoothing !== false) {
     const settingsHash = `${interpolated.mode}_${interpolated.x.toFixed(1)}_${interpolated.y.toFixed(1)}_${interpolated.width.toFixed(1)}_${interpolated.height.toFixed(1)}_${interpolated.rotation.toFixed(1)}`;
-    const sceneChanged = detectSceneChange(clipId + '_objr', sourceCanvas as HTMLCanvasElement);
+    const sceneChanged = detectSceneChange(cacheKey + '_objr', sourceCanvas as HTMLCanvasElement);
     
-    let cacheEntry = temporalInpaintCache.get(clipId);
+    let cacheEntry = temporalInpaintCache.get(cacheKey);
     if (!sceneChanged && cacheEntry && cacheEntry.settingsHash === settingsHash && cacheEntry.frameCount < 3) {
       ctx.drawImage(cacheEntry.canvas, 0, 0);
       cacheEntry.frameCount++;
@@ -543,7 +539,7 @@ export function applyObjectRemoval(
       cacheCanvas.width = clipWidth;
       cacheCanvas.height = clipHeight;
       cacheEntry = { canvas: cacheCanvas, frameCount: 0, settingsHash };
-      temporalInpaintCache.set(clipId, cacheEntry);
+      temporalInpaintCache.set(cacheKey, cacheEntry);
     } else if (cacheEntry.canvas.width !== clipWidth || cacheEntry.canvas.height !== clipHeight) {
       cacheEntry.canvas.width = clipWidth;
       cacheEntry.canvas.height = clipHeight;
@@ -593,6 +589,90 @@ export function applyObjectRemoval(
 }
 
 /**
+ * ============================================
+ * MAIN ENTRY: Apply AI Object Removal & Inpainting
+ * ============================================
+ */
+export function applyObjectRemoval(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  clipWidth: number,
+  clipHeight: number,
+  settings: ClipObjectRemovalSettings,
+  currentTime: number,
+  clipStartTime: number,
+  sourceCanvas: HTMLCanvasElement | CanvasImageSource,
+  animations?: any,
+  isPlaying: boolean = false,
+  clipId: string = '_default'
+): void {
+  if (!settings || !settings.enabled) return;
+
+  const activeRegions = (settings.regions && settings.regions.length > 0)
+    ? settings.regions.filter(r => r.enabled)
+    : null;
+
+  if (activeRegions && activeRegions.length > 0) {
+    let currentSrc = sourceCanvas;
+    for (let i = 0; i < activeRegions.length; i++) {
+      const reg = activeRegions[i];
+      const singleSettings: ClipObjectRemovalSettings = {
+        enabled: true,
+        mode: reg.mode,
+        shape: reg.shape,
+        x: reg.x,
+        y: reg.y,
+        width: reg.width,
+        height: reg.height,
+        rotation: reg.rotation ?? 0,
+        feather: reg.feather ?? settings.feather ?? 10,
+        opacity: reg.opacity ?? settings.opacity ?? 100,
+        stretchStrength: reg.stretchStrength ?? settings.stretchStrength ?? 80,
+        patchSourceX: reg.patchSourceX ?? settings.patchSourceX ?? 30,
+        patchSourceY: reg.patchSourceY ?? settings.patchSourceY ?? 30,
+        showHighlight: settings.showHighlight,
+        temporalSmoothing: settings.temporalSmoothing,
+        quality: settings.quality,
+      };
+
+      applySingleRemovalPass(
+        ctx,
+        clipWidth,
+        clipHeight,
+        singleSettings,
+        currentTime,
+        clipStartTime,
+        currentSrc,
+        animations,
+        isPlaying,
+        `${clipId}_r${reg.id || i}`
+      );
+
+      if (i < activeRegions.length - 1) {
+        const { canvas: sc, ctx: scCtx } = getScratchCanvas(clipWidth, clipHeight);
+        scCtx.clearRect(0, 0, clipWidth, clipHeight);
+        scCtx.drawImage(ctx.canvas as any, 0, 0);
+        currentSrc = sc;
+      }
+    }
+    return;
+  }
+
+  // Single region default execution
+  applySingleRemovalPass(
+    ctx,
+    clipWidth,
+    clipHeight,
+    settings,
+    currentTime,
+    clipStartTime,
+    sourceCanvas,
+    animations,
+    isPlaying,
+    clipId
+  );
+}
+
+/**
  * Generate inpaint result for object removal (worker-safe version).
  * Returns the inpainted canvas that can be cached and reused.
  * This is extracted from applyObjectRemoval to allow caching in export worker.
@@ -619,6 +699,58 @@ export function generateObjectRemovalInpaint(
   if (!settings || !settings.enabled) {
     // No removal, just copy source
     resultCtx.drawImage(sourceCanvas, 0, 0);
+    return resultCanvas;
+  }
+
+  const activeRegions = (settings.regions && settings.regions.length > 0)
+    ? settings.regions.filter(r => r.enabled)
+    : null;
+
+  if (activeRegions && activeRegions.length > 0) {
+    resultCtx.drawImage(sourceCanvas, 0, 0);
+    for (let i = 0; i < activeRegions.length; i++) {
+      const reg = activeRegions[i];
+      const singleSettings: ClipObjectRemovalSettings = {
+        enabled: true,
+        mode: reg.mode,
+        shape: reg.shape,
+        x: reg.x,
+        y: reg.y,
+        width: reg.width,
+        height: reg.height,
+        rotation: reg.rotation ?? 0,
+        feather: reg.feather ?? settings.feather ?? 10,
+        opacity: reg.opacity ?? settings.opacity ?? 100,
+        stretchStrength: reg.stretchStrength ?? settings.stretchStrength ?? 80,
+        patchSourceX: reg.patchSourceX ?? settings.patchSourceX ?? 30,
+        patchSourceY: reg.patchSourceY ?? settings.patchSourceY ?? 30,
+        showHighlight: false,
+        temporalSmoothing: settings.temporalSmoothing,
+        quality: settings.quality,
+      };
+
+      const interpolated = interpolateSettings(singleSettings, currentTime, clipStartTime, animations);
+      const bounds = getPixelBounds(interpolated, clipWidth, clipHeight);
+      if (
+        bounds.centerX < -bounds.w || bounds.centerX > clipWidth + bounds.w ||
+        bounds.centerY < -bounds.h || bounds.centerY > clipHeight + bounds.h
+      ) {
+        continue;
+      }
+
+      switch (interpolated.mode) {
+        case 'content_aware':
+          applyContentAwareStretch(resultCtx, resultCanvas, bounds, interpolated, clipWidth, clipHeight);
+          break;
+        case 'patch_replace':
+          applyPatchReplace(resultCtx, resultCanvas, bounds, interpolated, clipWidth, clipHeight);
+          break;
+        case 'blur_conceal':
+        case 'pixelate':
+          applyBlurConceal(resultCtx, resultCanvas, bounds, interpolated, clipWidth, clipHeight);
+          break;
+      }
+    }
     return resultCanvas;
   }
   

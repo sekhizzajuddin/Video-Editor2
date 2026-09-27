@@ -44,6 +44,9 @@ export function getObjectRemovalSettingsHash(settings: any): string {
     `srcX:${(settings.patchSourceX ?? 30).toFixed(1)}`,
     `srcY:${(settings.patchSourceY ?? 30).toFixed(1)}`,
     `shape:${settings.shape ?? 'rect'}`,
+    settings.regions && settings.regions.length > 0 
+      ? `regions:${settings.regions.map((r: any) => `${r.id}:${r.enabled ? '1' : '0'}:${r.x?.toFixed(1)}:${r.y?.toFixed(1)}:${r.width?.toFixed(1)}:${r.height?.toFixed(1)}:${r.mode}`).join(';')}`
+      : 'no_regions',
   ];
   
   return parts.join('|');

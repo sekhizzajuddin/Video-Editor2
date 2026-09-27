@@ -459,6 +459,11 @@ interface EditorActions {
   closeCustomFxMaker: () => void;
   addCustomFx: (fx: import('@/types').CustomFxItem) => void;
   removeCustomFx: (id: string) => void;
+
+  // Watermark Remover
+  setShowWatermarkRemoverModal: (show: boolean) => void;
+  openWatermarkRemover: (clipId?: string) => void;
+  closeWatermarkRemover: () => void;
 }
 
 const defaultTracks = createEmptyTracks();
@@ -546,6 +551,8 @@ const initialState: EditorState = {
   showTeleprompter: false,
   showHelpMenu: false,
   showAiSpeedSyncModal: false,
+  showWatermarkRemoverModal: false,
+  watermarkRemoverTargetClipId: null,
   customFxList: [],
   showCustomFxMakerModal: false,
   customFxTargetClipId: null,
@@ -3944,6 +3951,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setShowTeleprompter: (show) => set({ showTeleprompter: show }),
   setShowHelpMenu: (show, section = null) => set({ showHelpMenu: show, activeHelpSection: section }),
   setShowAiSpeedSyncModal: (show) => set({ showAiSpeedSyncModal: show }),
+  setShowWatermarkRemoverModal: (show) => set({ showWatermarkRemoverModal: show }),
+  openWatermarkRemover: (clipId) => {
+    const state = get();
+    const targetId = clipId || state.selectedClipId || (state.tracks.flatMap((t: any) => t.clips).find((c: any) => c.mediaId)?.id) || null;
+    set({ showWatermarkRemoverModal: true, watermarkRemoverTargetClipId: targetId });
+  },
+  closeWatermarkRemover: () => set({ showWatermarkRemoverModal: false, watermarkRemoverTargetClipId: null }),
   openCustomFxMaker: (clipId) => set({ showCustomFxMakerModal: true, customFxTargetClipId: clipId || null }),
   closeCustomFxMaker: () => set({ showCustomFxMakerModal: false, customFxTargetClipId: null }),
   addCustomFx: (fx) => {

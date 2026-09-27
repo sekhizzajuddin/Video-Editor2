@@ -470,6 +470,26 @@ export interface ClipLumaKeySettings {
 export type ObjectRemovalMode = 'content_aware' | 'patch_replace' | 'blur_conceal' | 'pixelate';
 export type ObjectRemovalShape = 'rectangle' | 'ellipse' | 'polygon';
 
+export interface WatermarkRegion {
+  id: string;
+  name?: string;
+  enabled: boolean;
+  mode: ObjectRemovalMode;
+  shape: ObjectRemovalShape;
+  x: number;          // Center X in % (0 to 100)
+  y: number;          // Center Y in % (0 to 100)
+  width: number;      // Width in % (1 to 100)
+  height: number;     // Height in % (1 to 100)
+  rotation?: number;  // Angle in degrees
+  feather?: number;   // Edge feathering softness in px (0 to 50)
+  opacity?: number;   // Removal strength / mixing opacity (0 to 100)
+  stretchStrength?: number; // Inward diffusion intensity (1 to 100)
+  patchSourceX?: number;    // Reference sampling X % (0 to 100)
+  patchSourceY?: number;    // Reference sampling Y % (0 to 100)
+}
+
+export type ClipWatermarkRegion = WatermarkRegion;
+
 export interface ClipObjectRemovalSettings {
   enabled: boolean;
   mode: ObjectRemovalMode;
@@ -488,6 +508,7 @@ export interface ClipObjectRemovalSettings {
   temporalSmoothing?: boolean; // Frame-to-frame stabilization for video
   quality?: 'preview' | 'export'; // Fast preview vs studio export quality
   points?: { x: number; y: number }[]; // For custom polygon lasso bounding
+  regions?: WatermarkRegion[]; // Multi-region support for multiple watermarks on the same clip
 }
 
 export interface ClipKenBurnsSettings {
@@ -1059,6 +1080,8 @@ export interface EditorState {
   showTeleprompter: boolean;
   showHelpMenu: boolean;
   showAiSpeedSyncModal: boolean;
+  showWatermarkRemoverModal: boolean;
+  watermarkRemoverTargetClipId: string | null;
   activeHelpSection: string | null;
   useProxies: boolean;
   showProgressBar: boolean;

@@ -1604,12 +1604,22 @@ export async function renderCanvasEngine({
                 bgColor: clip.aiBackground.bgColor ?? '#1e1e24',
               };
               try {
+                // Snapshot the current cropped+filtered frame so AI compositing
+                // doesn't self-draw (clearing + drawing the same canvas = black)
+                // and so segmentation runs on the actual visible crop, not the
+                // uncropped raw video element.
+                const aiSourceCanvas = getOrCreateCanvas(offscreenCanvasPool.current, `ai_src_${clip.id}`, offCanvas.width, offCanvas.height);
+                const aiSrcCtx = aiSourceCanvas.getContext('2d')!;
+                aiSrcCtx.clearRect(0, 0, aiSourceCanvas.width, aiSourceCanvas.height);
+                aiSrcCtx.drawImage(offCanvas, 0, 0);
+                // Stamp with video time so getVideoCurrentTime() can look up the
+                // pre-rendered temporal mask cache (canvas has no native currentTime)
+                (aiSourceCanvas as any).currentTime = (sourceElement as any).currentTime ?? 0;
+
                 if (isExporting) {
-                  // Export: block until we have an exact synchronous mask for this frame
-                  await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+                  await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, aiSourceCanvas, clip.id, smartOpts);
                 } else {
-                  // Interactive: awaits cached mask lookup to prevent rAF buffer-reuse races
-                  await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, sourceElement, clip.id, smartOpts);
+                  await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, aiSourceCanvas, clip.id, smartOpts);
                 }
               } catch (aiErr) {
                 console.warn('[CanvasRenderingEngine] AI background render error:', aiErr);

@@ -22,6 +22,7 @@ import {
   Volume2,
   VolumeX,
   Repeat,
+  Eraser,
 } from 'lucide-react';
 import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -322,6 +323,20 @@ export function TimelineModals({
                         AI Auto-Cue Sound Effects
                       </button>
                     </>
+                  )}
+
+                  {/* Remove Watermark */}
+                  {(contextMenu.mediaType === 'video' || contextMenu.mediaType === 'image') && (
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#3e3e3e] flex items-center gap-2 transition-colors"
+                      onClick={() => {
+                        useEditorStore.getState().openWatermarkRemover(contextMenu.clipId);
+                        setContextMenu(null);
+                      }}
+                    >
+                      <Eraser className="w-3.5 h-3.5 text-cyan-400" />
+                      Remove Watermark...
+                    </button>
                   )}
 
                    {/* Extract Audio */}
