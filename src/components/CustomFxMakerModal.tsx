@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { CustomFxItem, TimelineClip } from '@/types';
 import { generateCustomFx, type CustomFxProgress } from '@/utils/customFxDirector';
 import { X, Sparkles, Music, Eye, RefreshCw, Check, AlertTriangle, Loader2, Film } from 'lucide-react';
+import { toast } from 'sonner';
 
 export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
   const { tracks, customFxTargetClipId, addCustomFx, pipWindows, mediaLibrary } = useEditorStore(
@@ -161,36 +162,23 @@ export function CustomFxMakerModal({ onClose }: { onClose: () => void }) {
 
     addCustomFx(fxItem);
 
-    // Automatically connect and insert onto FX track directly above targetClip
+    // Apply directly onto the target clip as a semi-collapsible sub-track!
+    // Never creates a separate FX track — FX is permanently bound to this clip.
     const state = useEditorStore.getState();
-    const fxTrackId = state.ensureFxTrackAbove(targetClip.trackId);
-    const fxClipId = `custom-fx-clip-${Date.now()}`;
-    const fxClip: TimelineClip = {
-      id: fxClipId,
-      mediaId: fxItem.id,
-      trackId: fxTrackId,
-      startTime: targetClip.startTime,
-      duration: targetClip.duration,
-      trimStart: 0,
-      trimEnd: 0,
-      opacity: 1,
-      speed: 1,
-      effects: [],
-      transform: { x: 0, y: 0, scale: 1, rotation: 0 },
-      linkedClipId: targetClip.id,
+    state.updateClip(targetClip.id, {
       fxSettings: {
         type: 'custom_html',
         intensity: 100,
         customFxId: fxItem.id,
         customHtmlCss: fxItem.htmlCss,
         customFxName: fxItem.name,
+        enabled: true,
+        isCollapsed: false, // Expands initially so user sees the sub-track immediately over the clip!
       },
-    };
-
-    state.insertClip(fxClip as any, targetClip.startTime, fxTrackId);
-    state.updateClip(targetClip.id, { linkedClipId: fxClipId });
-    state.selectClip(fxClipId);
+    });
+    state.selectClip(targetClip.id);
     state.saveSnapshot('Apply Custom FX to Clip');
+    toast.success(`✨ Applied "${fxItem.name}" to ${(targetClip as any).name || targetClip.id}`);
     onClose();
   }, [resultHtml, targetClip, resultName, resultDescription, resultThumbnail, audioBreakdown, visualBreakdown, resultReasoning, resultPrompt, addCustomFx, onClose]);
 

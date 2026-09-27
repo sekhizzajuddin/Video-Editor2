@@ -3200,6 +3200,48 @@ export async function renderCanvasEngine({
   // holds the fully rendered frame, so run each active FX clip's shader across
   // the full canvas — matching the export Compositor's full-frame FX pass.
   if (!skipExpensiveFX) {
+    // 1. Clips on visual tracks with attached FX sub-tracks (clip.fxSettings)
+    for (const track of tracks) {
+      if (track.type === 'fx' || track.hidden || track.muted) continue;
+      for (const clip of track.clips) {
+        if (clip.disabled || !clip.fxSettings) continue;
+        if (clip.fxSettings.enabled === false) continue;
+        if ((clip.fxSettings.intensity ?? 100) <= 0) continue;
+        if (currentTime < clip.startTime || currentTime >= clip.startTime + clip.duration + 0.001) continue;
+
+        const fxIntensity = clip.fxSettings.intensity ?? 100;
+        const fxRelTime = Math.max(0, currentTime - clip.startTime);
+
+        // Custom HTML/CSS FX: render via cached SceneStage pipeline
+        if (clip.fxSettings.type === 'custom_html' && clip.fxSettings.customHtmlCss) {
+          const cacheKey = clip.id;
+          const htmlHash = _simpleHash(clip.fxSettings.customHtmlCss);
+          let cached = _customFxStageCache.get(cacheKey);
+          if (!cached || cached.htmlHash !== htmlHash) {
+            if (cached) destroySceneStage(cached.stage);
+            const stage = createSceneStage(clip.fxSettings.customHtmlCss, {
+              width: composite.width, height: composite.height, transparent: true,
+            });
+            if (stage) {
+              const seekMode = stage.hasAnimations ? 'css' : 'static';
+              cached = { stage, seekMode, htmlHash };
+              _customFxStageCache.set(cacheKey, cached);
+            }
+          }
+          if (cached) {
+            try {
+              await captureSceneFrame(cached.stage, composite, fxRelTime, cached.seekMode);
+            } catch (e) {
+              console.warn('[CanvasRenderingEngine] Custom FX render error:', e);
+            }
+          }
+        } else {
+          applyFxEffect(ctx, composite.width, composite.height, clip.fxSettings.type, fxIntensity, fxRelTime, isPlaying, clip.fxSettings);
+        }
+      }
+    }
+
+    // 2. Legacy FX tracks
     for (const track of fxTracks) {
       if (track.hidden) continue;
       // If this FX track is linked to a video track, respect the host track's hidden/muted state

@@ -598,6 +598,28 @@ async function callGeminiReasoning(
   throw new Error(lastError || 'Gemini reasoning failed on all models');
 }
 
+/**
+ * Strips residual escaped quotes from LLM-generated HTML.
+ * LLMs often return JSON where the htmlCss value has double-escaped quotes:
+ *   width=\\\"1920\\\" -> after JSON.parse -> width=\"1920\"
+ * The browser needs clean: width="1920"
+ */
+function stripEscapedQuotes(html: string): string {
+  if (!html) return html;
+  // Replace literal backslash-quote sequences with just quotes
+  // Handle multiple levels of escaping: \\" -> \" -> "
+  let result = html;
+  // Keep replacing until stable (handles triple+ escaping)
+  let prev = '';
+  let iterations = 0;
+  while (result !== prev && iterations < 5) {
+    prev = result;
+    result = result.replace(/\\"/g, '"');
+    iterations++;
+  }
+  return result;
+}
+
 export async function coReasonAndGenerate(
   audioBreakdown: AudioBreakdown | null,
   visualBreakdown: VisualBreakdown | null,
@@ -628,6 +650,9 @@ export async function coReasonAndGenerate(
 
   const parsed = parseJsonSafely(rawText);
   let htmlCss = typeof parsed.htmlCss === 'string' ? parsed.htmlCss : '';
+
+  // Strip residual escaped quotes from LLM output before any DOM parsing
+  htmlCss = stripEscapedQuotes(htmlCss);
 
   // Sanitize the generated HTML and enforce strict transparency
   htmlCss = sanitizeMotionSceneHtml(htmlCss);
@@ -791,7 +816,7 @@ Return ONLY JSON: { "name": "...", "description": "...", "reasoning": "...", "ht
       }
 
       const correctedParsed = parseJsonSafely(correctedText);
-      let correctedHtml = sanitizeMotionSceneHtml(correctedParsed.htmlCss || '');
+      let correctedHtml = sanitizeMotionSceneHtml(stripEscapedQuotes(correctedParsed.htmlCss || ''));
       correctedHtml = enforceHtmlTransparency(correctedHtml);
 
       if (correctedHtml.trim()) {

@@ -1060,7 +1060,8 @@ export class Compositor {
     // pixels. Each active FX layer's shader runs in z-order over the already
     // composited content + particles, mirroring the preview's timeline-FX pass.
     for (const layer of contentLayers) {
-      if (layer.type !== 'fx' || !layer.fxSettings) continue;
+      if (!layer.fxSettings) continue;
+      if (layer.fxSettings.enabled === false) continue;
       if ((layer.fxSettings.intensity ?? 100) <= 0) continue;
       const localTime = Math.max(0, (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
       // Custom HTML/CSS FX: render via SceneStage pipeline

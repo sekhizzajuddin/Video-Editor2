@@ -16,6 +16,7 @@ import {
 import { FrameStripOverlay } from './FrameStripOverlay';
 import { WaveformOverlay } from './WaveformOverlay';
 import { TransitionTarget } from './TransitionTarget';
+import { ClipFxSubTrack } from './ClipFxSubTrack';
 
 // Module-level stable fallback descriptor (PERF: was recreated per render with
 // a fresh `createdAt: Date.now()`, defeating shallow comparisons).
@@ -533,8 +534,21 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
 
 
+      {/* ── Semi-Collapsible FX Sub-Track (Directly Over Applied Clip) ── */}
+      {clip.fxSettings && (
+        <ClipFxSubTrack
+          clip={clip}
+          width={width}
+          trackLocked={trackLocked}
+        />
+      )}
+
       {/* ── Clip label overlay ────────────────────── */}
-      <div className="absolute inset-0 flex flex-col px-1.5 py-0.5 overflow-hidden z-10 pointer-events-none">
+      <div className={`absolute inset-0 flex flex-col px-1.5 py-0.5 overflow-hidden z-10 pointer-events-none ${
+        clip.fxSettings
+          ? (clip.fxSettings.isCollapsed ?? true) ? 'pt-[20px]' : 'pt-[38px]'
+          : ''
+      }`}>
         <div className="flex items-center gap-1 min-w-0 pr-8">
           {media.type === 'video' && <Film className="w-2.5 h-2.5 shrink-0 opacity-70" />}
           {media.type === 'audio' && <Music className="w-2.5 h-2.5 shrink-0 opacity-70" />}

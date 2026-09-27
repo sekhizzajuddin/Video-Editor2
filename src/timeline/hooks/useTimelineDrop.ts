@@ -281,7 +281,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         return;
       }
 
-      // ── Custom AI FX Drop ──
+      // ── Custom AI FX Drop (Attach directly as sub-track to target clip) ──
       const customFxRaw = e.dataTransfer.getData('application/procut-custom-fx');
       if (customFxRaw) {
         try {
@@ -291,76 +291,43 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           const x = e.clientX - rect.left;
           const dropTime = Math.max(0, x / zoomLevel);
 
-          let targetTrackId: string;
           let targetClip: TimelineClip | null = null;
-
           if (track) {
-            if (track.type === 'video' || track.type === 'text') {
-              // Dropped onto a video/text track: snap to clip under cursor, ensure FX track directly above
-              targetClip = track.clips.find((c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration) || null;
-              targetTrackId = state.ensureFxTrackAbove(track.id);
-            } else if (track.type === 'fx') {
-              targetTrackId = track.id;
-              if (track.linkedTrackId) {
-                const hostTrack = state.tracks.find((t) => t.id === track.linkedTrackId);
-                if (hostTrack) {
-                  targetClip = hostTrack.clips.find((c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration) || null;
-                }
-              }
-            } else {
-              const existingFx = state.tracks.find((t) => t.type === 'fx');
-              if (existingFx) {
-                targetTrackId = existingFx.id;
-              } else {
-                const firstVideo = state.tracks.find((t) => t.type === 'video');
-                targetTrackId = firstVideo
-                  ? state.ensureFxTrackAbove(firstVideo.id)
-                  : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+            targetClip = track.clips.find((c) => dropTime >= c.startTime && dropTime < c.startTime + c.duration) || null;
+          }
+          if (!targetClip) {
+            for (const t of state.tracks) {
+              if (t.type === 'video' || t.type === 'text') {
+                const c = t.clips.find((clip) => dropTime >= clip.startTime && dropTime < clip.startTime + clip.duration);
+                if (c) { targetClip = c; break; }
               }
             }
-          } else {
-            const firstVideo = state.tracks.find((t) => t.type === 'video');
-            targetTrackId = firstVideo
-              ? state.ensureFxTrackAbove(firstVideo.id)
-              : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
           }
 
-          const startTime = targetClip ? targetClip.startTime : dropTime;
-          const duration = targetClip ? targetClip.duration : (customFx.duration || 5);
-          const fxClipId = `fx_clip_${Math.random().toString(36).substr(2, 9)}`;
-
-          const fxClip: TimelineClip = {
-            id: fxClipId,
-            mediaId: customFx.id,
-            trackId: targetTrackId,
-            startTime,
-            duration,
-            trimStart: 0,
-            trimEnd: 0,
-            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
-            opacity: 1,
-            speed: 1,
-            effects: [],
-            linkedClipId: targetClip ? targetClip.id : undefined,
-            fxSettings: {
-              type: 'custom_html' as any,
-              intensity: 100,
-              customFxId: customFx.id,
-              customHtmlCss: customFx.htmlCss,
-              customFxName: customFx.name,
-            },
-          };
-
-          state.addClip(fxClip);
           if (targetClip) {
-            state.updateClip(targetClip.id, { linkedClipId: fxClipId });
+            state.updateClip(targetClip.id, {
+              fxSettings: {
+                type: 'custom_html',
+                intensity: 100,
+                customFxId: customFx.id,
+                customHtmlCss: customFx.htmlCss,
+                customFxName: customFx.name,
+                enabled: true,
+                isCollapsed: false,
+              },
+            });
+            state.selectClip(targetClip.id);
+            state.saveSnapshot('Apply Custom FX to Clip');
+            setHoveredTrackId(null);
+            setDropPreview(null);
+            toast.success(`✨ Applied "${customFx.name}" to ${(targetClip as any).name || targetClip.id}`);
+            return;
+          } else {
+            toast.info('Drop onto a video or image clip to attach this FX');
+            setHoveredTrackId(null);
+            setDropPreview(null);
+            return;
           }
-          state.selectClip(fxClipId);
-          state.saveSnapshot('Add Custom FX Clip');
-          setHoveredTrackId(null);
-          setDropPreview(null);
-          toast.success(targetClip ? `Connected "${customFx.name}" with video clip` : `Added "${customFx.name}" to FX track`);
-          return;
         } catch (err) {
           console.error('Failed to parse custom fx drop', err);
         }

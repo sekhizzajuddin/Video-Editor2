@@ -3061,53 +3061,24 @@ export function MediaPanel() {
                               }
                             }
 
-                            let targetTrackId: string;
-                            if (hostTrackId) {
-                              targetTrackId = state.ensureFxTrackAbove(hostTrackId);
-                            } else {
-                              const existingFx = state.tracks.find(t => t.type === 'fx');
-                              if (existingFx) {
-                                targetTrackId = existingFx.id;
-                              } else {
-                                const firstVideo = state.tracks.find(t => t.type === 'video');
-                                targetTrackId = firstVideo
-                                  ? state.ensureFxTrackAbove(firstVideo.id)
-                                  : (state.addTrack('fx'), useEditorStore.getState().tracks.find(t => t.type === 'fx')!.id);
-                              }
-                            }
-
-                            const startTime = targetClip ? targetClip.startTime : currentTime;
-                            const duration = targetClip ? targetClip.duration : (fx.duration || 3);
-                            const clipId = `custom-fx-clip-${Date.now()}`;
-
-                            state.insertClip({
-                              id: clipId,
-                              mediaId: fx.id,
-                              trackId: targetTrackId,
-                              startTime,
-                              duration,
-                              trimStart: 0,
-                              trimEnd: 0,
-                              opacity: 1,
-                              speed: 1,
-                              effects: [],
-                              transform: { x: 0, y: 0, scale: 1, rotation: 0 },
-                              linkedClipId: targetClip ? targetClip.id : undefined,
-                              fxSettings: {
-                                type: 'custom_html',
-                                intensity: 100,
-                                customFxId: fx.id,
-                                customHtmlCss: fx.htmlCss,
-                                customFxName: fx.name,
-                              },
-                            } as any, startTime, targetTrackId);
-
                             if (targetClip) {
-                              state.updateClip(targetClip.id, { linkedClipId: clipId });
+                              state.updateClip(targetClip.id, {
+                                fxSettings: {
+                                  type: 'custom_html',
+                                  intensity: 100,
+                                  customFxId: fx.id,
+                                  customHtmlCss: fx.htmlCss,
+                                  customFxName: fx.name,
+                                  enabled: true,
+                                  isCollapsed: false,
+                                },
+                              });
+                              state.selectClip(targetClip.id);
+                              state.saveSnapshot('Apply Custom FX to Clip');
+                              toast.success(`✨ Applied "${fx.name}" to ${(targetClip as any).name || targetClip.id}`);
+                            } else {
+                              toast.info('Select a video or image clip first to apply this FX');
                             }
-                            state.selectClip(clipId);
-                            state.saveSnapshot('Add Custom FX Clip');
-                            toast.success(targetClip ? `Connected "${fx.name}" with video clip` : `Added "${fx.name}" to FX track`);
                           }}
                           className="group relative flex items-center gap-3 p-2.5 bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-xl cursor-pointer hover:border-amber-500/50 hover:bg-amber-500/5 transition-all hover:shadow-md active:scale-[0.98]"
                         >
