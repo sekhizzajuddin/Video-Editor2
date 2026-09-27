@@ -1619,7 +1619,11 @@ export async function renderCanvasEngine({
                 aiSrcCtx.drawImage(offCanvas, 0, 0);
                 // Stamp with video time so getVideoCurrentTime() can look up the
                 // pre-rendered temporal mask cache (canvas has no native currentTime)
-                (aiSourceCanvas as any).currentTime = (sourceElement as any).currentTime ?? 0;
+                const srcTime = (sourceElement && typeof (sourceElement as any).currentTime === 'number' && (sourceElement as any).currentTime >= 0)
+                  ? (sourceElement as any).currentTime
+                  : localTime;
+                (aiSourceCanvas as any).currentTime = srcTime;
+                (aiSourceCanvas as any).localTime = localTime;
 
                 if (isExporting) {
                   await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, aiSourceCanvas, clip.id, smartOpts);

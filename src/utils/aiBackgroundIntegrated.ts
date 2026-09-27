@@ -65,6 +65,7 @@ import {
   subscribeClipBackgroundAnalysis,
   getClipAnalysisStatus,
   applyPreRenderedMaskIfAvailable,
+  preRenderedMaskCache,
   applySpillSuppression,
   refineMaskEdges,
   getPooledCanvas,
@@ -189,6 +190,13 @@ export async function applyAiBackgroundSmart(
         }
       )
     ) {
+      return;
+    }
+
+    // Single Source of Truth: if this clip has any pre-rendered analysis masks,
+    // do NOT fall back to live MediaPipe/IS-Net — alternating models causes matte flickering.
+    const preCache = preRenderedMaskCache.get(clipId);
+    if (preCache && preCache.size > 0) {
       return;
     }
 
