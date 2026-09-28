@@ -1630,6 +1630,16 @@ export async function renderCanvasEngine({
                 } else {
                   await applyAiBackgroundSmart(oCtx, offCanvas.width, offCanvas.height, aiSourceCanvas, clip.id, smartOpts);
                 }
+                
+                // Re-apply crop bounds: AI background modes like 'color' or 'blur' fill the
+                // entire canvas. We must mask out the cropped areas so the background doesn't
+                // bleed outside the user's intended crop rectangle (which appears as a large black box).
+                oCtx.globalCompositeOperation = 'destination-in';
+                oCtx.beginPath();
+                oCtx.rect(odx, ody, odw, odh);
+                oCtx.fillStyle = 'black'; // Color doesn't matter for destination-in, only alpha
+                oCtx.fill();
+                oCtx.globalCompositeOperation = 'source-over';
               } catch (aiErr) {
                 console.warn('[CanvasRenderingEngine] AI background render error:', aiErr);
               }

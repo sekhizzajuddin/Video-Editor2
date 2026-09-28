@@ -217,14 +217,14 @@ export async function applyAiBackgroundSmart(
         compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
       }
 
-      // Fire async inference on current frame (5ms MediaPipe GPU)
+      // Fire async inference on current frame (RVM achieves near-realtime and gives CapCut-like perfect quality)
       runSegmentationAsync(
         sourceElement,
         sourceW,
         sourceH,
         clipId,
         chosenModel,
-        true, // useMediaPipe
+        false, // Force high-quality RVM instead of low-quality MediaPipe
         width,
         height
       );
