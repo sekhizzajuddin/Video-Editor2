@@ -2867,8 +2867,22 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 {/* 1-Tap Toggle */}
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     const enabled = !selectedClip.aiBackground?.enabled;
+                    // Desktop builds can use the native Cutout worker. Ask before
+                    // enabling it when the runtime/model is missing; normal web
+                    // builds keep the existing browser path unchanged.
+                    if (enabled && window.desktopCutout) {
+                      const nativeStatus = await window.desktopCutout.status();
+                      if (!nativeStatus.installed) {
+                        const shouldInstall = await window.desktopCutout.chooseInstall();
+                        if (!shouldInstall) return;
+                        // The signed worker installer will populate these paths.
+                        // Do not enable a native path until it is actually ready.
+                        const afterPrompt = await window.desktopCutout.status();
+                        if (!afterPrompt.installed) return;
+                      }
+                    }
                     const existing = selectedClip.aiBackground ?? {
                       enabled: false,
                       mode: 'remove',
