@@ -93,6 +93,8 @@ import { loadBackgroundRemover, cleanupClipBackgroundState, startClipBackgroundA
 import { loadRVMSession } from '@/utils/rvmMatting';
 import PipTab from './tabs/PipTab';
 import { ENTER_EXIT_PRESETS } from '@/utils/clipEnterExitEngine';
+import { checkDesktopAiStatus, hasUserSkippedDesktopPrompt } from '@/utils/desktopAiBridge';
+import { DesktopAiCutoutModal } from '@/components/DesktopAiCutoutModal';
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -444,6 +446,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [isClipDetailsOpen, setIsClipDetailsOpen] = useState(true);
+  const [showDesktopCutoutModal, setShowDesktopCutoutModal] = useState(false);
+  const [pendingCutoutClipId, setPendingCutoutClipId] = useState<string | null>(null);
 
   const dynamicStretch = useEditorStore((s) => s.dynamicStretch);
   const startDynamicStretch = useEditorStore((s) => s.startDynamicStretch);
@@ -974,6 +978,41 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const removeClip = useCallback((clipId: string) => {
     storeRemoveClip(clipId);
   }, [storeRemoveClip]);
+
+  const enableClipCutout = useCallback((clipId: string) => {
+    const found = findClipDeep(useEditorStore.getState(), clipId);
+    if (!found) return;
+    const clip = found.clip;
+    const existing = clip.aiBackground ?? {
+      enabled: false,
+      mode: 'remove',
+      edgeBlur: 2,
+      choke: -1,
+      blurStrength: 12,
+      strokeColor: '#ffffff',
+      strokeWidth: 4,
+      strokeGlow: false,
+      bgColor: '#121316',
+      modelSelection: 2,
+    };
+    updateClip(clip.id, {
+      aiBackground: { ...existing, enabled: true, modelSelection: 2 }
+    });
+    scheduleSaveSnapshot('Toggle AI Cutout');
+    loadRVMSession().catch(() => {});
+    const mediaItem = mediaLibrary.find((m) => m.id === clip.mediaId || m.url === clip.mediaId);
+    const clipUrl = mediaItem?.url || (clip as any).url || (clip as any).sourceUrl || '';
+    if (clipUrl) {
+      startClipBackgroundAnalysis(
+        clip.id,
+        clipUrl,
+        clip.trimStart || 0,
+        clip.duration || 5,
+        2,
+        true
+      );
+    }
+  }, [mediaLibrary, updateClip]);
 
   // Check if a given tab is supported by the clip & track
   const isTabSupportedForClip = useCallback((tab: PropertiesTab, clip: any, track: any): boolean => {
@@ -2881,51 +2920,33 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   type="button"
                   onClick={async () => {
                     const enabled = !selectedClip.aiBackground?.enabled;
-                    // Desktop builds can use the native Cutout worker. Ask before
-                    // enabling it when the runtime/model is missing; normal web
-                    // builds keep the existing browser path unchanged.
-                    if (enabled && window.desktopCutout) {
-                      const nativeStatus = await window.desktopCutout.status();
-                      if (!nativeStatus.installed) {
-                        const shouldInstall = await window.desktopCutout.chooseInstall();
-                        if (!shouldInstall) return;
-                        // The signed worker installer will populate these paths.
-                        // Do not enable a native path until it is actually ready.
-                        const afterPrompt = await window.desktopCutout.status();
-                        if (!afterPrompt.installed) return;
-                      }
-                    }
-                    const existing = selectedClip.aiBackground ?? {
-                      enabled: false,
-                      mode: 'remove',
-                      edgeBlur: 2,
-                      choke: -1,
-                      blurStrength: 12,
-                      strokeColor: '#ffffff',
-                      strokeWidth: 4,
-                      strokeGlow: false,
-                      bgColor: '#121316',
-                      modelSelection: 2,
-                    };
-                    updateClip(selectedClip.id, {
-                      aiBackground: { ...existing, enabled, modelSelection: 2 }
-                    });
-                    scheduleSaveSnapshot('Toggle AI Cutout');
                     if (enabled) {
-                      loadRVMSession().catch(() => {});
-                      const mediaItem = mediaLibrary.find((m) => m.id === selectedClip.mediaId || m.url === selectedClip.mediaId);
-                      const clipUrl = mediaItem?.url || (selectedClip as any).url || (selectedClip as any).sourceUrl || '';
-                      if (clipUrl) {
-                        startClipBackgroundAnalysis(
-                          selectedClip.id,
-                          clipUrl,
-                          selectedClip.trimStart || 0,
-                          selectedClip.duration || 5,
-                          2,
-                          true
-                        );
+                      // 1. First search for desktop model (via Electron IPC or local companion HTTP)
+                      const desktopStatus = await checkDesktopAiStatus();
+                      if (!desktopStatus.available && !hasUserSkippedDesktopPrompt()) {
+                        setPendingCutoutClipId(selectedClip.id);
+                        setShowDesktopCutoutModal(true);
+                        return;
                       }
+                      // Desktop ready OR user skipped -> proceed with cutout immediately
+                      enableClipCutout(selectedClip.id);
                     } else {
+                      const existing = selectedClip.aiBackground ?? {
+                        enabled: false,
+                        mode: 'remove',
+                        edgeBlur: 2,
+                        choke: -1,
+                        blurStrength: 12,
+                        strokeColor: '#ffffff',
+                        strokeWidth: 4,
+                        strokeGlow: false,
+                        bgColor: '#121316',
+                        modelSelection: 2,
+                      };
+                      updateClip(selectedClip.id, {
+                        aiBackground: { ...existing, enabled: false }
+                      });
+                      scheduleSaveSnapshot('Toggle AI Cutout');
                       cleanupClipBackgroundState(selectedClip.id);
                     }
                   }}
@@ -8623,7 +8644,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         </Suspense>
       )}
 
-
+      <DesktopAiCutoutModal
+        isOpen={showDesktopCutoutModal}
+        onClose={() => setShowDesktopCutoutModal(false)}
+        onUseBrowser={() => {
+          if (pendingCutoutClipId) {
+            enableClipCutout(pendingCutoutClipId);
+            setPendingCutoutClipId(null);
+          } else if (selectedClip) {
+            enableClipCutout(selectedClip.id);
+          }
+        }}
+      />
     </div>
   );
 }

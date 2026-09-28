@@ -537,7 +537,7 @@ export interface MaskAnalysisStatus {
   totalFrames: number;
 }
 
-const MASK_CACHE_FPS = 20; // Cache key granularity: 20 keys/sec for smooth playback lookup
+export const MASK_CACHE_FPS = 30; // 30 FPS granularity: Every single frame gets its own distinct mask (no 3-frame stutter)
 export const preRenderedMaskCache = new Map<string, Map<number, ImageBitmap | HTMLCanvasElement>>();
 const analysisProgressMap = new Map<string, MaskAnalysisStatus>();
 const progressListeners = new Map<string, Set<(status: MaskAnalysisStatus) => void>>();
@@ -767,18 +767,13 @@ async function runClipBackgroundAnalysisInternal(
 
     const actualDuration = Math.min(isFinite(video.duration) ? Math.max(0.1, video.duration - startTime) : duration, duration);
 
-    // ── High-Accuracy Temporal Keyframe Strategy ───────────────────────────
-    // RVM (primary): recurrent memory keeps temporal coherence across keyframes,
-    // so 12 FPS sampling yields fluid, flicker-free mattes with sub-80ms step times.
-    // MediaPipe GPU (fallback, modelSelection 0/1) runs in ~5ms per frame —
-    // sampled at full 20 FPS. IS-Net (modelSelection 2 fallback) at 10 FPS.
-    // The multiclass MediaPipe model is GPU accelerated and inexpensive enough
-    // for near-video-rate analysis. Sampling at 8 FPS keeps temporal edges much
-    // closer to OpenReel while avoiding redundant work on every display frame.
-    const inferenceFps = rvmReady ? 12 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 8;
+    // ── High-Accuracy Continuous Per-Frame Mask Strategy ───────────────────
+    // Every frame gets its own distinct neural matte directly from the model.
+    // fillRatio is strictly 1:1, completely removing the 3-frame duplicate stutter.
+    const inferenceFps = MASK_CACHE_FPS;
     const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
-    const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
-    const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
+    const fillRatio = 1;
+    const totalCacheSlots = totalKeyframes;
 
     // Update status immediately so UI displays accurate total frames (e.g. 0 / 50 frames)
     updateClipAnalysisStatus(clipId, {
@@ -916,21 +911,11 @@ async function runClipBackgroundAnalysisInternal(
       // If segmentation succeeded with a valid bitmap, cache it.
       // If segmentation returned null (seeking glitch / timeout), do NOT store an empty sentinel
       // which would poison the cache and suppress live preview cutout.
+      // Each frame receives its own unique neural matte directly for smooth continuous playback
       if (bitmap) {
-        for (let f = 0; f < fillRatio; f++) {
-          const fillKey = keyframeKey + f;
-          if (fillKey < totalCacheSlots + timeToKey(startTime)) {
-            maskMap.set(fillKey, bitmap);
-          }
-        }
+        maskMap.set(keyframeKey, bitmap);
       } else if (noSubject) {
-        const fillValue = getEmptyMaskSentinel();
-        for (let f = 0; f < fillRatio; f++) {
-          const fillKey = keyframeKey + f;
-          if (fillKey < totalCacheSlots + timeToKey(startTime)) {
-            maskMap.set(fillKey, fillValue);
-          }
-        }
+        maskMap.set(keyframeKey, getEmptyMaskSentinel());
       }
 
       processed++;
