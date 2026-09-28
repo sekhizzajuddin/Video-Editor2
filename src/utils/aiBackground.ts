@@ -55,7 +55,10 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
         const vision = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
         );
-        const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite';
+        // OpenReel's high-quality path uses the multiclass selfie model. Combining
+        // every non-background class preserves hair, clothes, face and accessories;
+        // the landscape binary tends to cut those regions away.
+        const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
         const createOpts: any = {
           baseOptions: { modelAssetPath, delegate: 'GPU' },
           runningMode: 'IMAGE',
@@ -138,10 +141,25 @@ export async function segmentSourceWithMediaPipe(
       return null;
     }
 
-    const confidenceMask = result.confidenceMasks[0];
-    let floatArray = confidenceMask.getAsFloat32Array();
-    const w = confidenceMask.width;
-    const h = confidenceMask.height;
+    // Multiclass model returns separate background, hair, skin, clothes and
+    // accessory masks. Use the union of all non-background classes instead of
+    // taking only mask[0], which is the main source of missing hair/clothing.
+    const confidenceMasks = result.confidenceMasks;
+    const labels = typeof segmenter.getLabels === 'function' ? segmenter.getLabels() : [];
+    const backgroundIndex = Math.max(0, labels.findIndex((label: string) => /^background$/i.test(label.trim())));
+    const baseMask = confidenceMasks[backgroundIndex] ?? confidenceMasks[0];
+    const baseValues = baseMask.getAsFloat32Array();
+    let floatArray: Float32Array;
+    if (confidenceMasks.length > 1) {
+      floatArray = new Float32Array(baseValues.length);
+      for (let i = 0; i < baseValues.length; i++) {
+        floatArray[i] = 1 - Math.max(0, Math.min(1, baseValues[i]));
+      }
+    } else {
+      floatArray = baseValues;
+    }
+    const w = baseMask.width;
+    const h = baseMask.height;
 
     if (clipId) {
       floatArray = stabilizeTemporalAlpha(clipId, floatArray, w, h, videoTime);
@@ -164,7 +182,7 @@ export async function segmentSourceWithMediaPipe(
     }
 
     const bitmap = await createImageBitmap(imgData);
-    confidenceMask.close();
+    for (const mask of confidenceMasks) mask.close();
     result.close();
     return bitmap;
   } catch (err) {
@@ -633,7 +651,20 @@ async function runClipBackgroundAnalysisInternal(
         img.onerror = () => reject(new Error('Image failed to load for background analysis'));
         img.src = videoUrl;
       });
-      const bmp = await segmentSourceWithMediaPipe(img, 'landscape', clipId, 0);
+      // Prefer the fast video-oriented segmenter, but always fall back to the
+      // bundled IS-Net model. MediaPipe can fail on browsers without WebGL or
+      // when its cross-origin model request is blocked; treating that failure as
+      // a successful empty matte made Cutout appear to do nothing.
+      let bmp = await segmentSourceWithMediaPipe(img, 'landscape', clipId, 0).catch(() => null);
+      if (!bmp) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 640;
+        canvas.height = img.naturalHeight || 360;
+        const c = canvas.getContext('2d');
+        c?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+        if (blob) bmp = await segmentBlobToImageBitmap(blob, 'isnet_fp16');
+      }
       if (bmp) {
         if (!preRenderedMaskCache.has(clipId)) {
           preRenderedMaskCache.set(clipId, new Map());
@@ -675,12 +706,22 @@ async function runClipBackgroundAnalysisInternal(
   attachInvisibleMediaElement(video);
 
   try {
+    // Publish progress before downloading/initialising a model. Previously the
+    // UI stayed at 0% for the entire model startup, which looked like a hung
+    // Cutout job even though inference had not started yet.
+    updateClipAnalysisStatus(clipId, {
+      status: 'analyzing', progress: 1, processedFrames: 0, totalFrames: 1,
+    });
+    notifyMaskReady();
+
     // ── PRIMARY ENGINE: RVM (Robust Video Matting) — CapCut-class quality ──
     // Recurrent temporal memory → hair-level alpha, zero flicker/ghosting.
     // Falls back to MediaPipe / IS-Net when RVM is unavailable (no Float16Array
     // support or model download failure).
-    const rvmSession = await loadRVMSession().catch(() => null);
-    const rvmReady = rvmSession != null;
+    // RVM currently fails on the browser ONNX provider with AveragePool ceil
+    // shape errors. Skip its session entirely so analysis can progress through
+    // the working MediaPipe path instead of remaining at 1%.
+    const rvmReady = false;
     if (!rvmReady) {
       const mpType = modelSelection === 0 ? 'general' : 'landscape';
       await loadMediaPipeSegmenter(mpType).catch(() => {});
@@ -731,7 +772,10 @@ async function runClipBackgroundAnalysisInternal(
     // so 12 FPS sampling yields fluid, flicker-free mattes with sub-80ms step times.
     // MediaPipe GPU (fallback, modelSelection 0/1) runs in ~5ms per frame —
     // sampled at full 20 FPS. IS-Net (modelSelection 2 fallback) at 10 FPS.
-    const inferenceFps = rvmReady ? 12 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
+    // The multiclass MediaPipe model is GPU accelerated and inexpensive enough
+    // for near-video-rate analysis. Sampling at 8 FPS keeps temporal edges much
+    // closer to OpenReel while avoiding redundant work on every display frame.
+    const inferenceFps = rvmReady ? 12 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 8;
     const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
     const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
     const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
@@ -835,21 +879,38 @@ async function runClipBackgroundAnalysisInternal(
           noSubject = true;
         }
 
-        // Robust fallback: if RVM failed or had an error on this keyframe, use MediaPipe
+        // Robust fallback chain: RVM -> MediaPipe -> IS-Net. Do not turn an
+        // inference error into an empty mask: that erases the entire frame and
+        // was the main reason Cutout looked inactive on some browsers.
         if (!bitmap && !noSubject) {
           bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, 'landscape', clipId, targetTime).catch(() => null);
-          if (!bitmap) {
-            noSubject = true;
+        }
+        if (!bitmap && !noSubject && fCtx) {
+          const blob = 'convertToBlob' in frameCanvas
+            ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })
+            : await new Promise<Blob | null>((resolve) =>
+                (frameCanvas as HTMLCanvasElement).toBlob(resolve, 'image/jpeg', 0.9)
+              );
+          if (blob) {
+            bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
           }
         }
+        if (!bitmap) noSubject = true;
       } else {
-        // ── FALLBACK (no RVM): MediaPipe Ultra-Fast Engine (Primary) ──
-        // MediaPipe runs in ~10-25ms, never hangs, and handles human subjects
+        // Use the multiclass MediaPipe person model first. It is the same
+        // high-quality family used by OpenReel and runs on the GPU without the
+        // 3–5 second IS-Net inference stall. IS-Net remains a fallback only.
         const mpType = modelSelection === 0 ? 'general' : 'landscape';
         bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime).catch(() => null);
-        if (!bitmap) {
-          noSubject = true;
+        if (!bitmap && modelSelection === 2 && fCtx) {
+          const blob = 'convertToBlob' in frameCanvas
+            ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })
+            : await new Promise<Blob | null>((resolve) =>
+                (frameCanvas as HTMLCanvasElement).toBlob(resolve, 'image/jpeg', 0.9)
+              );
+          if (blob) bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
         }
+        if (!bitmap) noSubject = true;
       }
 
       // If segmentation succeeded with a valid bitmap, cache it.
@@ -1127,28 +1188,16 @@ export function applyPreRenderedMaskIfAvailable(
   const targetKey = timeToKey(currentVideoTime);
   let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
 
-  // If exact frame isn't ready yet, look for closest analyzed frame within +-20 frames (~1s)
-  const maxSearchOffset = 20;
+  // Use the nearest timestamp, not the first mask found. The old search always
+  // preferred the previous frame, and its wide one-second clamp made a moving
+  // subject visibly trail the video while analysis was catching up.
+  const maxSearchOffset = 3; // at most ~125 ms at the 24 FPS cache rate
   if (!preMask) {
-    for (let offset = 1; offset <= maxSearchOffset; offset++) {
-      preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
-      if (preMask) break;
-    }
-  }
-
-  // If still not found, clamp to the closest existing key in the pre-rendered cache
-  if (!preMask && clipPreRendered.size > 0) {
-    let closestKey = -1;
-    let closestDiff = Infinity;
-    for (const k of clipPreRendered.keys()) {
-      const diff = Math.abs(k - targetKey);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestKey = k;
-      }
-    }
-    if (closestKey >= 0) {
-      preMask = clipPreRendered.get(closestKey);
+    for (let offset = 1; offset <= maxSearchOffset && !preMask; offset++) {
+      const before = clipPreRendered.get(targetKey - offset);
+      const after = clipPreRendered.get(targetKey + offset);
+      // Prefer the future frame when equally close: it avoids visible trailing.
+      preMask = after || before;
     }
   }
 

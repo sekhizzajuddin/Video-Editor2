@@ -238,7 +238,7 @@ export async function applyAiBackgroundSmart(
         sourceH,
         clipId,
         chosenModel,
-        options.modelSelection !== 2, // Use MediaPipe GPU unless Ultra Studio IS-Net is selected
+        true, // MediaPipe is the reliable browser fallback, including Studio mode
         width,
         height
       );
@@ -278,9 +278,26 @@ async function runSegmentationAsync(
     const videoTime = source && 'currentTime' in source ? (source as any).currentTime : 0;
     const isVideo = ('videoWidth' in source && (source as HTMLVideoElement).videoWidth > 0) || videoTime > 0;
 
-    // Try 0: RVM (ByteDance Robust Video Matting - CapCut-grade temporal recurrent alpha)
-    const rvmSession = await loadRVMSession().catch(() => null);
-    if (rvmSession && isVideo) {
+    // Try MediaPipe first. RVM's model can load successfully but still fail at
+    // session.run on browsers whose WebGPU/WebGL provider lacks AveragePool ceil
+    // support; waiting for that failure made Cutout stall before the usable GPU
+    // segmenter was reached.
+    if (tryMediaPipe) {
+      const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime).catch(() => null);
+      if (mpBitmap) {
+        maskCanvas = getPooledCanvas(`${clipId}_async_mp`, targetW, targetH);
+        const mCtx = maskCanvas.getContext('2d');
+        mCtx?.drawImage(mpBitmap, 0, 0, targetW, targetH);
+        mpBitmap.close();
+      }
+    }
+
+    // RVM is retained as a fallback for environments where MediaPipe is unavailable.
+    // RVM is currently incompatible with the browser ONNX execution provider
+    // (AveragePool ceil shape error). Do not even initialise it here: doing so
+    // blocks the usable MediaPipe path and leaves the preview at 1%.
+    const rvmSession = null;
+    if (!maskCanvas && rvmSession && isVideo) {
       const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 512).catch(() => null);
       if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
         maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
@@ -322,20 +339,17 @@ async function runSegmentationAsync(
       }
     }
 
-    // Final guard: if all engines failed or mask is empty, cache the sentinel
-    if (!maskCanvas || (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
-      maskCanvas = getEmptyMaskSentinel();
-    }
-
-    if (maskCanvas) {
+    // If inference fails, leave the original video untouched. Caching an empty
+    // sentinel here caused the compositor to apply destination-in and turn the
+    // entire preview blank.
+    if (maskCanvas && (await measureMaskCoverage(maskCanvas)) >= RVM_EMPTY_COVERAGE) {
       cacheMaskCanvas(clipId, maskCanvas);
       notifyMaskReady();
     }
   } catch (err) {
     console.warn('[aiBackgroundIntegrated] Async segmentation failed:', err);
-    // On complete failure, cache the sentinel to prevent infinite retries that freeze playback
-    const sentinel = getEmptyMaskSentinel();
-    cacheMaskCanvas(clipId, sentinel);
+    // Fail open: keep the original frame visible and allow a later retry.
+    // Do not cache an empty mask; destination-in with an empty mask blanks video.
     notifyMaskReady();
   } finally {
     (window as any)[flightKey] = false;
@@ -360,7 +374,9 @@ async function runSegmentationSync(
   const isVideo = ('videoWidth' in source && (source as HTMLVideoElement).videoWidth > 0) || videoTime > 0;
 
   // Try 0: RVM (CapCut-grade recurrent memory matting at high resolution)
-  const rvmSession = await loadRVMSession().catch(() => null);
+  // RVM is disabled until its AveragePool/WebGPU incompatibility is resolved.
+  // MediaPipe is the reliable browser path and must run without waiting for RVM.
+  const rvmSession = null;
   if (rvmSession && isVideo) {
     const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, targetW >= 768 ? 768 : 512).catch(() => null);
     if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
@@ -404,11 +420,10 @@ async function runSegmentationSync(
     }
   }
 
-  // Final guard: if all engines failed or mask is empty, cache the sentinel
+  // Fail open: no mask means keep rendering the original video. Never return
+  // an empty sentinel to the compositor because destination-in would blank it.
   if (!maskCanvas || (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
-    const sentinel = getEmptyMaskSentinel();
-    cacheMaskCanvas(clipId, sentinel);
-    return sentinel;
+    return null;
   }
 
   if (maskCanvas) {

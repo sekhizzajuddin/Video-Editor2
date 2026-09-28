@@ -39,6 +39,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
@@ -2864,11 +2865,36 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   </div>
                 </div>
 
+                <a
+                  href="https://github.com/sekhizzajuddin/Video-Editor2/releases"
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Download the Windows desktop app"
+                  aria-label="Download Windows desktop app"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:border-cyan-400/60 hover:text-cyan-300 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </a>
+
                 {/* 1-Tap Toggle */}
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     const enabled = !selectedClip.aiBackground?.enabled;
+                    // Desktop builds can use the native Cutout worker. Ask before
+                    // enabling it when the runtime/model is missing; normal web
+                    // builds keep the existing browser path unchanged.
+                    if (enabled && window.desktopCutout) {
+                      const nativeStatus = await window.desktopCutout.status();
+                      if (!nativeStatus.installed) {
+                        const shouldInstall = await window.desktopCutout.chooseInstall();
+                        if (!shouldInstall) return;
+                        // The signed worker installer will populate these paths.
+                        // Do not enable a native path until it is actually ready.
+                        const afterPrompt = await window.desktopCutout.status();
+                        if (!afterPrompt.installed) return;
+                      }
+                    }
                     const existing = selectedClip.aiBackground ?? {
                       enabled: false,
                       mode: 'remove',
