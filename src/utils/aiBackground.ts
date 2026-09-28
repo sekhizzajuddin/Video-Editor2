@@ -1185,6 +1185,13 @@ export function applyPreRenderedMaskIfAvailable(
     return false;
   }
 
+  // During playback, use the live timestamped MediaPipe pipeline instead of
+  // reusing a pre-analysis matte for several display frames. Pre-rendered masks
+  // are still used for paused scrubbing/export, where they are frame-accurate.
+  // This is the reason the old implementation visibly skipped about 3 frames
+  // between mask updates.
+  if (isPlaying && !extraOptions?.isExporting) return false;
+
   const targetKey = timeToKey(currentVideoTime);
   let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
 
