@@ -876,13 +876,25 @@ async function runClipBackgroundAnalysisInternal(
         }
         if (!bitmap) noSubject = true;
       } else {
-        // ── FALLBACK (no RVM): MediaPipe Ultra-Fast Engine (Primary) ──
-        // MediaPipe runs in ~10-25ms, never hangs, and handles human subjects
-        const mpType = modelSelection === 0 ? 'general' : 'landscape';
-        bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime).catch(() => null);
-        if (!bitmap) {
-          noSubject = true;
+        // Studio mode uses the higher-detail IS-Net matte first. MediaPipe is
+        // retained as a fast fallback for browsers where the IS-Net model is
+        // unavailable. This gives hair/clothing edges substantially better
+        // quality than using the low-resolution selfie segmenter alone.
+        if (modelSelection === 2 && fCtx) {
+          const blob = 'convertToBlob' in frameCanvas
+            ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.94 })
+            : await new Promise<Blob | null>((resolve) =>
+                (frameCanvas as HTMLCanvasElement).toBlob(resolve, 'image/jpeg', 0.94)
+              );
+          if (blob) {
+            bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
+          }
         }
+        if (!bitmap) {
+          const mpType = modelSelection === 0 ? 'general' : 'landscape';
+          bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime).catch(() => null);
+        }
+        if (!bitmap) noSubject = true;
       }
 
       // If segmentation succeeded with a valid bitmap, cache it.
