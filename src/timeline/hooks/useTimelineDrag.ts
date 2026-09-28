@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore, findClipDeep, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { TimelineClip, TimelineTrack, MediaItem } from '@/types';
-import { getRampedTrimEndForRightResize, getRampedTrimStartForLeftResize, getSpeedRampEngine } from '@/utils/speedRamp';
+import { getRampedTrimEndForRightResize, getRampedTrimStartForLeftResize, getSpeedRampEngine, getClipSourceEnd } from '@/utils/speedRamp';
 import { setTrimPreviewTime } from '@/utils/playbackClock';
 import { getTrackHeight, getTrackTop, getTrackAtY } from '../trackGeometry';
 
@@ -529,7 +529,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
           .filter((c) => c.id !== clip.id && c.splitGroupId === clip.splitGroupId)
           .sort((a, b) => a.trimStart - b.trimStart);
         if (edge === 'left') {
-          const prev = siblingClips.reverse().find((c) => c.trimStart + c.duration <= clip.trimStart + 0.001);
+          const prev = siblingClips.reverse().find((c) =>
+            Math.abs(c.startTime + c.duration - clip.startTime) < 0.05 &&
+            Math.abs(getClipSourceEnd(c) - clip.trimStart) < 0.05
+          );
           if (prev) {
             sibling = {
               id: prev.id,
@@ -543,7 +546,10 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
             };
           }
         } else {
-          const next = siblingClips.find((c) => c.trimStart >= clip.trimStart + clip.duration - 0.001);
+          const next = siblingClips.find((c) =>
+            Math.abs(clip.startTime + clip.duration - c.startTime) < 0.05 &&
+            Math.abs(getClipSourceEnd(clip) - c.trimStart) < 0.05
+          );
           if (next) {
             sibling = {
               id: next.id,

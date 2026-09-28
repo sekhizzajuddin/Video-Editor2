@@ -25,7 +25,7 @@ const setAudioParam = (param: AudioParam, target: number, ctxTime: number, rampT
 };
 
 import { useEditorStore } from '@/store/editorStore';
-import { getMediaTimeForClip, getSpeedForClipAtTime } from '@/utils/speedRamp';
+import { getMediaTimeForClip, getSpeedForClipAtTime, getClipSourceEnd } from '@/utils/speedRamp';
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
@@ -1221,35 +1221,60 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
     // ── SEQUENTIAL SPLIT GROUP SHARING ────────────────────────────────
     // Split segments of the same source media share a single <video> element
-    // across cuts, gaps, and trims. Crossing a split boundary simply seeks
-    // currentTime on the shared element rather than instantiating a new decoder.
-    // They only need dedicated elements if two instances actively OVERLAP in time.
+    // across contiguous cuts without transitions. If segments have a timeline gap,
+    // a media source discontinuity, an active transition, or overlap, they MUST
+    // receive dedicated elements so pre-roll and independent rendering work cleanly.
     {
-      const splitGroups = new Map<string, { clipId: string; start: number; end: number }[]>();
+      const splitGroups = new Map<string, { clipId: string; start: number; end: number; clip: any }[]>();
       for (const [clipId, info] of neededClips) {
         if (!info.shareKey.includes('::clip:')) {
           let group = splitGroups.get(info.shareKey);
           if (!group) { group = []; splitGroups.set(info.shareKey, group); }
-          group.push({ clipId, start: info.start, end: info.end });
+          let foundClip: any;
+          for (const t of sortedTracksRef.current) {
+            foundClip = t.clips.find((c: any) => c.id === clipId);
+            if (foundClip) break;
+          }
+          if (foundClip) {
+            group.push({ clipId, start: info.start, end: info.end, clip: foundClip });
+          }
         }
       }
       for (const [, members] of splitGroups) {
         if (members.length < 2) continue;
         members.sort((a, b) => a.start - b.start);
-        let hasOverlap = false;
+
+        let currentChain = [members[0]];
+        const chains: typeof members[] = [];
+
         for (let i = 1; i < members.length; i++) {
-          if (members[i].start < members[i - 1].end - 0.001) {
-            hasOverlap = true;
-            break;
+          const prev = members[i - 1];
+          const curr = members[i];
+          const hasOverlap = curr.start < prev.end - 0.001;
+          const isAdjacent = Math.abs(curr.start - prev.end) < 0.05;
+          const isContiguous = Math.abs(curr.clip.trimStart - getClipSourceEnd(prev.clip)) < 0.05;
+          const hasTransition = Boolean(prev.clip.transitionOut || curr.clip.transitionIn);
+
+          if (!hasOverlap && isAdjacent && isContiguous && !hasTransition) {
+            currentChain.push(curr);
+          } else {
+            chains.push(currentChain);
+            currentChain = [curr];
           }
         }
-        if (hasOverlap) {
-          // Reassign each clip in this group to its own dedicated element only if overlapping
-          for (const m of members) {
-            const info = neededClips.get(m.clipId)!;
-            info.shareKey = `${info.mediaId}::clip:${m.clipId}`;
+        chains.push(currentChain);
+
+        chains.forEach((chain, chainIdx) => {
+          if (chain.length === 1) {
+            const info = neededClips.get(chain[0].clipId);
+            if (info) info.shareKey = `${info.mediaId}::clip:${chain[0].clipId}`;
+          } else if (chainIdx > 0) {
+            for (const m of chain) {
+              const info = neededClips.get(m.clipId);
+              if (info) info.shareKey = `${info.mediaId}::split:${m.clip.splitGroupId}_${chainIdx}`;
+            }
           }
-        }
+        });
       }
     }
 
@@ -1359,7 +1384,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             if (!el && !key.includes('::clip:')) {
               for (const [, e] of pool) {
                 if (e.type === 'video' && e.mediaId === info.mediaId && e.el && (e.el as HTMLVideoElement).readyState >= 1) {
-                  if (e._shareKey === key || e._shareKey?.startsWith(`${info.mediaId}::`)) {
+                  if (e._shareKey === key) {
                     el = e.el as HTMLVideoElement;
                     mediaVideoEls.set(key, el);
                     break;
@@ -1779,29 +1804,19 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // scrub/playback fallbacks. shareKey format is `${mediaId}::${groupId}`,
       // so the group id is the part after '::'.
       let splitGroupIdx: Map<string, MediaElement> | null = null;
-      let mediaIdIdx: Map<string, MediaElement> | null = null;
-      const getSplitGroupEntry = (splitGroupId?: string, mediaId?: string): MediaElement | null => {
+      const getSplitGroupEntry = (splitGroupId?: string): MediaElement | null => {
+        if (!splitGroupId) return null;
         if (!splitGroupIdx) {
           splitGroupIdx = new Map();
-          mediaIdIdx = new Map();
           for (const [, e] of pool) {
             if (e.type !== 'video' || !e.el) continue;
             if (e._shareKey) {
               const gid = e._shareKey.split('::')[1];
               if (gid && !splitGroupIdx.has(gid)) splitGroupIdx.set(gid, e);
             }
-            if (e.mediaId && !mediaIdIdx.has(e.mediaId)) {
-              mediaIdIdx.set(e.mediaId, e);
-            }
           }
         }
-        if (splitGroupId && splitGroupIdx && splitGroupIdx.has(splitGroupId)) {
-          return splitGroupIdx.get(splitGroupId)!;
-        }
-        if (mediaId && mediaIdIdx && mediaIdIdx.has(mediaId)) {
-          return mediaIdIdx.get(mediaId)!;
-        }
-        return null;
+        return splitGroupIdx.get(splitGroupId) ?? null;
       };
       // SPEED FRAME FIX: consecutive-buffering-tick counter (hysteresis for the
       // isBuffering flag — see the buffering detection section below).
@@ -1956,7 +1971,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         for (const clip of clips) {
         let entry = pool.get(clip.clipId);
         if (!entry) {
-          entry = getSplitGroupEntry(clip.clip?.splitGroupId, clip.mediaId) ?? undefined;
+          entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
         }
         if (!entry || entry.type !== 'video') continue;
         const mediaItem = mediaMap.get(clip.mediaId);
@@ -2001,7 +2016,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // PERF (multi-split fix): the fallback matches elements of the same split
         // group, or the same mediaId if no dedicated element is allocated.
         if (!entry) {
-          entry = getSplitGroupEntry(clip.clip?.splitGroupId, clip.mediaId) ?? undefined;
+          entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
         }
         if (!entry) continue;
 

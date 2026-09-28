@@ -385,7 +385,6 @@ export async function renderCanvasEngine({
   // the ready-element indexes are rebuilt every render (cheap — the pool holds
   // a handful of elements) so readiness stays fresh across async loads.
   let splitSiblingEl: Map<string, HTMLVideoElement>;
-  let mediaTrackSiblingEl: Map<string, HTMLVideoElement>;
   {
     let clipsById: Map<string, TimelineClip>;
     if (_cachedClipsById && tracks === _cachedClipsByIdTracksRef) {
@@ -399,17 +398,12 @@ export async function renderCanvasEngine({
       _cachedClipsByIdTracksRef = tracks;
     }
     splitSiblingEl = new Map<string, HTMLVideoElement>();
-    mediaTrackSiblingEl = new Map<string, HTMLVideoElement>();
     for (const [otherId, otherEl] of videoElements) {
       if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
       const oc = clipsById.get(otherId);
       if (!oc) continue;
       if (oc.splitGroupId && !splitSiblingEl.has(oc.splitGroupId)) {
         splitSiblingEl.set(oc.splitGroupId, otherEl);
-      }
-      const mtKey = `${oc.mediaId}::${oc.trackId}`;
-      if (!mediaTrackSiblingEl.has(mtKey)) {
-        mediaTrackSiblingEl.set(mtKey, otherEl);
       }
     }
   }
@@ -1515,7 +1509,6 @@ export async function renderCanvasEngine({
           // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
           videoEl =
             (clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
-            mediaTrackSiblingEl.get(`${clip.mediaId}::${clip.trackId}`) ||
             null;
           if (videoEl) {
             videoElements.set(clip.id, videoEl);

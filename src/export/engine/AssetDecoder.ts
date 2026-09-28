@@ -150,10 +150,15 @@ export class AssetDecoder {
       return wrapped?.canvas || null;
     }
 
-    // A media item may be reused later with a source-time reset. A backwards
-    // request (transition overlap) must NOT walk from position 0 — restart the
-    // iterator at the requested time instead.
-    if (this.lastRequestedTime >= 0 && timestampSeconds + 0.0005 < this.lastRequestedTime) {
+    // A media item may be reused later with a source-time reset or a forward cut/jump.
+    // A backwards request (transition overlap) or a forward jump across cut/deleted
+    // segments (> 0.5s) must NOT walk sequential frames — restart the iterator
+    // at the requested time instead.
+    if (
+      this.lastRequestedTime >= 0 &&
+      (timestampSeconds + 0.0005 < this.lastRequestedTime ||
+       timestampSeconds - this.lastRequestedTime > 0.5)
+    ) {
       this.restartIteratorAt(timestampSeconds);
     }
     this.lastRequestedTime = timestampSeconds;

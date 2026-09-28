@@ -32,6 +32,7 @@ import {
   calculateSpeedFramesRamp,
   getRampedTrimStartForLeftResize,
   invalidateSpeedSegmentsCache,
+  getClipSourceEnd,
 } from '@/utils/speedRamp';
 import { invalidateFrameStripCache } from '@/timeline/components/FrameStripOverlay';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
@@ -114,6 +115,100 @@ let _transactionTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 // Create empty tracks
 const createEmptyTracks = (): TimelineTrack[] => [];
+
+/**
+ * Ensures split groups only group clips that are strictly contiguous:
+ * 1. Same track & same mediaId
+ * 2. Directly adjacent on timeline (|prev.startTime + prev.duration - curr.startTime| < 0.05)
+ * 3. Directly contiguous in source media (|getClipSourceEnd(prev) - curr.trimStart| < 0.05)
+ *
+ * If a middle clip is deleted or a clip is moved away, lone clips have their
+ * splitGroupId removed (undefined). Multiple separated contiguous chains get
+ * separate splitGroupIds.
+ */
+export function sanitizeTrackSplitGroups(track: TimelineTrack): TimelineTrack {
+  if (!track.clips || track.clips.length === 0) return track;
+
+  const groups = new Map<string, TimelineClip[]>();
+  for (const clip of track.clips) {
+    if (clip.splitGroupId) {
+      const list = groups.get(clip.splitGroupId) || [];
+      list.push(clip);
+      groups.set(clip.splitGroupId, list);
+    }
+  }
+
+  if (groups.size === 0) return track;
+
+  const patchMap = new Map<string, string | undefined>();
+
+  for (const [groupId, groupClips] of groups.entries()) {
+    if (groupClips.length <= 1) {
+      patchMap.set(groupClips[0].id, undefined);
+      continue;
+    }
+
+    const sorted = [...groupClips].sort((a, b) => a.startTime - b.startTime);
+    const chains: TimelineClip[][] = [];
+    let currentChain: TimelineClip[] = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1];
+      const curr = sorted[i];
+
+      const prevTimelineEnd = prev.startTime + prev.duration;
+      const isAdjacent = Math.abs(curr.startTime - prevTimelineEnd) < 0.05;
+
+      const prevSourceEnd = getClipSourceEnd(prev);
+      const isContiguous = Math.abs(curr.trimStart - prevSourceEnd) < 0.05;
+      const isSameMedia = prev.mediaId === curr.mediaId && !!prev.mediaId;
+
+      if (isSameMedia && isAdjacent && isContiguous) {
+        currentChain.push(curr);
+      } else {
+        chains.push(currentChain);
+        currentChain = [curr];
+      }
+    }
+    chains.push(currentChain);
+
+    chains.forEach((chain, idx) => {
+      if (chain.length === 1) {
+        patchMap.set(chain[0].id, undefined);
+      } else {
+        const assignedGroupId = idx === 0 ? groupId : generateId();
+        for (const c of chain) {
+          patchMap.set(c.id, assignedGroupId);
+        }
+      }
+    });
+  }
+
+  let changed = false;
+  for (const clip of track.clips) {
+    if (patchMap.has(clip.id)) {
+      if (clip.splitGroupId !== patchMap.get(clip.id)) {
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  if (!changed) return track;
+
+  return {
+    ...track,
+    clips: track.clips.map((clip) => {
+      if (patchMap.has(clip.id)) {
+        return {
+          ...clip,
+          splitGroupId: patchMap.get(clip.id),
+        };
+      }
+      return clip;
+    }),
+  };
+}
 
 /**
  * Automatically synchronizes each FX track's `linkedTrackId` with the visual track (video/text)
@@ -1981,6 +2076,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         });
       }
 
+      newTracks = newTracks.map(sanitizeTrackSplitGroups);
+
       const newSelectedClipIds = state.selectedClipIds.filter((id) => !idsToRemove.includes(id));
       const newSelectedClipId =
         state.selectedClipId && idsToRemove.includes(state.selectedClipId)
@@ -2014,7 +2111,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         if (hasClip) {
           newPipWindows[pipId] = {
             ...pip,
-            tracks: pip.tracks.map(t => ({
+            tracks: pip.tracks.map(t => sanitizeTrackSplitGroups({
               ...t,
               clips: t.clips.filter(c => !idsToRemove.includes(c.id))
             })).filter(t => t.clips.length > 0)
@@ -2703,7 +2800,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
       }
 
-      return { tracks: newTracks, pipWindows: newPipWindows };
+      return { tracks: newTracks.map(sanitizeTrackSplitGroups), pipWindows: newPipWindows };
     });
 
     if (success) {
@@ -2864,7 +2961,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (!anyMoved) return {};
 
       return { 
-        tracks: newTracks,
+        tracks: newTracks.map(sanitizeTrackSplitGroups),
         pipWindows: newPipWindows
       };
     });
@@ -3338,7 +3435,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         }
 
         if (!modified) return track;
-        return { ...track, clips: newClips };
+        return sanitizeTrackSplitGroups({ ...track, clips: newClips });
       });
 
       const newSelectedKeyframeLines = state.selectedKeyframeLines.filter(l => !idsToSplit.has(l.clipId));

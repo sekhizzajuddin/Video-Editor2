@@ -497,7 +497,49 @@ describe('export worker — edited timeline scenarios', () => {
       const draws = f.pass.filter((o) => o.op === 'draw' && o.pixels);
       expect(draws.length, `frame ${i} black`).toBe(1);
     });
-  });
+  }, 15000);
+
+  it('split clips with middle part deleted (forward jump in source media) renders cleanly without hanging', async () => {
+    // Clip 1 covers source 0-1s, middle 1-4s deleted, Clip 3 covers source 4-5s.
+    const buf = buildInputMp4(6);
+    const mediaId = 'm-split-del';
+    const timeline = {
+      tracks: [
+        {
+          id: 't1',
+          type: 'video',
+          locked: false,
+          muted: false,
+          hidden: false,
+          clips: [
+            videoClip('c1', mediaId, 0, 1, { trimStart: 0 }),
+            videoClip('c3', mediaId, 1, 1, { trimStart: 4 }),
+          ],
+        },
+      ],
+      media: [{ id: mediaId, name: 'a.mp4', duration: 6, url: 'blob:x', ...DEFAULT_MEDIA_META }],
+      duration: 2,
+      totalDuration: 2,
+      aspectRatio: 16 / 9,
+    };
+
+    const { handle } = makeFileHandle('split-del.mp4');
+    const res = await runWorkerExport({
+      timeline,
+      config: baseConfig,
+      audioData: null,
+      fileHandle: handle,
+      mediaBuffers: { [mediaId]: buf },
+    });
+    expect(res.warnings).toEqual([]);
+
+    const enc = FakeVideoEncoder.last!;
+    expect(enc.captured.length).toBe(60);
+    enc.captured.forEach((f, i) => {
+      const draws = f.pass.filter((o) => o.op === 'draw' && o.pixels);
+      expect(draws.length, `frame ${i} black`).toBe(1);
+    });
+  }, 15000);
 
   it('overlaid B-roll on a second track draws both layers', async () => {
     const main = buildInputMp4(2);
