@@ -700,8 +700,10 @@ async function runClipBackgroundAnalysisInternal(
     // Recurrent temporal memory → hair-level alpha, zero flicker/ghosting.
     // Falls back to MediaPipe / IS-Net when RVM is unavailable (no Float16Array
     // support or model download failure).
-    const rvmSession = await loadRVMSession().catch(() => null);
-    const rvmReady = rvmSession != null;
+    // RVM currently fails on the browser ONNX provider with AveragePool ceil
+    // shape errors. Skip its session entirely so analysis can progress through
+    // the working MediaPipe path instead of remaining at 1%.
+    const rvmReady = false;
     if (!rvmReady) {
       const mpType = modelSelection === 0 ? 'general' : 'landscape';
       await loadMediaPipeSegmenter(mpType).catch(() => {});
