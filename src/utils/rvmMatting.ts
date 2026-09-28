@@ -130,6 +130,11 @@ async function canUseWebGPUF16(): Promise<boolean> {
 let resolvedWasmPath: string | null = null;
 async function getBestWasmPath(): Promise<string> {
   if (resolvedWasmPath) return resolvedWasmPath;
+  // Vite's dev server appends ?import to dynamic mjs imports, breaking ONNX WASM load
+  if (import.meta.env.DEV) {
+    resolvedWasmPath = RVM_WASM_CDN;
+    return resolvedWasmPath;
+  }
   try {
     const resp = await fetch('/onnx/ort-wasm-simd-threaded.jsep.mjs', { method: 'HEAD' });
     const ct = resp.headers.get('content-type') || '';
@@ -200,19 +205,19 @@ export function loadRVMSession(forceWasm = false): Promise<any | null> {
       if (allowWebGPU) {
         try {
           return await ort.InferenceSession.create(modelBuf, {
-            executionProviders: ['webgpu', 'webgl', 'wasm'],
+            executionProviders: ['webgpu', 'webgl'],
             graphOptimizationLevel: 'all',
           });
         } catch (gpuErr) {
-          console.warn('[rvmMatting] WebGPU session creation failed, falling back to WebGL/WASM:', gpuErr);
+          console.warn('[rvmMatting] WebGPU session creation failed, falling back to WebGL:', gpuErr);
           isWebGPUDisabled = true;
         }
       }
 
-      // Pure WASM/WebGL execution provider (Universal SIMD, zero GPU shader incompatibilities)
+      // Pure WebGL execution provider (Universal SIMD, zero GPU shader incompatibilities)
       try {
         return await ort.InferenceSession.create(modelBuf, {
-          executionProviders: ['webgl', 'wasm'],
+          executionProviders: ['webgl'],
           graphOptimizationLevel: 'all',
         });
       } catch (wasmErr) {
@@ -223,7 +228,7 @@ export function loadRVMSession(forceWasm = false): Promise<any | null> {
           }
         } catch {}
         return await ort.InferenceSession.create(modelBuf, {
-          executionProviders: ['webgl', 'wasm'],
+          executionProviders: ['webgl'],
           graphOptimizationLevel: 'all',
         });
       }

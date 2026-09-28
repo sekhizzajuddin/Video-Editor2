@@ -195,12 +195,7 @@ export async function applyAiBackgroundSmart(
       return;
     }
 
-    // Single Source of Truth: if this clip has any pre-rendered analysis masks,
-    // do NOT fall back to live MediaPipe/IS-Net — alternating models causes matte flickering.
-    const preCache = preRenderedMaskCache.get(clipId);
-    if (preCache && preCache.size > 0) {
-      return;
-    }
+
 
     // ── STEP 1: Determine Model Selection ─────────────────────────────────
     const chosenModel: 'general' | 'landscape' =
@@ -229,25 +224,11 @@ export async function applyAiBackgroundSmart(
         height
       );
 
-      // If no cached mask yet (first playback frame), await sync segmentation so it doesn't show uncut frame
-      if (!cached) {
-        const firstMask = await runSegmentationSync(
-          sourceElement,
-          sourceW,
-          sourceH,
-          clipId,
-          chosenModel,
-          true,
-          width,
-          height
-        );
-        if (firstMask) {
-          cacheMaskCanvas(clipId, firstMask);
-          if (!isEmptyMaskMarker(firstMask)) {
-            compositeMask(ctx, sourceElement, firstMask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
-          }
-        }
-      }
+      // We intentionally do NOT await runSegmentationSync here for the first frame.
+      // Awaiting it would freeze video playback if the AI model needs to be downloaded
+      // (like the 170MB IS-Net model) or if inference is slow. Instead, the async
+      // segmentation started above will eventually populate the cache, and the mask
+      // will magically pop in a few frames later.
     } else {
       // PAUSED / SCRUBBING / EXPORT:
       // Await synchronous high-quality mask directly from GPU
