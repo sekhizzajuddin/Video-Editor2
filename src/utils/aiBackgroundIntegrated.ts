@@ -238,7 +238,7 @@ export async function applyAiBackgroundSmart(
         sourceH,
         clipId,
         chosenModel,
-        options.modelSelection !== 2, // Use MediaPipe GPU unless Ultra Studio IS-Net is selected
+        true, // MediaPipe is the reliable browser fallback, including Studio mode
         width,
         height
       );
@@ -278,9 +278,23 @@ async function runSegmentationAsync(
     const videoTime = source && 'currentTime' in source ? (source as any).currentTime : 0;
     const isVideo = ('videoWidth' in source && (source as HTMLVideoElement).videoWidth > 0) || videoTime > 0;
 
-    // Try 0: RVM (ByteDance Robust Video Matting - CapCut-grade temporal recurrent alpha)
+    // Try MediaPipe first. RVM's model can load successfully but still fail at
+    // session.run on browsers whose WebGPU/WebGL provider lacks AveragePool ceil
+    // support; waiting for that failure made Cutout stall before the usable GPU
+    // segmenter was reached.
+    if (tryMediaPipe) {
+      const mpBitmap = await segmentSourceWithMediaPipe(source as any, modelType, clipId, videoTime).catch(() => null);
+      if (mpBitmap) {
+        maskCanvas = getPooledCanvas(`${clipId}_async_mp`, targetW, targetH);
+        const mCtx = maskCanvas.getContext('2d');
+        mCtx?.drawImage(mpBitmap, 0, 0, targetW, targetH);
+        mpBitmap.close();
+      }
+    }
+
+    // RVM is retained as a fallback for environments where MediaPipe is unavailable.
     const rvmSession = await loadRVMSession().catch(() => null);
-    if (rvmSession && isVideo) {
+    if (!maskCanvas && rvmSession && isVideo) {
       const rvmRes = await segmentWithRVM(source as any, clipId, videoTime, 512).catch(() => null);
       if (rvmRes && rvmRes.coverage >= RVM_EMPTY_COVERAGE) {
         maskCanvas = getPooledCanvas(`${clipId}_async_rvm`, targetW, targetH);
