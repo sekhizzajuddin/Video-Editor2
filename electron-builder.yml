@@ -1,0 +1,22 @@
+appId: com.procut.videoeditor
+productName: ProCut Video Editor
+directories:
+  output: release
+  buildResources: electron/resources
+files:
+  - dist/**
+  - electron/**
+  - package.json
+asar: true
+win:
+  target:
+    - nsis
+  artifactName: ProCut-Video-Editor-${version}-Setup.exe
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ProCut Video Editor
+extraMetadata:
+  main: electron/main.cjs
