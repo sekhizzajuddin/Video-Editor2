@@ -390,8 +390,11 @@ async function segmentWithRVMInner(
     }
 
     const scale = Math.min(1, maxDim / Math.max(sw, sh));
-    const infW = Math.max(32, Math.round((sw * scale) / 2) * 2);
-    const infH = Math.max(32, Math.round((sh * scale) / 2) * 2);
+    // MULTIPLE OF 32: RVM's backbone has 5 downsampling stages (2^5 = 32).
+    // ONNX Runtime WebGPU fails with "using ceil() in shape computation is not yet supported for AveragePool"
+    // if dimensions are not exact multiples of 32.
+    const infW = Math.max(64, Math.round((sw * scale) / 32) * 32);
+    const infH = Math.max(64, Math.round((sh * scale) / 32) * 32);
 
     const canvas = getSrcCanvas(`_rvm_src_${infW}x${infH}`, infW, infH);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -409,11 +412,12 @@ async function segmentWithRVMInner(
     }
     const ort: any = (ortModule as any).default || ortModule;
     const srcTensor = createFloat16Tensor(ort, srcF32, [1, 3, infH, infW]);
-    // Target internal recurrent backbone resolution is ~448px on the longer dimension.
-    // This provides ~2.5x higher detail than the old 192px downsample, capturing
-    // facial contours, beards, and fingers without gaps or blockiness.
+
+    // Target internal recurrent backbone resolution. Quantize to exact power-of-two fraction
+    // (0.25, 0.5, or 1.0) so pooling stages never produce fractional dimensions or require ceil().
     const targetBackboneDim = 448;
-    const ratioVal = Math.min(1.0, Math.max(0.25, targetBackboneDim / Math.max(infW, infH)));
+    const rawRatio = targetBackboneDim / Math.max(infW, infH);
+    const ratioVal = rawRatio >= 0.75 ? 1.0 : rawRatio >= 0.35 ? 0.5 : 0.25;
     const dRatio = new ort.Tensor('float32', new Float32Array([ratioVal]), [1]);
 
     // State validation: reset on seek, backward time or resolution change

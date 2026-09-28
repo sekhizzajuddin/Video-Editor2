@@ -684,10 +684,6 @@ async function runClipBackgroundAnalysisInternal(
     if (!rvmReady) {
       const mpType = modelSelection === 0 ? 'general' : 'landscape';
       await loadMediaPipeSegmenter(mpType).catch(() => {});
-      if (modelSelection === 2 && !isLoaded) {
-        // Do not block pre-analysis on the heavy 170MB download
-        loadBackgroundRemover().catch(() => {});
-      }
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -835,40 +831,24 @@ async function runClipBackgroundAnalysisInternal(
         if (res && res.coverage >= RVM_EMPTY_COVERAGE) {
           bitmap = res.bitmap;
         } else if (res) {
-          // RVM (person-focused) sees no subject — could be an object clip.
-          // Try the general-purpose IS-Net model for this keyframe.
-          const maxDim = 512;
-          const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
-          if (snap) {
-            bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16').catch(() => null);
-          }
-          if (!bitmap) noSubject = true;
+          // RVM sees no subject in this frame
+          noSubject = true;
         }
 
-        // Robust fallback: if RVM failed on this keyframe, try MediaPipe then IS-Net
+        // Robust fallback: if RVM failed or had an error on this keyframe, use MediaPipe
         if (!bitmap && !noSubject) {
           bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, 'landscape', clipId, targetTime).catch(() => null);
           if (!bitmap) {
-            const maxDim = 512;
-            const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
-            if (snap) {
-              bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16');
-            }
+            noSubject = true;
           }
         }
       } else {
         // ── FALLBACK (no RVM): MediaPipe Ultra-Fast Engine (Primary) ──
-        // MediaPipe runs in ~10-40ms, never hangs, and handles human subjects
+        // MediaPipe runs in ~10-25ms, never hangs, and handles human subjects
         const mpType = modelSelection === 0 ? 'general' : 'landscape';
         bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime).catch(() => null);
-
-        // Secondary fallback to IS-Net ONLY if MediaPipe failed and IS-Net is already loaded
-        if (!bitmap && modelSelection === 2 && isLoaded) {
-          const maxDim = 512;
-          const snap = await captureSnapshotBlob(segmentationSource as any, w, h, maxDim);
-          if (snap) {
-            bitmap = await segmentBlobToImageBitmap(snap.blob, 'isnet_fp16').catch(() => null);
-          }
+        if (!bitmap) {
+          noSubject = true;
         }
       }
 
