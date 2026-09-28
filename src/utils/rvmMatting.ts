@@ -436,18 +436,9 @@ async function segmentWithRVMInner(
     try {
       out = await session.run(feeds);
     } catch (runErr: any) {
-      console.warn('[rvmMatting] RVM session.run failed with current EP, switching to WASM:', runErr?.message || runErr);
-      if (!isWebGPUDisabled) {
-        isWebGPUDisabled = true;
-        session = await loadRVMSession(true);
-        if (session) {
-          out = await session.run(feeds);
-        } else {
-          throw runErr;
-        }
-      } else {
-        throw runErr;
-      }
+      console.warn('[rvmMatting] RVM session.run failed with current EP (WebGPU/WebGL). Aborting RVM to prevent UI freeze on WASM:', runErr?.message || runErr);
+      isWebGPUDisabled = true;
+      throw runErr;
     }
 
     // Persist new recurrent states (copy — output memory may be reused)

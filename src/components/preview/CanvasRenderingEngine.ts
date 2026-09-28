@@ -1633,13 +1633,11 @@ export async function renderCanvasEngine({
                 
                 // Re-apply crop bounds: AI background modes like 'color' or 'blur' fill the
                 // entire canvas. We must mask out the cropped areas so the background doesn't
-                // bleed outside the user's intended crop rectangle (which appears as a large black box).
-                oCtx.globalCompositeOperation = 'destination-in';
-                oCtx.beginPath();
-                oCtx.rect(odx, ody, odw, odh);
-                oCtx.fillStyle = 'black'; // Color doesn't matter for destination-in, only alpha
-                oCtx.fill();
-                oCtx.globalCompositeOperation = 'source-over';
+                // bleed outside the user's intended crop rectangle.
+                if (cLeft > 0) oCtx.clearRect(0, 0, odx, offCanvas.height);
+                if (cRight > 0) oCtx.clearRect(odx + odw, 0, offCanvas.width, offCanvas.height);
+                if (cTop > 0) oCtx.clearRect(0, 0, offCanvas.width, ody);
+                if (cBot > 0) oCtx.clearRect(0, ody + odh, offCanvas.width, offCanvas.height);
               } catch (aiErr) {
                 console.warn('[CanvasRenderingEngine] AI background render error:', aiErr);
               }

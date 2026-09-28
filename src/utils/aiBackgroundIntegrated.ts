@@ -331,16 +331,18 @@ async function runSegmentationAsync(
 
     // Try 2: ONNX full frame fallback
     if (!maskCanvas) {
-      const snap = await captureSnapshotBlob(source, sourceW, sourceH, 512);
-      if (snap) {
-        maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+      try {
+        const snap = await captureSnapshotBlob(source, sourceW, sourceH, 512);
+        if (snap) {
+          maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet_fp16');
+        }
+      } catch (err) {
+        console.warn('[aiBackgroundIntegrated] ONNX fallback failed:', err);
       }
     }
 
-    // Final guard: never cache a no-subject mask — destination-in with a
-    // near-empty mask erases the entire frame. Cache the sentinel instead so the
-    // frame stays original, and we don't infinitely retry.
-    if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
+    // Final guard: if all engines failed or mask is empty, cache the sentinel
+    if (!maskCanvas || (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
       maskCanvas = getEmptyMaskSentinel();
     }
 
@@ -350,6 +352,10 @@ async function runSegmentationAsync(
     }
   } catch (err) {
     console.warn('[aiBackgroundIntegrated] Async segmentation failed:', err);
+    // On complete failure, cache the sentinel to prevent infinite retries that freeze playback
+    const sentinel = getEmptyMaskSentinel();
+    cacheMaskCanvas(clipId, sentinel);
+    notifyMaskReady();
   } finally {
     (window as any)[flightKey] = false;
   }
@@ -407,16 +413,18 @@ async function runSegmentationSync(
 
   // Try 2: ONNX full frame fallback
   if (!maskCanvas) {
-    const snap = await captureSnapshotBlob(source, sourceW, sourceH, 512);
-    if (snap) {
-      maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
+    try {
+      const snap = await captureSnapshotBlob(source, sourceW, sourceH, 512);
+      if (snap) {
+        maskCanvas = await segmentBlob(snap.blob, snap.w, snap.h, 'isnet');
+      }
+    } catch (err) {
+      console.warn('[aiBackgroundIntegrated] ONNX sync fallback failed:', err);
     }
   }
 
-  // Final guard: never return a no-subject mask — destination-in with a
-  // near-empty mask erases the entire frame. Return sentinel so the caller keeps
-  // the original frame and avoids infinite retry.
-  if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
+  // Final guard: if all engines failed or mask is empty, cache the sentinel
+  if (!maskCanvas || (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
     const sentinel = getEmptyMaskSentinel();
     cacheMaskCanvas(clipId, sentinel);
     return sentinel;

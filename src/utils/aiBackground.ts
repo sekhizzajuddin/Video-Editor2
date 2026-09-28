@@ -114,12 +114,15 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
  * Run MediaPipe Selfie Segmenter directly on a Video/Canvas/Image element.
  * Applies Smoothstep Hermite S-Curve for High-Accuracy anti-aliased matte edges.
  */
+let isMediaPipeDisabledForPerf = false;
+
 export async function segmentSourceWithMediaPipe(
   source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
   modelType: 'general' | 'landscape' = 'landscape',
   clipId?: string,
   videoTime = 0
 ): Promise<ImageBitmap | null> {
+  if (isMediaPipeDisabledForPerf) return null;
   if (!source) return null;
   if ('videoWidth' in source && (source as HTMLVideoElement).videoWidth === 0) return null;
   if ('naturalWidth' in source && (source as HTMLImageElement).naturalWidth === 0) return null;
@@ -129,7 +132,17 @@ export async function segmentSourceWithMediaPipe(
   if (!segmenter) return null;
 
   try {
+    const t0 = performance.now();
     const result = segmenter.segment(source as any);
+    const t1 = performance.now();
+    
+    // If inference took longer than 80ms, it is falling back to WASM CPU and completely blocking
+    // the main thread, resulting in 1 FPS and freezing the player. Permanently disable MediaPipe for this session.
+    if (t1 - t0 > 80) {
+      console.warn(`[MediaPipe] CPU inference too slow (${(t1-t0).toFixed(1)}ms). Disabling to prevent UI freeze.`);
+      isMediaPipeDisabledForPerf = true;
+    }
+
     if (!result || !result.confidenceMasks || result.confidenceMasks.length === 0) {
       result?.close();
       return null;
