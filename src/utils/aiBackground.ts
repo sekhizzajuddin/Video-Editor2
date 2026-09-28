@@ -688,6 +688,14 @@ async function runClipBackgroundAnalysisInternal(
   attachInvisibleMediaElement(video);
 
   try {
+    // Publish progress before downloading/initialising a model. Previously the
+    // UI stayed at 0% for the entire model startup, which looked like a hung
+    // Cutout job even though inference had not started yet.
+    updateClipAnalysisStatus(clipId, {
+      status: 'analyzing', progress: 1, processedFrames: 0, totalFrames: 1,
+    });
+    notifyMaskReady();
+
     // ── PRIMARY ENGINE: RVM (Robust Video Matting) — CapCut-class quality ──
     // Recurrent temporal memory → hair-level alpha, zero flicker/ghosting.
     // Falls back to MediaPipe / IS-Net when RVM is unavailable (no Float16Array
