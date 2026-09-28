@@ -633,7 +633,20 @@ async function runClipBackgroundAnalysisInternal(
         img.onerror = () => reject(new Error('Image failed to load for background analysis'));
         img.src = videoUrl;
       });
-      const bmp = await segmentSourceWithMediaPipe(img, 'landscape', clipId, 0);
+      // Prefer the fast video-oriented segmenter, but always fall back to the
+      // bundled IS-Net model. MediaPipe can fail on browsers without WebGL or
+      // when its cross-origin model request is blocked; treating that failure as
+      // a successful empty matte made Cutout appear to do nothing.
+      let bmp = await segmentSourceWithMediaPipe(img, 'landscape', clipId, 0).catch(() => null);
+      if (!bmp) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 640;
+        canvas.height = img.naturalHeight || 360;
+        const c = canvas.getContext('2d');
+        c?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+        if (blob) bmp = await segmentBlobToImageBitmap(blob, 'isnet_fp16');
+      }
       if (bmp) {
         if (!preRenderedMaskCache.has(clipId)) {
           preRenderedMaskCache.set(clipId, new Map());
@@ -835,13 +848,23 @@ async function runClipBackgroundAnalysisInternal(
           noSubject = true;
         }
 
-        // Robust fallback: if RVM failed or had an error on this keyframe, use MediaPipe
+        // Robust fallback chain: RVM -> MediaPipe -> IS-Net. Do not turn an
+        // inference error into an empty mask: that erases the entire frame and
+        // was the main reason Cutout looked inactive on some browsers.
         if (!bitmap && !noSubject) {
           bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, 'landscape', clipId, targetTime).catch(() => null);
-          if (!bitmap) {
-            noSubject = true;
+        }
+        if (!bitmap && !noSubject && fCtx) {
+          const blob = 'convertToBlob' in frameCanvas
+            ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })
+            : await new Promise<Blob | null>((resolve) =>
+                (frameCanvas as HTMLCanvasElement).toBlob(resolve, 'image/jpeg', 0.9)
+              );
+          if (blob) {
+            bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
           }
         }
+        if (!bitmap) noSubject = true;
       } else {
         // ── FALLBACK (no RVM): MediaPipe Ultra-Fast Engine (Primary) ──
         // MediaPipe runs in ~10-25ms, never hangs, and handles human subjects
