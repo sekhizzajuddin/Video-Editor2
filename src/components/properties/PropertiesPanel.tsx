@@ -39,6 +39,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
@@ -2863,6 +2864,17 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     <p className="text-[10px] text-[var(--theme-text-muted)]">1-Tap background cutout & trending creator styles</p>
                   </div>
                 </div>
+
+                <a
+                  href="https://github.com/sekhizzajuddin/Video-Editor2/releases"
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Download the Windows desktop app"
+                  aria-label="Download Windows desktop app"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:border-cyan-400/60 hover:text-cyan-300 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </a>
 
                 {/* 1-Tap Toggle */}
                 <button
