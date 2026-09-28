@@ -55,7 +55,10 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
         const vision = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
         );
-        const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite';
+        // OpenReel's high-quality path uses the multiclass selfie model. Combining
+        // every non-background class preserves hair, clothes, face and accessories;
+        // the landscape binary tends to cut those regions away.
+        const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
         const createOpts: any = {
           baseOptions: { modelAssetPath, delegate: 'GPU' },
           runningMode: 'IMAGE',
@@ -138,10 +141,25 @@ export async function segmentSourceWithMediaPipe(
       return null;
     }
 
-    const confidenceMask = result.confidenceMasks[0];
-    let floatArray = confidenceMask.getAsFloat32Array();
-    const w = confidenceMask.width;
-    const h = confidenceMask.height;
+    // Multiclass model returns separate background, hair, skin, clothes and
+    // accessory masks. Use the union of all non-background classes instead of
+    // taking only mask[0], which is the main source of missing hair/clothing.
+    const confidenceMasks = result.confidenceMasks;
+    const labels = typeof segmenter.getLabels === 'function' ? segmenter.getLabels() : [];
+    const backgroundIndex = Math.max(0, labels.findIndex((label: string) => /^background$/i.test(label.trim())));
+    const baseMask = confidenceMasks[backgroundIndex] ?? confidenceMasks[0];
+    const baseValues = baseMask.getAsFloat32Array();
+    let floatArray: Float32Array;
+    if (confidenceMasks.length > 1) {
+      floatArray = new Float32Array(baseValues.length);
+      for (let i = 0; i < baseValues.length; i++) {
+        floatArray[i] = 1 - Math.max(0, Math.min(1, baseValues[i]));
+      }
+    } else {
+      floatArray = baseValues;
+    }
+    const w = baseMask.width;
+    const h = baseMask.height;
 
     if (clipId) {
       floatArray = stabilizeTemporalAlpha(clipId, floatArray, w, h, videoTime);
@@ -164,7 +182,7 @@ export async function segmentSourceWithMediaPipe(
     }
 
     const bitmap = await createImageBitmap(imgData);
-    confidenceMask.close();
+    for (const mask of confidenceMasks) mask.close();
     result.close();
     return bitmap;
   } catch (err) {
