@@ -1188,28 +1188,16 @@ export function applyPreRenderedMaskIfAvailable(
   const targetKey = timeToKey(currentVideoTime);
   let preMask: ImageBitmap | HTMLCanvasElement | undefined = clipPreRendered.get(targetKey);
 
-  // If exact frame isn't ready yet, look for closest analyzed frame within +-20 frames (~1s)
-  const maxSearchOffset = 20;
+  // Use the nearest timestamp, not the first mask found. The old search always
+  // preferred the previous frame, and its wide one-second clamp made a moving
+  // subject visibly trail the video while analysis was catching up.
+  const maxSearchOffset = 3; // at most ~125 ms at the 24 FPS cache rate
   if (!preMask) {
-    for (let offset = 1; offset <= maxSearchOffset; offset++) {
-      preMask = clipPreRendered.get(targetKey - offset) || clipPreRendered.get(targetKey + offset);
-      if (preMask) break;
-    }
-  }
-
-  // If still not found, clamp to the closest existing key in the pre-rendered cache
-  if (!preMask && clipPreRendered.size > 0) {
-    let closestKey = -1;
-    let closestDiff = Infinity;
-    for (const k of clipPreRendered.keys()) {
-      const diff = Math.abs(k - targetKey);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestKey = k;
-      }
-    }
-    if (closestKey >= 0) {
-      preMask = clipPreRendered.get(closestKey);
+    for (let offset = 1; offset <= maxSearchOffset && !preMask; offset++) {
+      const before = clipPreRendered.get(targetKey - offset);
+      const after = clipPreRendered.get(targetKey + offset);
+      // Prefer the future frame when equally close: it avoids visible trailing.
+      preMask = after || before;
     }
   }
 
