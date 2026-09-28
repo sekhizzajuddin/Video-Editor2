@@ -1791,6 +1791,30 @@ export async function renderCanvasEngine({
               }
             }
 
+            if (clip.fxSettings?.type === 'subject_outline_flash') {
+              const neonOpts = {
+                color: clip.fxSettings.outlineColor || '#00f0ff',
+                strokeWidth: clip.fxSettings.outlineWidth || 3,
+                glowBlur: clip.fxSettings.glowBlur || 14,
+                flashSpeed: clip.fxSettings.strobeSpeed || 8,
+                currentTime: currentTime,
+                clipId: `neon_${clip.id}`,
+                isPlaying: !isExporting,
+              };
+              
+              // Apply to oCtx (offCanvas) using aiSourceCanvas or sourceElement
+              // so it perfectly aligns with all crops, scales, and positions.
+              const neonSource = (typeof getOrCreateCanvas !== 'undefined' && typeof offscreenCanvasPool !== 'undefined')
+                ? getOrCreateCanvas(offscreenCanvasPool.current, `ai_src_${clip.id}`, offCanvas.width, offCanvas.height)
+                : sourceElement;
+                
+              if (isExporting) {
+                await applySubjectNeonOutlineFlash(oCtx, offCanvas.width, offCanvas.height, neonSource, neonOpts);
+              } else {
+                void applySubjectNeonOutlineFlash(oCtx, offCanvas.width, offCanvas.height, neonSource, neonOpts);
+              }
+            }
+
             if (clip.mask?.enabled) {
               await applyClipMaskOffscreen(oCtx, clip.mask, offCanvas.width, offCanvas.height, clip.id, clip.startTime, clip.animations, clip.expressions);
             } else {
@@ -1801,26 +1825,6 @@ export async function renderCanvasEngine({
               drawPerspectiveTexture(ctx, offCanvas, corners);
             } else {
               ctx.drawImage(offCanvas, dx, dy, dw, dh);
-            }
-          }
-
-          if (clip.fxSettings?.type === 'subject_outline_flash') {
-            const sourceEl = videoEl || imageEl;
-            if (sourceEl) {
-              const neonOpts = {
-                color: clip.fxSettings.outlineColor || '#00f0ff',
-                strokeWidth: clip.fxSettings.outlineWidth || 3,
-                glowBlur: clip.fxSettings.glowBlur || 14,
-                flashSpeed: clip.fxSettings.strobeSpeed || 8,
-                currentTime: currentTime,
-                clipId: `neon_${clip.id}`,
-                isPlaying: !isExporting,
-              };
-              if (isExporting) {
-                await applySubjectNeonOutlineFlash(ctx, W, H, sourceEl, neonOpts);
-              } else {
-                void applySubjectNeonOutlineFlash(ctx, W, H, sourceEl, neonOpts);
-              }
             }
           }
         }

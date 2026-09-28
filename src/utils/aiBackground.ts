@@ -236,7 +236,7 @@ export function getEmptyMaskSentinel(): HTMLCanvasElement {
   return s as HTMLCanvasElement;
 }
 
-function isEmptyMaskMarker(m: ImageBitmap | HTMLCanvasElement): boolean {
+export function isEmptyMaskMarker(m: ImageBitmap | HTMLCanvasElement): boolean {
   return m.width === 1 && m.height === 1;
 }
 

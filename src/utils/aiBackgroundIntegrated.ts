@@ -73,6 +73,8 @@ import {
   ensureClipMasksReady,
   measureMaskCoverage,
   MaskAnalysisStatus,
+  getEmptyMaskSentinel,
+  isEmptyMaskMarker,
 } from './aiBackground';
 
 import {
@@ -211,7 +213,7 @@ export async function applyAiBackgroundSmart(
       // PLAYBACK (Interactive):
       // Composite whatever we have cached immediately (never drops frames / never blocks 60 FPS)
       const cached = getCachedMaskCanvas(clipId, width, height);
-      if (cached) {
+      if (cached && !isEmptyMaskMarker(cached)) {
         compositeMask(ctx, sourceElement, cached, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
       }
 
@@ -241,7 +243,9 @@ export async function applyAiBackgroundSmart(
         );
         if (firstMask) {
           cacheMaskCanvas(clipId, firstMask);
-          compositeMask(ctx, sourceElement, firstMask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
+          if (!isEmptyMaskMarker(firstMask)) {
+            compositeMask(ctx, sourceElement, firstMask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
+          }
         }
       }
     } else {
@@ -259,7 +263,9 @@ export async function applyAiBackgroundSmart(
       );
       if (mask) {
         cacheMaskCanvas(clipId, mask);
-        compositeMask(ctx, sourceElement, mask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
+        if (!isEmptyMaskMarker(mask)) {
+          compositeMask(ctx, sourceElement, mask, width, height, choke, feather, options.spillSuppression, options.spillColor, clipId, options);
+        }
       }
     }
   } catch (err) {
@@ -332,10 +338,10 @@ async function runSegmentationAsync(
     }
 
     // Final guard: never cache a no-subject mask — destination-in with a
-    // near-empty mask erases the entire frame. Cache nothing instead so the
-    // frame stays original.
+    // near-empty mask erases the entire frame. Cache the sentinel instead so the
+    // frame stays original, and we don't infinitely retry.
     if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
-      maskCanvas = null;
+      maskCanvas = getEmptyMaskSentinel();
     }
 
     if (maskCanvas) {
@@ -408,10 +414,12 @@ async function runSegmentationSync(
   }
 
   // Final guard: never return a no-subject mask — destination-in with a
-  // near-empty mask erases the entire frame. Return null so the caller keeps
-  // the original frame (CapCut behavior: no subject → no cutout applied).
+  // near-empty mask erases the entire frame. Return sentinel so the caller keeps
+  // the original frame and avoids infinite retry.
   if (maskCanvas && (await measureMaskCoverage(maskCanvas)) < RVM_EMPTY_COVERAGE) {
-    return null;
+    const sentinel = getEmptyMaskSentinel();
+    cacheMaskCanvas(clipId, sentinel);
+    return sentinel;
   }
 
   if (maskCanvas) {
