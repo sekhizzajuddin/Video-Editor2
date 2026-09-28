@@ -79,6 +79,17 @@ export function MaskTab({ selectedClip, updateClip }: MaskTabProps) {
 
       {vectorMask.enabled && (
         <>
+          {/* Transparent Alpha Mask Badge */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between text-[11px]">
+            <div className="flex items-center gap-2.5">
+              <span className="text-base">🏁</span>
+              <div>
+                <span className="font-bold text-blue-400">Transparent Alpha Mask Active</span>
+                <p className="text-[10px] text-[var(--theme-text-muted)] mt-0.5">Mask cuts out footage with transparent alpha — layers underneath and the canvas checkerboard show through.</p>
+              </div>
+            </div>
+          </div>
+
           {/* Preset Shape Selector */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider">Mask Shape Preset</label>

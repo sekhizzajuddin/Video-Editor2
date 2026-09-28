@@ -136,10 +136,13 @@ export class Compositor {
   private glProgram: WebGLProgram | null = null;
   private glTexture: WebGLTexture | null = null;
 
-  constructor(canvas: OffscreenCanvas, aspectRatio: string = '16:9') {
+  public transparentBackground: boolean = false;
+
+  constructor(canvas: OffscreenCanvas, aspectRatio: string = '16:9', transparentBackground: boolean = false) {
     this.canvas = canvas;
     this.aspectRatio = aspectRatio;
-    this.ctx = canvas.getContext('2d', { alpha: false }) as OffscreenCanvasRenderingContext2D;
+    this.transparentBackground = transparentBackground;
+    this.ctx = canvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = 'high';
   }
@@ -314,9 +317,13 @@ export class Compositor {
   }
 
   public async render(layers: RenderLayer[], overlays: FrameOverlay[] = [], postEffect?: FramePostEffect) {
-    // Fill background
-    this.ctx.fillStyle = '#0a0a0a';
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    // Fill background or clear for transparent export
+    if (this.transparentBackground) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    } else {
+      this.ctx.fillStyle = '#0a0a0a';
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
 
     // Separate adjustment layers from content layers
     const contentLayers = layers.filter(l => l.type !== 'adjustment');
@@ -333,8 +340,12 @@ export class Compositor {
     if (needsIntermediate) {
       tempCanvas = new OffscreenCanvas(this.canvas.width, this.canvas.height);
       const tempCtx = tempCanvas.getContext('2d', { alpha: true }) as OffscreenCanvasRenderingContext2D;
-      tempCtx.fillStyle = '#0a0a0a';
-      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      if (this.transparentBackground) {
+        tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+      } else {
+        tempCtx.fillStyle = '#0a0a0a';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      }
       targetCtx = tempCtx;
     }
 

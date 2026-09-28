@@ -39,6 +39,10 @@ interface PreviewCanvasToolbarHeaderProps {
   setAspectRatio: (ar: '16:9' | '9:16' | '1:1' | '4:3') => void;
   showGrid: boolean;
   setShowGrid: (show: boolean) => void;
+  showTransparencyGrid?: boolean;
+  setShowTransparencyGrid?: (show: boolean) => void;
+  canvasBgColor?: string;
+  setCanvasBgColor?: (color: string) => void;
   viewportZoom: number;
   onResetZoom: () => void;
   onFitZoom: () => void;
@@ -57,6 +61,10 @@ export function PreviewCanvasHeaderToolbar({
   setAspectRatio,
   showGrid,
   setShowGrid,
+  showTransparencyGrid,
+  setShowTransparencyGrid,
+  canvasBgColor,
+  setCanvasBgColor,
   viewportZoom,
   onResetZoom,
   onFitZoom,
@@ -143,6 +151,25 @@ export function PreviewCanvasHeaderToolbar({
         >
           <Grid className="w-3.5 h-3.5" />
         </button>
+
+        {setShowTransparencyGrid && (
+          <button
+            onClick={() => setShowTransparencyGrid(!showTransparencyGrid)}
+            title={showTransparencyGrid ? "Transparency Grid On (Showing transparent masks as checkerboard)" : "Transparency Grid Off"}
+            className={`p-1.5 rounded-lg border transition-all ${
+              showTransparencyGrid 
+                ? 'bg-blue-600/15 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-sm' 
+                : 'text-[var(--theme-text-muted)] border-transparent hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="1" y="1" width="7" height="7" fill="currentColor" opacity="0.9" />
+              <rect x="8" y="1" width="7" height="7" fill="currentColor" opacity="0.35" />
+              <rect x="1" y="8" width="7" height="7" fill="currentColor" opacity="0.35" />
+              <rect x="8" y="8" width="7" height="7" fill="currentColor" opacity="0.9" />
+            </svg>
+          </button>
+        )}
 
         <div className="flex items-center gap-1 border-l border-[var(--theme-border)] pl-2 ml-0.5">
           <button
@@ -302,6 +329,61 @@ export function PreviewCanvasHeaderToolbar({
                   <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${settings.showSafeZones ? 'left-4.5' : 'left-0.5'}`} />
                 </button>
               </div>
+
+              {setShowTransparencyGrid && (
+                <div className="flex items-center justify-between pt-1 border-t border-[var(--theme-border)]">
+                  <div>
+                    <label className="text-xs font-medium text-[var(--theme-text-primary)] block">Transparency Grid</label>
+                    <span className="text-[10px] text-[var(--theme-text-muted)]">Checkerboard for transparent cutouts & masks</span>
+                  </div>
+                  <button
+                    onClick={() => setShowTransparencyGrid(!showTransparencyGrid)}
+                    className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${showTransparencyGrid ? 'bg-blue-600' : 'bg-gray-400 dark:bg-gray-700'}`}
+                  >
+                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${showTransparencyGrid ? 'left-4.5' : 'left-0.5'}`} />
+                  </button>
+                </div>
+              )}
+
+              {setCanvasBgColor && (
+                <div className="pt-1 border-t border-[var(--theme-border)]">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--theme-text-muted)] mb-1.5 block">
+                    Canvas Background
+                  </label>
+                  <div className="grid grid-cols-4 gap-1">
+                    {[
+                      { id: 'transparent', label: 'Checker' },
+                      { id: '#0a0a0a', label: 'Black' },
+                      { id: '#1e1e24', label: 'Studio' },
+                      { id: '#ffffff', label: 'White' },
+                    ].map((item) => {
+                      const isSelected = item.id === 'transparent' ? showTransparencyGrid : (!showTransparencyGrid && canvasBgColor === item.id);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            if (item.id === 'transparent') {
+                              setShowTransparencyGrid?.(true);
+                              setCanvasBgColor('transparent');
+                            } else {
+                              setShowTransparencyGrid?.(false);
+                              setCanvasBgColor(item.id);
+                            }
+                          }}
+                          className={`py-1 px-1.5 text-[10px] font-medium rounded border transition-all text-center ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-500/15 text-blue-500 font-bold shadow-sm'
+                              : 'border-[var(--theme-border)] bg-[var(--theme-bg-card)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

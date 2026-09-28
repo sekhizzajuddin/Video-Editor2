@@ -3065,7 +3065,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     <label className="block text-[10px] text-[var(--theme-text-muted)] font-medium mb-1.5">Cutout Style</label>
                     <div className="grid grid-cols-4 gap-1.5">
                       {[
-                        { id: 'remove', label: 'Cutout', icon: '✂️', desc: 'Transparent' },
+                        { id: 'remove', label: 'Transparent', icon: '✂️', desc: 'Transparent' },
                         { id: 'blur', label: 'Blur BG', icon: '📸', desc: 'Portrait' },
                         { id: 'outline', label: 'Sticker', icon: '✨', desc: 'Outline' },
                         { id: 'color', label: 'Backdrop', icon: '🎨', desc: 'Color' },
@@ -3096,6 +3096,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       })}
                     </div>
                   </div>
+
+                  {/* Transparent Alpha Mask Active Banner */}
+                  {(!selectedClip.aiBackground.mode || selectedClip.aiBackground.mode === 'remove') && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 flex items-center justify-between text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🏁</span>
+                        <div>
+                          <span className="font-semibold text-emerald-400">Transparent Alpha Masking Active</span>
+                          <p className="text-[10px] text-[var(--theme-text-muted)]">Background is completely transparent. Layers underneath and the transparency checkerboard show through.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Mode-Specific Controls */}
                   {/* 1. Blur BG Controls */}

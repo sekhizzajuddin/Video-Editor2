@@ -83,6 +83,27 @@ let _cachedFxTracks: TimelineTrack[] = [];
 let _cachedVisualTracks: TimelineTrack[] = [];
 
 // ---------------------------------------------------------------------------
+// Cached dark transparency checkerboard pattern for alpha masking and cutouts.
+// ---------------------------------------------------------------------------
+let _checkerboardPattern: CanvasPattern | null = null;
+function getCheckerboardPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  if (!_checkerboardPattern) {
+    const pCanvas = document.createElement('canvas');
+    pCanvas.width = 32;
+    pCanvas.height = 32;
+    const pCtx = pCanvas.getContext('2d');
+    if (!pCtx) return null;
+    pCtx.fillStyle = '#222328';
+    pCtx.fillRect(0, 0, 32, 32);
+    pCtx.fillStyle = '#17181c';
+    pCtx.fillRect(0, 0, 16, 16);
+    pCtx.fillRect(16, 16, 16, 16);
+    _checkerboardPattern = ctx.createPattern(pCanvas, 'repeat');
+  }
+  return _checkerboardPattern;
+}
+
+// ---------------------------------------------------------------------------
 // Per-clip animation presence cache — avoids Object.keys(clip.animations) every frame.
 // Object.keys() allocates a new Array every call. At 4 clips × 60fps = 14,400 arrays/min.
 // Invalidated when tracks reference changes (Zustand always gives new ref on mutation).
@@ -148,11 +169,13 @@ export interface RenderCanvasParams {
     viewport: { x: number; y: number; zoom: number };
     settings: any;
     showGrid: boolean;
+    showTransparencyGrid?: boolean;
     canvasBgColor: string;
     isPlaying: boolean;
     isScrubbing?: boolean;
     aspectRatio: string;
     isExporting: boolean;
+    exportTransparent?: boolean;
     exportWidth?: number;
     exportHeight?: number;
     showProgressBar: boolean;
@@ -260,10 +283,12 @@ export async function renderCanvasEngine({
     viewport,
     settings,
     showGrid,
+    showTransparencyGrid = true,
     canvasBgColor,
     isPlaying,
     aspectRatio,
     isExporting,
+    exportTransparent,
     useProxies
   } = renderDeps;
 
@@ -283,7 +308,7 @@ export async function renderCanvasEngine({
 
   if (!compositeCtxRef.current) {
     compositeCtxRef.current = composite.getContext('2d', {
-      alpha: false,
+      alpha: true,
       // NOTE: Do NOT set willReadFrequently here — the composite canvas only does
       // drawImage compositing and never calls getImageData. Setting willReadFrequently
       // disables GPU acceleration, causing massive performance degradation.
@@ -415,8 +440,12 @@ export async function renderCanvasEngine({
   // drawSingleClip function now falls back to cached ImageBitmaps from frameCache,
   // so we always proceed with rendering to ensure smooth scrubbing and transform updates.
 
-  ctx.fillStyle = canvasBgColor;
-  ctx.fillRect(0, 0, composite.width, composite.height);
+  if (isExporting && exportTransparent) {
+    ctx.clearRect(0, 0, composite.width, composite.height);
+  } else {
+    ctx.fillStyle = canvasBgColor === 'transparent' ? '#0a0a0a' : (canvasBgColor || '#0a0a0a');
+    ctx.fillRect(0, 0, composite.width, composite.height);
+  }
 
   ctx.save();
   ctx.scale(canvas_scale, canvas_scale);
@@ -453,6 +482,22 @@ export async function renderCanvasEngine({
   ctx.clip();
 
   ctx.translate(offsetX, offsetY);
+
+  // --- Transparency Grid / Canvas Background for Masking and Cutouts ---
+  // When transparency grid is enabled (default) or canvas background is set to transparent,
+  // render an industry-standard checkerboard pattern inside the frame bounds (0, 0, W, H)
+  // so AI background cutouts, vector masks, shape masks, and keyed footage visually show
+  // a crisp transparent canvas instead of solid black.
+  if (!isExporting && (showTransparencyGrid || canvasBgColor === 'transparent')) {
+    const pattern = getCheckerboardPattern(ctx);
+    if (pattern) {
+      ctx.fillStyle = pattern;
+      ctx.fillRect(0, 0, W, H);
+    }
+  } else if (canvasBgColor && canvasBgColor !== 'transparent' && canvasBgColor !== '#0a0a0a') {
+    ctx.fillStyle = canvasBgColor;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   // --- Virtual Camera Pan & Scan ---
   const virtualCamera = useEditorStore.getState().virtualCamera;

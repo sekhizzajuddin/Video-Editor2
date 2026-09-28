@@ -47,6 +47,7 @@ export function ExportModal() {
   const [quality, setQuality] = useState<'low' | 'medium' | 'high' | 'ultra'>('high');
   const [format, setFormat] = useState<'mp4' | 'webm' | 'gif' | 'prores' | 'wav'>('mp4');
   const [fps, setFps] = useState<number>(30);
+  const [transparentBackground, setTransparentBackground] = useState<boolean>(true);
   const [filename, setFilename] = useState('');
   const [outputFolder, setOutputFolder] = useState(() => localStorage.getItem('exportOutputFolder') || '');
   const [isBrowsing, setIsBrowsing] = useState(false);
@@ -136,6 +137,7 @@ export function ExportModal() {
             aspectRatio,
             startAt: region.startTime,
             endAt: region.endTime,
+            transparentBackground: (format === 'webm' || format === 'prores' || format === 'gif') ? transparentBackground : false,
           }, fileHandle);
         } catch (batchErr) {
           console.error('[ExportModal] Batch region export failed:', batchErr);
@@ -178,11 +180,12 @@ export function ExportModal() {
         aspectRatio,
         startAt,
         endAt,
+        transparentBackground: (format === 'webm' || format === 'prores' || format === 'gif') ? transparentBackground : false,
       }, fileHandle);
     } catch (exportErr: any) {
       console.error('[ExportModal] Export failed:', exportErr);
     }
-  }, [startExport, selectedResolution, format, fps, quality, filename, outputFolder, projectName, aspectRatio, exportScope, exportRegions, totalDuration]);
+  }, [startExport, selectedResolution, format, fps, quality, filename, outputFolder, projectName, aspectRatio, exportScope, exportRegions, totalDuration, transparentBackground]);
 
   if (!showExportModal) return null;
 
@@ -454,6 +457,44 @@ export function ExportModal() {
               </select>
             </div>
           </div>
+
+          {/* Transparent Alpha Channel Option (WebM / ProRes / GIF) */}
+          {(format === 'webm' || format === 'prores' || format === 'gif') && (
+            <div className="bg-[#232323] p-2.5 rounded-lg border border-[#3a3a3a] flex items-center justify-between transition-all">
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded flex items-center justify-center bg-emerald-500/10 text-emerald-400">
+                  <Layers className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                    <span>Transparent Background</span>
+                    <span className="text-[10px] text-emerald-400 font-medium bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                      Alpha Channel
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-[#888] mt-0.5">
+                    Preserves transparent cutouts &amp; masks without solid black background.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={transparentBackground}
+                disabled={!canEdit}
+                onClick={() => setTransparentBackground(v => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  transparentBackground ? 'bg-emerald-500' : 'bg-[#404040]'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    transparentBackground ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-1.5 text-[10px] text-[#707070]">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500/80" />

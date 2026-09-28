@@ -144,10 +144,11 @@ export function PreviewCanvasContainer() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
+  const [showTransparencyGrid, setShowTransparencyGrid] = useState(true);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [showThumbnailModal, setShowThumbnailModal] = useState(false);
   const [thumbnailImageData, setThumbnailImageData] = useState<string | null>(null);
-  const [canvasBgColor, setCanvasBgColor] = useState('#0a0a0a');
+  const [canvasBgColor, setCanvasBgColor] = useState('transparent');
   const setIsScrubbing = useEditorStore((s) => s.setIsScrubbing);
   const [adaptiveQuality, setAdaptiveQuality] = useState<'high' | 'medium' | 'low'>('high');
   // On-device media diagnostics (Android remote debugging): ?mediadebug=1
@@ -275,6 +276,7 @@ export function PreviewCanvasContainer() {
     viewport,
     settings,
     showGrid,
+    showTransparencyGrid,
     canvasBgColor,
     isPlaying,
     isScrubbing,
@@ -300,6 +302,7 @@ export function PreviewCanvasContainer() {
       viewport,
       settings,
       showGrid,
+      showTransparencyGrid,
       canvasBgColor,
       isPlaying,
       isScrubbing,
@@ -326,6 +329,7 @@ export function PreviewCanvasContainer() {
       prev.exportWidth !== exportWidth ||
       prev.exportHeight !== exportHeight ||
       prev.showGrid !== showGrid ||
+      prev.showTransparencyGrid !== showTransparencyGrid ||
       prev.showProgressBar !== showProgressBar ||
       prev.canvasBgColor !== canvasBgColor ||
       prev.settings !== settings ||
@@ -348,6 +352,7 @@ export function PreviewCanvasContainer() {
         viewport,
         settings,
         showGrid,
+        showTransparencyGrid,
         canvasBgColor,
         isPlaying,
         isScrubbing,
@@ -372,6 +377,7 @@ export function PreviewCanvasContainer() {
     viewport,
     settings,
     showGrid,
+    showTransparencyGrid,
     canvasBgColor,
     isPlaying,
     isScrubbing,
@@ -981,6 +987,10 @@ export function PreviewCanvasContainer() {
         setAspectRatio={setAspectRatio}
         showGrid={showGrid}
         setShowGrid={setShowGrid}
+        showTransparencyGrid={showTransparencyGrid}
+        setShowTransparencyGrid={setShowTransparencyGrid}
+        canvasBgColor={canvasBgColor}
+        setCanvasBgColor={setCanvasBgColor}
         viewportZoom={viewport.zoom}
         onResetZoom={() => setViewport((v) => ({ ...v, zoom: 1 }))}
         onFitZoom={() => setViewport({ x: 0, y: 0, zoom: 1 })}
@@ -1029,7 +1039,7 @@ export function PreviewCanvasContainer() {
           height={activeCanvasHeight}
           className={`preview-canvas pointer-events-none ${
             isFullscreen
-              ? 'absolute inset-0 w-full h-full object-contain bg-black'
+              ? 'absolute inset-0 w-full h-full object-contain'
               : 'w-full h-full object-contain'
           }`}
         />

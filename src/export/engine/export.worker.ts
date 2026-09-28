@@ -12,6 +12,7 @@ export interface ExportWorkerConfig {
   quality?: 'low' | 'medium' | 'high' | 'ultra';
   startAt?: number;
   endAt?: number;
+  transparentBackground?: boolean;
 }
 
 export interface AudioExportPayload {
@@ -426,9 +427,10 @@ async function handleExport(
       postMessage({ type: 'WARNING', payload: { message: warning } });
     }
 
-    // Compositor Initialization
+    // Compositor Initialization: enable transparent alpha canvas for WebM, ProRes, GIF or when explicitly requested
     const canvas = new OffscreenCanvas(outputWidth, outputHeight);
-    compositor = new Compositor(canvas, config.aspectRatio);
+    const isTransparent = !!config.transparentBackground || config.format === 'webm' || config.format === 'prores' || config.format === 'gif';
+    compositor = new Compositor(canvas, config.aspectRatio, isTransparent);
 
     // Calculate duration reliably
     const startAt = typeof config.startAt === 'number' && config.startAt >= 0 ? config.startAt : 0;
