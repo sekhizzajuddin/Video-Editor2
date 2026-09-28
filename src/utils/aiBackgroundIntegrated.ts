@@ -224,7 +224,7 @@ export async function applyAiBackgroundSmart(
         sourceH,
         clipId,
         chosenModel,
-        false, // Force high-quality RVM instead of low-quality MediaPipe
+        true, // Allow MediaPipe fallback if WebGPU/WASM RVM fails to load
         width,
         height
       );

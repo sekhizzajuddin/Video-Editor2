@@ -200,19 +200,19 @@ export function loadRVMSession(forceWasm = false): Promise<any | null> {
       if (allowWebGPU) {
         try {
           return await ort.InferenceSession.create(modelBuf, {
-            executionProviders: ['webgpu', 'wasm'],
+            executionProviders: ['webgpu', 'webgl', 'wasm'],
             graphOptimizationLevel: 'all',
           });
         } catch (gpuErr) {
-          console.warn('[rvmMatting] WebGPU session creation failed, falling back to pure WASM:', gpuErr);
+          console.warn('[rvmMatting] WebGPU session creation failed, falling back to WebGL/WASM:', gpuErr);
           isWebGPUDisabled = true;
         }
       }
 
-      // Pure WASM execution provider (Universal SIMD, zero GPU shader incompatibilities)
+      // Pure WASM/WebGL execution provider (Universal SIMD, zero GPU shader incompatibilities)
       try {
         return await ort.InferenceSession.create(modelBuf, {
-          executionProviders: ['wasm'],
+          executionProviders: ['webgl', 'wasm'],
           graphOptimizationLevel: 'all',
         });
       } catch (wasmErr) {
@@ -223,7 +223,7 @@ export function loadRVMSession(forceWasm = false): Promise<any | null> {
           }
         } catch {}
         return await ort.InferenceSession.create(modelBuf, {
-          executionProviders: ['wasm'],
+          executionProviders: ['webgl', 'wasm'],
           graphOptimizationLevel: 'all',
         });
       }
