@@ -754,7 +754,11 @@ async function runClipBackgroundAnalysisInternal(
     // so 12 FPS sampling yields fluid, flicker-free mattes with sub-80ms step times.
     // MediaPipe GPU (fallback, modelSelection 0/1) runs in ~5ms per frame —
     // sampled at full 20 FPS. IS-Net (modelSelection 2 fallback) at 10 FPS.
-    const inferenceFps = rvmReady ? 12 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 10;
+    // IS-Net is the quality path but is much heavier than MediaPipe. Sample it
+    // at 2 FPS and hold each matte across the intervening frames; this reduces a
+    // 10-second clip from ~100 expensive inferences to ~20 while preserving the
+    // high-detail alpha edges. MediaPipe modes remain full-rate.
+    const inferenceFps = rvmReady ? 12 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 2;
     const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
     const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
     const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
