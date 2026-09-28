@@ -772,11 +772,10 @@ async function runClipBackgroundAnalysisInternal(
     // so 12 FPS sampling yields fluid, flicker-free mattes with sub-80ms step times.
     // MediaPipe GPU (fallback, modelSelection 0/1) runs in ~5ms per frame —
     // sampled at full 20 FPS. IS-Net (modelSelection 2 fallback) at 10 FPS.
-    // IS-Net is the quality path but is much heavier than MediaPipe. Sample it
-    // at 2 FPS and hold each matte across the intervening frames; this reduces a
-    // 10-second clip from ~100 expensive inferences to ~20 while preserving the
-    // high-detail alpha edges. MediaPipe modes remain full-rate.
-    const inferenceFps = rvmReady ? 12 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 2;
+    // The multiclass MediaPipe model is GPU accelerated and inexpensive enough
+    // for near-video-rate analysis. Sampling at 8 FPS keeps temporal edges much
+    // closer to OpenReel while avoiding redundant work on every display frame.
+    const inferenceFps = rvmReady ? 12 : (modelSelection === 0 || modelSelection === 1) ? MASK_CACHE_FPS : 8;
     const totalKeyframes = Math.max(1, Math.ceil(actualDuration * inferenceFps));
     const fillRatio = Math.max(1, Math.round(MASK_CACHE_FPS / inferenceFps));
     const totalCacheSlots = Math.max(1, Math.ceil(actualDuration * MASK_CACHE_FPS));
@@ -898,23 +897,18 @@ async function runClipBackgroundAnalysisInternal(
         }
         if (!bitmap) noSubject = true;
       } else {
-        // Studio mode uses the higher-detail IS-Net matte first. MediaPipe is
-        // retained as a fast fallback for browsers where the IS-Net model is
-        // unavailable. This gives hair/clothing edges substantially better
-        // quality than using the low-resolution selfie segmenter alone.
-        if (modelSelection === 2 && fCtx) {
+        // Use the multiclass MediaPipe person model first. It is the same
+        // high-quality family used by OpenReel and runs on the GPU without the
+        // 3–5 second IS-Net inference stall. IS-Net remains a fallback only.
+        const mpType = modelSelection === 0 ? 'general' : 'landscape';
+        bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime).catch(() => null);
+        if (!bitmap && modelSelection === 2 && fCtx) {
           const blob = 'convertToBlob' in frameCanvas
-            ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.94 })
+            ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })
             : await new Promise<Blob | null>((resolve) =>
-                (frameCanvas as HTMLCanvasElement).toBlob(resolve, 'image/jpeg', 0.94)
+                (frameCanvas as HTMLCanvasElement).toBlob(resolve, 'image/jpeg', 0.9)
               );
-          if (blob) {
-            bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
-          }
-        }
-        if (!bitmap) {
-          const mpType = modelSelection === 0 ? 'general' : 'landscape';
-          bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime).catch(() => null);
+          if (blob) bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
         }
         if (!bitmap) noSubject = true;
       }
