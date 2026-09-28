@@ -155,7 +155,8 @@ async function configureWebmVideoEncoder(
   width: number,
   height: number,
   fps: number,
-  bitrate: number
+  bitrate: number,
+  keepAlpha: boolean = false
 ): Promise<'V_VP9' | 'V_VP8'> {
   const candidates: Array<{ codec: string; muxCodec: 'V_VP9' | 'V_VP8' }> = [
     { codec: 'vp09.00.10.08', muxCodec: 'V_VP9' }, // VP9 Profile 0, Level 1, 8-bit
@@ -172,6 +173,7 @@ async function configureWebmVideoEncoder(
       framerate: fps,
       latencyMode: 'realtime',
       bitrateMode: 'variable',
+      ...(keepAlpha ? { alpha: 'keep' } : {}),
     };
     try {
       // Check if VideoEncoder.isConfigSupported is available (it may not be in some environments)
@@ -265,7 +267,7 @@ class BlackFrameMonitor {
   private static readonly BLACK_THRESHOLD = 16;
 
   /** Max channel value over an 8x8 downsample of the composited frame. */
-  sample(canvas: OffscreenCanvas): number {
+  sample(canvas: OffscreenCanvas, isTransparent: boolean = false): number {
     const anyCanvas = canvas as any;
     const isFake = anyCanvas && (Array.isArray(anyCanvas.__ops) || Array.isArray(anyCanvas.__pass));
     if (isFake) {
@@ -306,7 +308,9 @@ class BlackFrameMonitor {
       const data = ctx.getImageData(0, 0, BlackFrameMonitor.SIZE, BlackFrameMonitor.SIZE).data;
       let max = 0;
       for (let i = 0; i < data.length; i += 4) {
-        const v = Math.max(data[i], data[i + 1], data[i + 2]);
+        const v = isTransparent
+          ? (data[i + 3] > 20 ? Math.max(data[i], data[i + 1], data[i + 2], 50) : 0)
+          : Math.max(data[i], data[i + 1], data[i + 2]);
         if (v > max) max = v;
       }
       return max;
@@ -429,7 +433,9 @@ async function handleExport(
 
     // Compositor Initialization: enable transparent alpha canvas for WebM, ProRes, GIF or when explicitly requested
     const canvas = new OffscreenCanvas(outputWidth, outputHeight);
-    const isTransparent = !!config.transparentBackground || config.format === 'webm' || config.format === 'prores' || config.format === 'gif';
+    const isTransparent = config.transparentBackground !== undefined
+      ? !!config.transparentBackground
+      : (config.format === 'webm' || config.format === 'prores' || config.format === 'gif');
     compositor = new Compositor(canvas, config.aspectRatio, isTransparent);
 
     // Calculate duration reliably
@@ -606,7 +612,8 @@ async function handleExport(
         outputWidth,
         outputHeight,
         config.fps,
-        config.bitrate || 12000000
+        config.bitrate || 12000000,
+        isTransparent
       );
       webmMuxerOptions.video.codec = picked;
       muxer = new WebMMuxerImport.Muxer(webmMuxerOptions);
@@ -704,7 +711,7 @@ async function handleExport(
       if (i === 0 || i % SAMPLE_EVERY === 0) {
         if (layers.some((l) => !!l.frame)) {
           sampledFramesWithVisualLayers++;
-          const luma = blackMonitor.sample(canvas);
+          const luma = blackMonitor.sample(canvas, !!config.transparentBackground);
           if (blackMonitor.isBlack(luma)) blackSampledFrames++;
         }
       }
@@ -724,6 +731,7 @@ async function handleExport(
         const vf = new VideoFrame(canvas, { 
           timestamp: timestampMicroseconds,
           duration: durationMicroseconds,
+          ...(isTransparent ? { alpha: 'keep' } : {}),
         });
         
         // Bound queued GPU surfaces. Eight to twelve frames keeps hardware

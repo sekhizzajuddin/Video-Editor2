@@ -124,6 +124,7 @@ export function useExportEngine() {
             bitrate: config.bitrate,
             startAt: config.startAt || 0,
             endAt: config.endAt || duration,
+            transparentBackground: config.transparentBackground,
             useHardwareEncoder: true,
             canvas: previewCanvas,
             audioStream: null,

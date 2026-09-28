@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers } from 'lucide-react';
+import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers, Palette } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
@@ -25,7 +25,7 @@ function generateFilename(projectName: string): string {
 }
 
 export function ExportModal() {
-  const { showExportModal, setShowExportModal, aspectRatio, projectName, exportRegions, selectedExportRegionId, totalDuration } = useEditorStore(
+  const { showExportModal, setShowExportModal, aspectRatio, projectName, exportRegions, selectedExportRegionId, totalDuration, tracks } = useEditorStore(
     useShallow(s => ({
       showExportModal: s.showExportModal,
       setShowExportModal: s.setShowExportModal,
@@ -34,8 +34,21 @@ export function ExportModal() {
       exportRegions: s.exportRegions || [],
       selectedExportRegionId: s.selectedExportRegionId,
       totalDuration: s.totalDuration,
+      tracks: s.tracks || [],
     }))
   );
+
+  const chromaKeyedClips = useMemo(() => {
+    const list: { id: string; name: string; color: string }[] = [];
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        if (!clip.disabled && clip.chromaKey?.enabled) {
+          list.push({ id: clip.id, name: clip.name || 'Video Clip', color: clip.chromaKey.color || '#00ff00' });
+        }
+      }
+    }
+    return list;
+  }, [tracks]);
 
   const initialResolution = useMemo(() => {
     if (aspectRatio === '9:16') return RESOLUTION_PRESETS['9:16_1080'];
@@ -72,8 +85,11 @@ export function ExportModal() {
         setExportScope('full');
       }
       setBatchStatus(null);
+      if (chromaKeyedClips.length > 0) {
+        setTransparentBackground(true);
+      }
     }
-  }, [showExportModal, initialResolution, projectName, selectedExportRegionId, exportRegions]);
+  }, [showExportModal, initialResolution, projectName, selectedExportRegionId, exportRegions, chromaKeyedClips]);
 
   const { exportState, startExport, cancelExport, downloadFile } = useExportEngine();
 
@@ -458,6 +474,55 @@ export function ExportModal() {
             </div>
           </div>
 
+          {/* Chroma Key Status & Export Linkage */}
+          {chromaKeyedClips.length > 0 && (
+            <div className="bg-emerald-950/25 border border-emerald-500/30 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center bg-emerald-500/20 text-emerald-400">
+                    <Palette className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
+                      <span>Chroma Key Active ({chromaKeyedClips.length} {chromaKeyedClips.length === 1 ? 'clip' : 'clips'})</span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    </div>
+                    <div className="text-[10px] text-emerald-400/80 flex items-center gap-1.5 mt-0.5">
+                      <span>Keyed colors:</span>
+                      {chromaKeyedClips.slice(0, 4).map((c: { id: string; name: string; color: string }, i: number) => (
+                        <span key={i} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/50 text-[9px] font-mono border border-emerald-500/30">
+                          <span className="w-2 h-2 rounded-full border border-white/40 shadow-sm" style={{ backgroundColor: c.color }} />
+                          {c.color}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {format === 'mp4' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormat('webm');
+                      setTransparentBackground(true);
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded shadow transition-colors flex items-center gap-1"
+                  >
+                    <span>Switch to WebM (Alpha)</span>
+                  </button>
+                )}
+              </div>
+              {format === 'mp4' ? (
+                <p className="text-[10px] text-amber-300/90 bg-amber-950/30 p-1.5 rounded border border-amber-500/20">
+                  Note: MP4 (H.264) does not support transparent alpha channels (keyed background exports as solid black). Switch to <strong>WebM</strong> or <strong>ProRes</strong> to preserve transparent transparency.
+                </p>
+              ) : (
+                <p className="text-[10px] text-emerald-300/80">
+                  Transparent alpha export enabled. WebM VP9 will preserve transparent green-screen cutouts.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Transparent Alpha Channel Option (WebM / ProRes / GIF) */}
           {(format === 'webm' || format === 'prores' || format === 'gif') && (
             <div className="bg-[#232323] p-2.5 rounded-lg border border-[#3a3a3a] flex items-center justify-between transition-all">
@@ -482,7 +547,7 @@ export function ExportModal() {
                 role="switch"
                 aria-checked={transparentBackground}
                 disabled={!canEdit}
-                onClick={() => setTransparentBackground(v => !v)}
+                onClick={() => setTransparentBackground((v: boolean) => !v)}
                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                   transparentBackground ? 'bg-emerald-500' : 'bg-[#404040]'
                 }`}

@@ -106,6 +106,8 @@ export class WebMWebCodecsBackend implements EncoderBackend {
       },
     });
 
+    const isTransparent = opts.transparentBackground === true;
+
     videoEncoder.configure({
       codec,
       width: opts.width,
@@ -113,7 +115,8 @@ export class WebMWebCodecsBackend implements EncoderBackend {
       bitrate,
       framerate: opts.fps,
       latencyMode: 'quality',
-    });
+      alpha: isTransparent ? 'keep' : 'discard',
+    } as any);
 
     opts.onProgress({ stage: 'capturing', percentage: 0, message: 'Beginning frame-by-frame WebM rendering...' });
 
@@ -124,6 +127,7 @@ export class WebMWebCodecsBackend implements EncoderBackend {
         startAt: opts.startAt,
         endAt: opts.endAt,
         fps: opts.fps,
+        alpha: isTransparent ? 'keep' : 'discard',
         onProgress: opts.onProgress,
         shouldCancel: () => this.cancelled,
       })) {

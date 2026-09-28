@@ -1114,7 +1114,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       : [0, 255, 0];
   };
 
-  const sampleCanvasColor = (canvas: HTMLCanvasElement, clientX: number, clientY: number): string => {
+  const sampleCanvasColor = (canvas: HTMLCanvasElement, clientX: number, clientY: number): string | null => {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
@@ -1122,9 +1122,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((clientY - rect.top) * scaleY)));
 
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return '#00ff00';
+    if (!ctx) return null;
 
     const pixel = ctx.getImageData(x, y, 1, 1).data;
+    if (pixel[3] < 20) {
+      toast.warning('Clicked on a transparent / keyed area. Click on a visible colored background.');
+      return null;
+    }
     return rgbToHex(pixel[0], pixel[1], pixel[2]);
   };
 
@@ -1146,13 +1150,17 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       [Math.floor(w / 2), h - margin],
     ];
 
-    let r = 0, g = 0, b = 0;
+    let r = 0, g = 0, b = 0, count = 0;
     coords.forEach(([cx, cy]) => {
       const p = ctx.getImageData(cx, cy, 1, 1).data;
-      r += p[0]; g += p[1]; b += p[2];
+      if (p[3] > 20) {
+        r += p[0]; g += p[1]; b += p[2];
+        count++;
+      }
     });
 
-    return rgbToHex(Math.round(r / coords.length), Math.round(g / coords.length), Math.round(b / coords.length));
+    if (count === 0) return null;
+    return rgbToHex(Math.round(r / count), Math.round(g / count), Math.round(b / count));
   };
 
   const CHROMA_KEY_PRESETS = [
@@ -1203,12 +1211,14 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           toast.info('Color picking cancelled — no clip selected.');
         } else {
           const color = sampleCanvasColor(canvas, e.clientX, e.clientY);
-          const existing = liveClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
-          storeUpdateClip(liveClip.id, {
-            chromaKey: { ...existing, color }
-          });
-          scheduleSaveSnapshot('Chroma Color Picked');
-          toast.success(`🎨 Color picked: ${color}`);
+          if (color) {
+            const existing = liveClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+            storeUpdateClip(liveClip.id, {
+              chromaKey: { ...existing, enabled: true, color }
+            });
+            scheduleSaveSnapshot('Chroma Color Picked');
+            toast.success(`🎨 Color picked: ${color}`);
+          }
         }
       } else {
         toast.info('Color picking cancelled');
@@ -3469,14 +3479,33 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           />
 
                           <button
-                            onClick={() => setIsPickingChromaColor(true)}
+                            onClick={async () => {
+                              if (typeof window !== 'undefined' && 'EyeDropper' in window) {
+                                try {
+                                  const dropper = new (window as any).EyeDropper();
+                                  const result = await dropper.open();
+                                  if (result?.sRGBHex) {
+                                    const existing = selectedClip.chromaKey ?? { enabled: true, color: '#00ff00', threshold: 30, softness: 10 };
+                                    updateClip(selectedClip.id, {
+                                      chromaKey: { ...existing, enabled: true, color: result.sRGBHex.toLowerCase() }
+                                    });
+                                    scheduleSaveSnapshot('Pick Chroma Key Color');
+                                    toast.success(`Color picked: ${result.sRGBHex}`);
+                                    return;
+                                  }
+                                } catch (err: any) {
+                                  if (err.name === 'AbortError') return;
+                                }
+                              }
+                              setIsPickingChromaColor(true);
+                            }}
                             disabled={isPickingChromaColor}
                             className={`p-1.5 rounded transition-colors ${
                               isPickingChromaColor
                                 ? 'bg-emerald-500 text-black'
                                 : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-white hover:bg-[#4e4e4e]'
                             }`}
-                            title="Pick color from canvas"
+                            title="Eyedropper: Pick color from screen or canvas"
                           >
                             <Pipette className="w-3.5 h-3.5" />
                           </button>

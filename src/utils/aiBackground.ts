@@ -120,7 +120,7 @@ export async function loadMediaPipeSegmenter(modelType: 'general' | 'landscape' 
 let isMediaPipeDisabledForPerf = false;
 
 export async function segmentSourceWithMediaPipe(
-  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap,
+  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | ImageBitmap | OffscreenCanvas,
   modelType: 'general' | 'landscape' = 'landscape',
   clipId?: string,
   videoTime = 0
@@ -133,8 +133,19 @@ export async function segmentSourceWithMediaPipe(
   const segmenter = await loadMediaPipeSegmenter(modelType);
   if (!segmenter) return null;
 
+  let mediaPipeSource: any = source;
+  let ownedBitmap: ImageBitmap | null = null;
+  if (typeof OffscreenCanvas !== 'undefined' && source instanceof OffscreenCanvas) {
+    try {
+      ownedBitmap = await createImageBitmap(source);
+      mediaPipeSource = ownedBitmap;
+    } catch {
+      return null;
+    }
+  }
+
   try {
-    const result = segmenter.segment(source as any);
+    const result = segmenter.segment(mediaPipeSource as any);
 
     if (!result || !result.confidenceMasks || result.confidenceMasks.length === 0) {
       result?.close();
@@ -188,6 +199,10 @@ export async function segmentSourceWithMediaPipe(
   } catch (err) {
     console.error('[aiBackground] MediaPipe segmentation error:', err);
     return null;
+  } finally {
+    if (ownedBitmap) {
+      try { ownedBitmap.close(); } catch {}
+    }
   }
 }
 
@@ -289,17 +304,34 @@ type PooledCanvas = HTMLCanvasElement | OffscreenCanvas;
 const canvasPool = new Map<string, PooledCanvas>();
 const MAX_POOL_SIZE = 50;
 
-// Worker-safe canvas factory: OffscreenCanvas works in both window and worker
-// scopes; document.createElement throws inside the export worker (used to crash
-// exports whenever choke/feather or blur/outline/color cutout modes were used).
+// Worker-safe canvas factory: uses HTMLCanvasElement in window/DOM scope (where
+// MediaPipe and canvas rendering require it) and OffscreenCanvas inside Web Workers.
 function createCanvas(w: number, h: number): PooledCanvas {
+  if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    return c;
+  }
   if (typeof OffscreenCanvas !== 'undefined') {
     return new OffscreenCanvas(w, h);
   }
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  return c;
+  // Safe fallback for headless / test / node environments
+  return {
+    width: w,
+    height: h,
+    getContext: () => ({
+      drawImage: () => {},
+      clearRect: () => {},
+      fillRect: () => {},
+      getImageData: () => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      putImageData: () => {},
+      save: () => {},
+      restore: () => {},
+      filter: 'none',
+      globalCompositeOperation: 'source-over',
+    }),
+  } as any;
 }
 
 export function getPooledCanvas(key: string, w: number, h: number): PooledCanvas {
@@ -789,6 +821,7 @@ async function runClipBackgroundAnalysisInternal(
     const maskMap = preRenderedMaskCache.get(clipId)!;
 
     let processed = 0;
+    let lastValidBitmap: ImageBitmap | HTMLCanvasElement | null = null;
 
     for (let i = 0; i < totalKeyframes; i++) {
       // Abort gracefully if job was cancelled or clip state cleaned up
@@ -802,6 +835,10 @@ async function runClipBackgroundAnalysisInternal(
       // Skip if this keyframe region is already fully cached
       if (maskMap.has(keyframeKey)) {
         processed++;
+        const cachedMask = maskMap.get(keyframeKey);
+        if (cachedMask && !isEmptyMaskMarker(cachedMask)) {
+          lastValidBitmap = cachedMask;
+        }
         const pct = Math.min(99, Math.round((processed / totalKeyframes) * 100));
         updateClipAnalysisStatus(clipId, {
           status: 'analyzing', progress: pct,
@@ -825,13 +862,13 @@ async function runClipBackgroundAnalysisInternal(
           const onSeek = () => {
             if ('requestVideoFrameCallback' in video) {
               (video as any).requestVideoFrameCallback(() => finish());
-              fallback = setTimeout(finish, 200);
+              fallback = setTimeout(finish, 100);
             } else {
               finish();
             }
           };
           video.addEventListener('seeked', onSeek);
-          fallback = setTimeout(finish, 600);
+          fallback = setTimeout(finish, 250);
           video.currentTime = targetTime;
         });
       }
@@ -880,7 +917,7 @@ async function runClipBackgroundAnalysisInternal(
         if (!bitmap && !noSubject) {
           bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, 'landscape', clipId, targetTime).catch(() => null);
         }
-        if (!bitmap && !noSubject && fCtx) {
+        if (!bitmap && !noSubject && fCtx && isLoaded) {
           const blob = 'convertToBlob' in frameCanvas
             ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })
             : await new Promise<Blob | null>((resolve) =>
@@ -890,14 +927,18 @@ async function runClipBackgroundAnalysisInternal(
             bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
           }
         }
-        if (!bitmap) noSubject = true;
+        if (!bitmap && lastValidBitmap) {
+          bitmap = lastValidBitmap;
+        } else if (!bitmap) {
+          noSubject = true;
+        }
       } else {
         // Use the multiclass MediaPipe person model first. It is the same
         // high-quality family used by OpenReel and runs on the GPU without the
         // 3–5 second IS-Net inference stall. IS-Net remains a fallback only.
         const mpType = modelSelection === 0 ? 'general' : 'landscape';
         bitmap = await segmentSourceWithMediaPipe(segmentationSource as any, mpType, clipId, targetTime).catch(() => null);
-        if (!bitmap && modelSelection === 2 && fCtx) {
+        if (!bitmap && modelSelection === 2 && fCtx && isLoaded) {
           const blob = 'convertToBlob' in frameCanvas
             ? await frameCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })
             : await new Promise<Blob | null>((resolve) =>
@@ -905,14 +946,18 @@ async function runClipBackgroundAnalysisInternal(
               );
           if (blob) bitmap = await segmentBlobToImageBitmap(blob, 'isnet_fp16').catch(() => null);
         }
-        if (!bitmap) noSubject = true;
+        if (!bitmap && lastValidBitmap) {
+          bitmap = lastValidBitmap;
+        } else if (!bitmap) {
+          noSubject = true;
+        }
       }
 
       // If segmentation succeeded with a valid bitmap, cache it.
-      // If segmentation returned null (seeking glitch / timeout), do NOT store an empty sentinel
-      // which would poison the cache and suppress live preview cutout.
+      // If segmentation returned null (seeking glitch / timeout), propagate lastValidBitmap or sentinel.
       // Each frame receives its own unique neural matte directly for smooth continuous playback
       if (bitmap) {
+        lastValidBitmap = bitmap;
         maskMap.set(keyframeKey, bitmap);
       } else if (noSubject) {
         maskMap.set(keyframeKey, getEmptyMaskSentinel());
@@ -1187,14 +1232,23 @@ export function applyPreRenderedMaskIfAvailable(
   }
 
   if (!preMask) {
-    // FIX (flicker): Once a clip has ANY pre-rendered analysis data, that cache is
-    // the SINGLE source of truth for the interactive preview. Falling back to the
-    // live per-frame pipeline here composited masks from a DIFFERENT inference
-    // engine/resolution — the alternating edges are exactly the CapCut-style
-    // "flickering cutout" bug. Show the nearest available analyzed mask instead;
-    // if the playhead is still ahead of the analysis, leave the original frame
-    // (it will be replaced on the next repaint once analysis catches up).
-    if (extraOptions?.isExporting) return false;
+    if (extraOptions?.isExporting) {
+      let minDiff = Infinity;
+      let closestKey = -1;
+      for (const k of clipPreRendered.keys()) {
+        const diff = Math.abs(k - targetKey);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestKey = k;
+        }
+      }
+      if (minDiff <= 15 && closestKey !== -1) {
+        preMask = clipPreRendered.get(closestKey);
+      }
+    }
+  }
+
+  if (!preMask) {
     return false;
   }
 

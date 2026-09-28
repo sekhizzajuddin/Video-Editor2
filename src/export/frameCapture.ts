@@ -7,6 +7,7 @@ export interface FrameCaptureOptions {
   startAt: number;
   endAt: number;
   fps: number;
+  alpha?: 'keep' | 'discard';
   onProgress?: (progress: ExportProgress) => void;
   shouldCancel?: () => boolean;
 }
@@ -55,6 +56,7 @@ export async function* streamCapturedFrames(opts: FrameCaptureOptions): AsyncGen
       const frame = new VideoFrame(opts.canvas, {
         timestamp: timestampUs,
         duration: durationUs,
+        alpha: opts.alpha || 'discard',
       });
       yield frame;
     }

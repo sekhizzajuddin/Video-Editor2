@@ -188,6 +188,9 @@ class FakeVideoDecoder {
   async flush() {
     while (this.decodeQueueSize > 0) await new Promise((r) => setTimeout(r, 0));
   }
+  reset() {
+    this.decodeQueueSize = 0;
+  }
   close() {
     this.state = 'closed';
   }

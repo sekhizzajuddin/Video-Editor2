@@ -175,7 +175,15 @@ export class AssetDecoder {
       break;
     }
 
-    return this.current?.canvas || null;
+    if (this.current) return this.current.canvas;
+    if (this.lookahead) return this.lookahead.canvas;
+    if (this.sink) {
+      try {
+        const wrapped = await this.sink.getCanvas(timestampSeconds);
+        if (wrapped?.canvas) return wrapped.canvas;
+      } catch {}
+    }
+    return null;
   }
 
   async getFrameAt(timestampMicroseconds: number): Promise<CanvasImageSource | null> {

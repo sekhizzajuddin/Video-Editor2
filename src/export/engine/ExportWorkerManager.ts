@@ -3,7 +3,7 @@ import { ExportPhase } from '../types';
 import { AudioMixer } from './AudioMixer';
 import { normalizeVideoBlobForExport } from './VideoNormalizer';
 import { getFileFromDB } from '@/utils/projectPersistence';
-import { ensureClipMasksReady } from '@/utils/aiBackground';
+import { ensureClipMasksReady, isEmptyMaskMarker } from '@/utils/aiBackground';
 
 export interface ExporterCallbacks {
   onProgress: (progress: number, currentFrame: number, eta: number) => void;
@@ -178,28 +178,36 @@ export class ExportWorkerManager {
             || (this.options.timeline.mediaLibrary || []).find((m: any) => m.id === clip.mediaId);
           const mediaUrl = mediaItem?.url || '';
           if (mediaUrl) {
-            const maskMap = await ensureClipMasksReady(
-              clip.id,
-              mediaUrl,
-              clip.trimStart || 0,
-              clip.duration || 5,
-              clip.aiBackground.modelSelection ?? 1
-            );
-            this.checkActive(signal);
-            if (maskMap && maskMap.size > 0) {
-              const list: Array<{ key: number; bitmap: ImageBitmap }> = [];
-              for (const [key, bmpOrCanvas] of maskMap.entries()) {
-                if (bmpOrCanvas) {
-                  try {
-                    const clonedBmp = await createImageBitmap(bmpOrCanvas);
-                    list.push({ key, bitmap: clonedBmp });
-                    transferables.push(clonedBmp);
-                  } catch (e) {
-                    console.warn('[ExportWorkerManager] Could not clone mask bitmap:', e);
+            try {
+              this.options.callbacks.onPhaseChange('preparing');
+              const maskMap = await ensureClipMasksReady(
+                clip.id,
+                mediaUrl,
+                clip.trimStart || 0,
+                clip.duration || 5,
+                clip.aiBackground.modelSelection ?? 1,
+                (pct: number) => {
+                  this.options.callbacks.onProgress(Math.round(pct * 0.9), 0, 0);
+                }
+              );
+              this.checkActive(signal);
+              if (maskMap && maskMap.size > 0) {
+                const list: Array<{ key: number; bitmap: ImageBitmap }> = [];
+                for (const [key, bmpOrCanvas] of maskMap.entries()) {
+                  if (bmpOrCanvas && !isEmptyMaskMarker(bmpOrCanvas)) {
+                    try {
+                      const clonedBmp = await createImageBitmap(bmpOrCanvas);
+                      list.push({ key, bitmap: clonedBmp });
+                      transferables.push(clonedBmp);
+                    } catch (e) {
+                      console.warn('[ExportWorkerManager] Could not clone mask bitmap:', e);
+                    }
                   }
                 }
+                aiMaskPayload[clip.id] = list;
               }
-              aiMaskPayload[clip.id] = list;
+            } catch (maskErr) {
+              console.warn('[ExportWorkerManager] ensureClipMasksReady failed for clip:', clip.id, maskErr);
             }
           }
         }

@@ -702,6 +702,7 @@ export class Compositor {
             strokeWidth: layer.aiBackground.strokeWidth ?? 4,
             strokeGlow: layer.aiBackground.strokeGlow ?? false,
             bgColor: layer.aiBackground.bgColor ?? '#1e1e24',
+            isExporting: true,
           };
 
           // Try to apply the cached mask
@@ -1759,30 +1760,35 @@ export class Compositor {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
     
-    // Parse hex color
-    const hex = settings.color.replace('#', '');
-    const kr = parseInt(hex.substring(0, 2), 16);
-    const kg = parseInt(hex.substring(2, 4), 16);
-    const kb = parseInt(hex.substring(4, 6), 16);
+    // Parse hex color with support for 3, 4, 6, 8 hex digits
+    let hex = (settings.color || '#00ff00').replace('#', '').trim();
+    if (hex.length === 3 || hex.length === 4) {
+      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+    const kr = parseInt(hex.substring(0, 2), 16) || 0;
+    const kg = parseInt(hex.substring(2, 4), 16) || 255;
+    const kb = parseInt(hex.substring(4, 6), 16) || 0;
     
-    const kyuv = this.rgb2yuv(kr, kg, kb);
-    const th = settings.threshold * 2.4;
-    const soft = settings.softness * 2.4;
+    const ku = -0.1687 * kr - 0.3313 * kg + 0.5 * kb + 128;
+    const kv = 0.5 * kr - 0.4187 * kg - 0.0813 * kb + 128;
+    const th = Math.max(0, settings.threshold) * 2.4;
+    const soft = Math.max(0, settings.softness) * 2.4;
     
+    const isGreenScreen = kg >= kr && kg >= kb;
+    const isBlueScreen = kb >= kr && kb >= kg;
+
     for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a === 0) continue;
+
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      const a = data[i + 3];
-      
-      if (a === 0) continue;
 
-      const yuv = this.rgb2yuv(r, g, b);
+      const u = -0.1687 * r - 0.3313 * g + 0.5 * b + 128;
+      const v = 0.5 * r - 0.4187 * g - 0.0813 * b + 128;
       
-      // Distance in UV space
-      const dy = yuv.u - kyuv.u;
-      const dz = yuv.v - kyuv.v;
-      const dist = Math.sqrt(dy * dy + dz * dz) * 255.0;
+      const dist = Math.sqrt((u - ku) ** 2 + (v - kv) ** 2);
       
       let alpha = 1.0;
       if (dist < th) {
@@ -1791,22 +1797,27 @@ export class Compositor {
         alpha = (dist - th) / soft;
       }
       
-      if (alpha < 1.0) {
-        data[i + 3] = a * alpha;
-        
-        // Spill suppression
-        if (settings.spillSuppression > 0 && alpha > 0.0) {
-           const spill = settings.spillSuppression / 100.0;
-           // If key color is mostly green
-           if (kg >= kr && kg >= kb) {
-             const gSpill = Math.max(0, g - Math.max(r, b)) * spill;
-             data[i + 1] = Math.max(0, g - gSpill);
-           } 
-           // If key color is mostly blue
-           else if (kb >= kr && kb >= kg) {
-             const bSpill = Math.max(0, b - Math.max(r, g)) * spill;
-             data[i + 2] = Math.max(0, b - bSpill);
-           }
+      data[i + 3] = Math.round(alpha * a);
+      
+      // Spill suppression on key boundary & fringe
+      if (settings.spillSuppression > 0 && dist < th + soft + 30) {
+        const factor = settings.spillSuppression / 100.0;
+        if (isGreenScreen) {
+          const excess = Math.max(0, g - Math.max(r, b));
+          if (excess > 0) {
+            const gSpill = excess * factor;
+            data[i + 1] = Math.max(0, Math.round(g - gSpill));
+            data[i] = Math.min(255, Math.round(r + gSpill * 0.25));
+            data[i + 2] = Math.min(255, Math.round(b + gSpill * 0.25));
+          }
+        } else if (isBlueScreen) {
+          const excess = Math.max(0, b - Math.max(r, g));
+          if (excess > 0) {
+            const bSpill = excess * factor;
+            data[i + 2] = Math.max(0, Math.round(b - bSpill));
+            data[i] = Math.min(255, Math.round(r + bSpill * 0.25));
+            data[i + 1] = Math.min(255, Math.round(g + bSpill * 0.25));
+          }
         }
       }
     }

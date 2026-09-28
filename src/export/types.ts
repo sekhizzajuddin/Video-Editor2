@@ -15,6 +15,7 @@ export interface ExportOptions {
   startAt: number;
   endAt: number;
   useHardwareEncoder: boolean;
+  transparentBackground?: boolean;
   canvas: HTMLCanvasElement | null;
   audioStream: MediaStream | null;
   onProgress: (progress: ExportProgress) => void;

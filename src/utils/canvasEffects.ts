@@ -671,6 +671,21 @@ export function applyColorOverlays(
   }
 }
 
+function parseChromaHex(hexStr: string): [number, number, number] {
+  let hex = (hexStr || '#00ff00').replace('#', '').trim();
+  if (hex.length === 3 || hex.length === 4) {
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  }
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  return [
+    isNaN(r) ? 0 : r,
+    isNaN(g) ? 255 : g,
+    isNaN(b) ? 0 : b,
+  ];
+}
+
 export function applyChromaKeyOnData(
   oCtx: CanvasRenderingContext2D,
   w: number,
@@ -685,53 +700,30 @@ export function applyChromaKeyOnData(
     const imgData = oCtx.getImageData(0, 0, w, h);
     const data = imgData.data;
 
-    const hex = keyColorHex.replace('#', '');
-    const rParse = parseInt(hex.substring(0, 2), 16);
-    const gParse = parseInt(hex.substring(2, 4), 16);
-    const bParse = parseInt(hex.substring(4, 6), 16);
-
-    const kr = isNaN(rParse) ? 0 : rParse;
-    const kg = isNaN(gParse) ? 255 : gParse;
-    const kb = isNaN(bParse) ? 0 : bParse;
+    const [kr, kg, kb] = parseChromaHex(keyColorHex);
 
     const ku = -0.1687 * kr - 0.3313 * kg + 0.5 * kb + 128;
     const kv = 0.5 * kr - 0.4187 * kg - 0.0813 * kb + 128;
 
-    const th = threshold * 2.4; 
-    const soft = softness * 2.4;
+    const th = Math.max(0, threshold) * 2.4; 
+    const soft = Math.max(0, softness) * 2.4;
 
     // Determine key color type for spill suppression
     const isGreenScreen = kg >= kr && kg >= kb;
     const isBlueScreen = kb >= kr && kb >= kg;
 
     for (let i = 0; i < data.length; i += 4) {
-      let r = data[i];
-      let g = data[i + 1];
-      let b = data[i + 2];
+      const a = data[i + 3];
+      if (a === 0) continue;
+
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
 
       const u = -0.1687 * r - 0.3313 * g + 0.5 * b + 128;
       const v = 0.5 * r - 0.4187 * g - 0.0813 * b + 128;
 
       const dist = Math.sqrt((u - ku) ** 2 + (v - kv) ** 2);
-
-      // ─── Spill Suppression ─────────────────────────────
-      if (spillSuppression > 0) {
-        if (isGreenScreen) {
-          const gSpill = Math.max(0, g - Math.max(r, b)) * (spillSuppression / 100);
-          g = Math.max(0, g - gSpill);
-          r = Math.min(255, r + gSpill * 0.25);
-          b = Math.min(255, b + gSpill * 0.25);
-        } else if (isBlueScreen) {
-          const bSpill = Math.max(0, b - Math.max(r, g)) * (spillSuppression / 100);
-          b = Math.max(0, b - bSpill);
-          r = Math.min(255, r + bSpill * 0.25);
-          g = Math.min(255, g + bSpill * 0.25);
-        }
-        
-        data[i] = r;
-        data[i + 1] = g;
-        data[i + 2] = b;
-      }
 
       // ─── Alpha Matte ───────────────────────────────────
       let alpha = 1.0;
@@ -741,7 +733,29 @@ export function applyChromaKeyOnData(
         alpha = (dist - th) / soft;
       }
 
-      data[i + 3] = Math.round(alpha * data[i + 3]);
+      data[i + 3] = Math.round(alpha * a);
+
+      // ─── Spill Suppression (Applied to fringe & boundary pixels) ──────
+      if (spillSuppression > 0 && dist < th + soft + 30) {
+        const factor = spillSuppression / 100;
+        if (isGreenScreen) {
+          const excess = Math.max(0, g - Math.max(r, b));
+          if (excess > 0) {
+            const gSpill = excess * factor;
+            data[i + 1] = Math.max(0, Math.round(g - gSpill));
+            data[i] = Math.min(255, Math.round(r + gSpill * 0.25));
+            data[i + 2] = Math.min(255, Math.round(b + gSpill * 0.25));
+          }
+        } else if (isBlueScreen) {
+          const excess = Math.max(0, b - Math.max(r, g));
+          if (excess > 0) {
+            const bSpill = excess * factor;
+            data[i + 2] = Math.max(0, Math.round(b - bSpill));
+            data[i] = Math.min(255, Math.round(r + bSpill * 0.25));
+            data[i + 1] = Math.min(255, Math.round(g + bSpill * 0.25));
+          }
+        }
+      }
     }
 
     // ─── Edge Feather ───────────────────────────────────

@@ -344,7 +344,7 @@ export async function renderCanvasEngine({
   const isAutoFast =
     previewMode === 'auto' &&
     isPlaying &&
-    (activeVideoClipCount > 1 || tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && (c.chromaKey?.enabled || c.lutFilter?.mediaId))));
+    (activeVideoClipCount > 1 || tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && c.lutFilter?.mediaId)));
   // Scrubbing forces quality-2 path so heavy FX (chroma, LUT, AI bg) are skipped,
   // making playhead drag feel CapCut-smooth.
   // Adaptive performance downgrade: if rolling FPS dropped below 50 for >1.5s,
@@ -1556,10 +1556,9 @@ export async function renderCanvasEngine({
           const hasCrop = cLeft > 0 || cRight > 0 || cTop > 0 || cBot > 0;
           const hasCssFilters = exposure !== 0 || contrast !== 100 || saturation !== 100 || blur > 0;
           const hasAiBg = !!clip.aiBackground?.enabled;
-          const keyPinned = isPinnedChromaKey(clip.chromaKey);
-          // Keyed overlay plates opt out of the FX skip: they are meaningless
-          // (a solid magenta block) without their key.
-          const hasChroma = !!clip.chromaKey?.enabled && (!skipExpensiveFX || keyPinned);
+          // Chroma Key (Green Screen) is a fundamental cutout matte: it must never
+          // be dropped during playback or fast mode (dropping it shows an opaque green block).
+          const hasChroma = !!clip.chromaKey?.enabled;
           const hasLuma = !skipExpensiveFX && !!clip.lumaKey?.enabled;
           const hasObjRemoval = !skipExpensiveFX && !!clip.objectRemoval?.enabled;
           const hasColorWheels = !skipExpensiveFX && !!(filters.shadows || filters.midtones || filters.highlights);
@@ -1688,28 +1687,29 @@ export async function renderCanvasEngine({
               }
             }
 
-            // Keyed overlay plates opt out of the FX skip: without the key the
-            // clip is a solid block of colour, so a pinned key stays on even
-            // while playing, scrubbing or in fast preview mode.
-            const allowHeavyFx = !skipExpensiveFX || keyPinned;
+            // Chroma Key (Green Screen) — essential cutout matte, always applied during playback.
+            // Without keying, a keyed clip appears as an opaque green block hiding lower layers.
+            if (clip.chromaKey?.enabled) {
+              const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold'], clip.expressions?.['chromaKey.threshold']);
+              const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness'], clip.expressions?.['chromaKey.softness']);
+              const animSpill = getAnimatedValue(clip.chromaKey.spillSuppression ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.spillSuppression'], clip.expressions?.['chromaKey.spillSuppression']);
+              const animFeather = getAnimatedValue(clip.chromaKey.edgeFeather ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.edgeFeather'], clip.expressions?.['chromaKey.edgeFeather']);
+              applyChromaKeyOnData(
+                oCtx,
+                offCanvas.width,
+                offCanvas.height,
+                clip.chromaKey.color,
+                animThresh,
+                animSoft,
+                animSpill,
+                animFeather
+              );
+            }
+
+            // Secondary / heavy grading & pixel effects
+            const allowHeavyFx = !skipExpensiveFX;
 
             if (allowHeavyFx) {
-              if (clip.chromaKey?.enabled) {
-                const animThresh = getAnimatedValue(clip.chromaKey.threshold, currentTime, clip.startTime, clip.animations?.['chromaKey.threshold'], clip.expressions?.['chromaKey.threshold']);
-                const animSoft = getAnimatedValue(clip.chromaKey.softness, currentTime, clip.startTime, clip.animations?.['chromaKey.softness'], clip.expressions?.['chromaKey.softness']);
-                const animSpill = getAnimatedValue(clip.chromaKey.spillSuppression ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.spillSuppression'], clip.expressions?.['chromaKey.spillSuppression']);
-                const animFeather = getAnimatedValue(clip.chromaKey.edgeFeather ?? 0, currentTime, clip.startTime, clip.animations?.['chromaKey.edgeFeather'], clip.expressions?.['chromaKey.edgeFeather']);
-                applyChromaKeyOnData(
-                  oCtx,
-                  offCanvas.width,
-                  offCanvas.height,
-                  clip.chromaKey.color,
-                  animThresh,
-                  animSoft,
-                  animSpill,
-                  animFeather
-                );
-              }
               if (clip.lumaKey?.enabled) {
                 const animThresh = getAnimatedValue(clip.lumaKey.threshold, currentTime, clip.startTime, clip.animations?.['lumaKey.threshold'], clip.expressions?.['lumaKey.threshold']);
                 const animSoft = getAnimatedValue(clip.lumaKey.softness, currentTime, clip.startTime, clip.animations?.['lumaKey.softness'], clip.expressions?.['lumaKey.softness']);

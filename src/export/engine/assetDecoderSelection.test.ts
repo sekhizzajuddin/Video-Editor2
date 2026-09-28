@@ -76,7 +76,7 @@ describe('AssetDecoder frame selection', () => {
     for (let i = 0; i < 10; i++) {
       const t = Math.round(trimStartUs + (i * 1_000_000) / 30);
       const frame: any = await decoder.getFrameAt(t);
-      const q = (decoder as any).decodedQueue.map((f: any) => f.timestamp);
+      const q = (decoder as any).decodedQueue?.map((f: any) => f.timestamp) ?? [];
       console.log(
         `t=${t} -> got=${frame?.timestamp} queue=[${q.length} frames ${q[0]}..${q[q.length - 1]}] nextSampleIdx=${(decoder as any).nextSampleIdx}`
       );
