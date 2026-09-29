@@ -644,17 +644,11 @@ export async function runGroqSpeedSync(
     throw new Error('Groq API Key is missing. Please configure it in Settings or set VITE_GROQ_API_KEY.');
   }
 
-  // 1. Transcribe TTS audio with Groq Whisper
-  console.log('[AiSpeedSync] Transcribing TTS audio with Groq Whisper...');
-  const ttsWhisper = await transcribeWithGroqWhisper(ttsAudioBlob, preferredWhisperModel);
-  const ttsWords = ttsWhisper.words;
-  const ttsSentences = ttsWhisper.sentences;
-
-  // 2. If video has audio, transcribe video audio with Groq Whisper
+  // 1. If video has audio, transcribe video audio with Groq Whisper FIRST
   let videoWords: SyncWordTiming[] | undefined;
   let videoSentences: SpeedSyncSentence[] | undefined;
   let videoText = '';
-  let successfulWhisperModel = ttsWhisper.model;
+  let successfulWhisperModel = preferredWhisperModel;
 
   if (videoAudioBlob) {
     try {
@@ -663,12 +657,23 @@ export async function runGroqSpeedSync(
       videoWords = videoWhisper.words;
       videoSentences = videoWhisper.sentences;
       videoText = videoWhisper.text;
-      successfulWhisperModel = `${videoWhisper.model} / ${ttsWhisper.model}`;
+      successfulWhisperModel = videoWhisper.model;
     } catch (vErr) {
       console.warn('[AiSpeedSync] Video audio Whisper transcription failed or video has no clear speech:', vErr);
       videoWords = [];
       videoSentences = [];
     }
+  }
+
+  // 2. Transcribe TTS audio with Groq Whisper SECOND
+  console.log('[AiSpeedSync] Transcribing TTS audio with Groq Whisper...');
+  const ttsWhisper = await transcribeWithGroqWhisper(ttsAudioBlob, preferredWhisperModel);
+  const ttsWords = ttsWhisper.words;
+  const ttsSentences = ttsWhisper.sentences;
+  if (videoAudioBlob) {
+    successfulWhisperModel = `${successfulWhisperModel} / ${ttsWhisper.model}`;
+  } else {
+    successfulWhisperModel = ttsWhisper.model;
   }
 
   const hasVideoSpeech = Boolean(videoWords && videoWords.length > 0);
@@ -976,21 +981,10 @@ export function buildAnchorsFromWordTimings(
 
   if (!matchedAny) return [];
 
-  // BUG 6 FIX: Merge anchors closer than 0.25s apart into phrase-level anchors
-  // to prevent micro-jitter from per-word speed oscillations (Gemini timestamps
-  // have ±50ms variance, causing wild 0.3x → 3.5x speed swings between words).
-  // Keep the LAST anchor of each phrase (best positional accuracy at phrase end).
-  const anchors: SyncAnchor[] = [];
-  for (let i = 0; i < rawAnchors.length; i++) {
-    const anchor = rawAnchors[i];
-    const next = rawAnchors[i + 1];
-    // Emit this anchor if it's the last one OR if the next anchor is ≥0.25s away in TTS time
-    if (!next || (next.ttsTime - anchor.ttsTime) >= 0.25) {
-      anchors.push(anchor);
-    }
-    // Otherwise skip this anchor (too close to the next) — the next word in
-    // the same phrase will represent the phrase boundary more accurately.
-  }
+  // BUG 6 FIX (Reverted): User specifically requested word-by-word delivery timing.
+  // Instead of merging anchors into phrase-level anchors, we pass through all matched
+  // word-level anchors to achieve exact per-word alignment.
+  const anchors: SyncAnchor[] = rawAnchors;
 
   // Trailing hold — "TTS wording is better than video clip": when the TTS
   // keeps speaking after the video's last matched word, HOLD the video near
@@ -1124,32 +1118,18 @@ export function detectTtsExtraSentences(params: {
         const nextWordTime = remainingTtsWords[0].time;
         const remainingDuration = ttsDuration - lastMatchedTime;
 
-        // Check if there is sentence-ending punctuation on the matched boundary
-        const lastWordRaw = tWords[lastMatchedTi].word || '';
-        const lastVWordRaw = vWords[maxVi]?.word || '';
-        const hasPunctuation = /[.!?؛۔]$/.test(lastWordRaw.trim()) || /[.!?؛۔]$/.test(lastVWordRaw.trim());
-
-        // Also check if any remaining TTS word has sentence punctuation
-        const remainingHasSentence = remainingTtsWords.some(w => /[.!?]/.test(w.word));
-
-        // Extra sentence criteria:
-        // - At least 3 extra words and at least 0.8s remaining duration
-        // - OR sentence punctuation and at least 2 extra words
-        const isExtraSentence =
-          (remainingTtsWords.length >= 3 && remainingDuration >= 0.8) ||
-          (hasPunctuation && remainingTtsWords.length >= 2) ||
-          (remainingHasSentence && remainingTtsWords.length >= 2);
-
-        if (isExtraSentence) {
+        // User requested EXACT SPLIT where it last matches the Video Clip
+        // We bypass all extra heuristics (punctuation, word count) and just split exactly here.
+        if (remainingTtsWords.length > 0) {
           // Calculate clean split point in the pause between sentences
-          let cutoff = (lastMatchedTime + 0.25 + nextWordTime) / 2;
-          cutoff = Math.max(lastMatchedTime + 0.1, Math.min(nextWordTime - 0.05, cutoff));
+          let cutoff = (lastMatchedTime + nextWordTime) / 2;
+          cutoff = Math.max(lastMatchedTime + 0.05, Math.min(nextWordTime - 0.05, cutoff));
 
-          if (cutoff > 0.25 && cutoff < ttsDuration - 0.2) {
+          if (cutoff > 0.1 && cutoff < ttsDuration - 0.1) {
             return {
               hasMoreSentences: true,
               matchingCutoffTime: Number(cutoff.toFixed(3)),
-              reason: `TTS has ${remainingTtsWords.length} trailing spoken words (${remainingDuration.toFixed(1)}s) after video dialogue ends.`,
+              reason: `Exact split applied: TTS has ${remainingTtsWords.length} trailing spoken words after video dialogue ends.`,
             };
           }
         }
