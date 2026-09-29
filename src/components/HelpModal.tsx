@@ -109,7 +109,7 @@ const HELP_SECTIONS = [
     options: [
       { name: 'Undo / Redo', desc: 'Revert your last action or re-apply it (Ctrl+Z / Ctrl+Y).' },
       { name: 'Workspace Layouts', desc: 'Switch between Default, Vertical, and Horizontal panel layouts based on your preference.' },
-      { name: 'Teleprompter', desc: 'Opens a scrolling text prompter you can read from while recording your screen or camera.' },
+      { name: 'Teleprompter Studio Pro', desc: 'Dialogue-by-dialogue prompter with live word tracking, auto-advance, Studio Mic DSP rack, Whisper alignment, and Gemini coaching.' },
       { name: 'Settings', desc: 'Access global app settings like proxy editing.' },
     ]
   }
