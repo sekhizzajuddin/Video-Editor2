@@ -410,9 +410,9 @@ export class FrameScheduler {
         }
 
         const transitionRole = activeTransition
-          ? (activeTransition.from.id === clip.id
+          ? (activeTransition.from?.id === clip.id
               ? 'from'
-              : activeTransition.to.id === clip.id
+              : activeTransition.to?.id === clip.id
                 ? 'to'
                 : null)
           : null;

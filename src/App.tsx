@@ -36,6 +36,7 @@ const GenerativeWorkspace = React.lazy(() => import('@/components/GenerativeWork
 const AiSpeedSyncModal = React.lazy(() => import('@/components/AiSpeedSyncModal').then(m => ({ default: m.AiSpeedSyncModal })));
 const CustomFxMakerModal = React.lazy(() => import('@/components/CustomFxMakerModal').then(m => ({ default: m.CustomFxMakerModal })));
 const WatermarkRemoverModal = React.lazy(() => import('@/components/WatermarkRemoverModal').then(m => ({ default: m.WatermarkRemoverModal })));
+const AutoDuckingModal = React.lazy(() => import('@/components/AutoDuckingModal').then(m => ({ default: m.AutoDuckingModal })));
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_SHORTCUTS, getShortcutString } from '@/utils/keyboardShortcuts';
@@ -94,6 +95,8 @@ function DesktopApp() {
     showSettingsModal,
     showAiSpeedSyncModal,
     setShowAiSpeedSyncModal,
+    showAutoDuckingModal,
+    setShowAutoDuckingModal,
     showCustomFxMakerModal,
     closeCustomFxMaker,
     showWatermarkRemoverModal,
@@ -105,6 +108,8 @@ function DesktopApp() {
     showSettingsModal: s.showSettingsModal,
     showAiSpeedSyncModal: s.showAiSpeedSyncModal,
     setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
+    showAutoDuckingModal: s.showAutoDuckingModal,
+    setShowAutoDuckingModal: s.setShowAutoDuckingModal,
     showCustomFxMakerModal: s.showCustomFxMakerModal,
     closeCustomFxMaker: s.closeCustomFxMaker,
     showWatermarkRemoverModal: s.showWatermarkRemoverModal,
@@ -830,6 +835,11 @@ function DesktopApp() {
       {showAiSpeedSyncModal && (
         <Suspense fallback={null}>
           <AiSpeedSyncModal onClose={() => setShowAiSpeedSyncModal(false)} />
+        </Suspense>
+      )}
+      {showAutoDuckingModal && (
+        <Suspense fallback={null}>
+          <AutoDuckingModal onClose={() => setShowAutoDuckingModal(false)} />
         </Suspense>
       )}
       {showCustomFxMakerModal && (

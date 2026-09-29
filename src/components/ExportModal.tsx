@@ -78,6 +78,62 @@ export function ExportModal() {
     };
   }, [tracks]);
 
+  const transitionSummary = useMemo(() => {
+    let total = 0;
+    let joinedCount = 0;
+    let standaloneInCount = 0;
+    let standaloneOutCount = 0;
+    const types = new Set<string>();
+
+    for (const track of tracks) {
+      if (track.muted || !track.clips || track.clips.length === 0) continue;
+      const sortedClips = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+
+      for (let i = 0; i < sortedClips.length; i++) {
+        const clip = sortedClips[i];
+        if (clip.disabled) continue;
+        const prevClip = i > 0 ? sortedClips[i - 1] : null;
+        const nextClip = i + 1 < sortedClips.length ? sortedClips[i + 1] : null;
+
+        const isJoinedWithPrev = prevClip && !prevClip.disabled && Math.abs(clip.startTime - (prevClip.startTime + prevClip.duration)) < 0.034;
+        const isJoinedWithNext = nextClip && !nextClip.disabled && Math.abs(nextClip.startTime - (clip.startTime + clip.duration)) < 0.034;
+
+        if (isJoinedWithPrev) {
+          if (clip.transitionIn || prevClip.transitionOut) {
+            joinedCount++;
+            total++;
+            const t = clip.transitionIn || prevClip.transitionOut;
+            if (t?.name) types.add(t.name);
+            else if (t?.type) types.add(t.type);
+          }
+        } else if (clip.transitionIn && (clip.transitionIn.duration || 0) > 0) {
+          standaloneInCount++;
+          total++;
+          const t = clip.transitionIn;
+          if (t?.name) types.add(t.name);
+          else if (t?.type) types.add(t.type);
+        }
+
+        if (!isJoinedWithNext && clip.transitionOut && (clip.transitionOut.duration || 0) > 0) {
+          standaloneOutCount++;
+          total++;
+          const t = clip.transitionOut;
+          if (t?.name) types.add(t.name);
+          else if (t?.type) types.add(t.type);
+        }
+      }
+    }
+
+    return {
+      total,
+      joinedCount,
+      standaloneCount: standaloneInCount + standaloneOutCount,
+      standaloneInCount,
+      standaloneOutCount,
+      types: Array.from(types),
+    };
+  }, [tracks]);
+
   const initialResolution = useMemo(() => {
     if (aspectRatio === '9:16') return RESOLUTION_PRESETS['9:16_1080'];
     if (aspectRatio === '1:1') return RESOLUTION_PRESETS['1:1_1080'];
@@ -602,6 +658,49 @@ export function ExportModal() {
                   Transparent alpha export enabled. WebM VP9 will preserve transparent background behind titles and animated text.
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Transitions Active Status & Blending Confirmation */}
+          {transitionSummary.total > 0 && (
+            <div className="bg-purple-950/25 border border-purple-500/30 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center bg-purple-500/20 text-purple-400">
+                    <Sparkles className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
+                      <span>Timeline Transitions ({transitionSummary.total} active)</span>
+                      <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                    </div>
+                    <div className="text-[10px] text-purple-400/80 flex items-center gap-1.5 mt-0.5">
+                      <span>{transitionSummary.joinedCount} joined {transitionSummary.joinedCount === 1 ? 'cut' : 'cuts'}</span>
+                      {transitionSummary.standaloneCount > 0 && (
+                        <>
+                          <span className="text-purple-500/50">•</span>
+                          <span>{transitionSummary.standaloneCount} standalone ({transitionSummary.standaloneInCount} In, {transitionSummary.standaloneOutCount} Out)</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {transitionSummary.types.length > 0 && (
+                  <div className="flex items-center gap-1 shrink-0 flex-wrap max-w-[200px] justify-end">
+                    {transitionSummary.types.slice(0, 3).map((t: string, i: number) => (
+                      <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-black/50 text-[9px] font-mono text-purple-300 border border-purple-500/30 capitalize">
+                        {t}
+                      </span>
+                    ))}
+                    {transitionSummary.types.length > 3 && (
+                      <span className="text-[9px] text-purple-400/70">+{transitionSummary.types.length - 3}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-purple-300/80 bg-purple-950/30 p-1.5 rounded border border-purple-500/20">
+                Frame-accurate WebGL/Canvas blending confirmed: Standalone transitions composite directly over underlying tracks or transparent alpha without requiring adjacent clips.
+              </p>
             </div>
           )}
 

@@ -525,3 +525,107 @@ describe('transition sound effects', () => {
   });
 });
 
+describe('standalone transitions (unjoined clips)', () => {
+  it('plays standalone In transition when alignment is left (Start at Cut)', () => {
+    const standaloneClip = clip('c_standalone', 10, 5, {
+      transitionIn: { type: 'dissolve', duration: 1.5, params: { alignment: 'left' } },
+    });
+
+    // Before window
+    expect(findActiveTransition([standaloneClip], 9.9)).toBeNull();
+
+    // Inside window [10.0, 11.5]
+    const mid = findActiveTransition([standaloneClip], 10.75);
+    expect(mid).not.toBeNull();
+    expect(mid!.from).toBeNull();
+    expect(mid!.to.id).toBe('c_standalone');
+    expect(mid!.windowStart).toBeCloseTo(10.0);
+    expect(mid!.windowEnd).toBeCloseTo(11.5);
+    expect(mid!.rawProgress).toBeCloseTo(0.5);
+
+    // After window
+    expect(findActiveTransition([standaloneClip], 11.6)).toBeNull();
+  });
+
+  it('does NOT play standalone In transition if alignment is not left', () => {
+    const centeredClip = clip('c_center', 10, 5, {
+      transitionIn: { type: 'dissolve', duration: 1.5, params: { alignment: 'center' } },
+    });
+    expect(findActiveTransition([centeredClip], 10.2)).toBeNull();
+  });
+
+  it('plays standalone Out transition when alignment is right (End at Cut)', () => {
+    const standaloneClip = clip('c_out', 10, 5, {
+      transitionOut: { type: 'dissolve', duration: 1.0, params: { alignment: 'right' } },
+    });
+
+    // Clip duration is 5, so clip spans [10, 15]. Out transition with right alignment spans [14, 15].
+    expect(findActiveTransition([standaloneClip], 13.9)).toBeNull();
+
+    const mid = findActiveTransition([standaloneClip], 14.5);
+    expect(mid).not.toBeNull();
+    expect(mid!.from.id).toBe('c_out');
+    expect(mid!.to).toBeNull();
+    expect(mid!.windowStart).toBeCloseTo(14.0);
+    expect(mid!.windowEnd).toBeCloseTo(15.0);
+    expect(mid!.rawProgress).toBeCloseTo(0.5);
+
+    // After clip ends
+    expect(findActiveTransition([standaloneClip], 15.1)).toBeNull();
+  });
+
+  it('does NOT play standalone Out transition if alignment is not right', () => {
+    const centeredClip = clip('c_center_out', 10, 5, {
+      transitionOut: { type: 'dissolve', duration: 1.0, params: { alignment: 'center' } },
+    });
+    expect(findActiveTransition([centeredClip], 14.5)).toBeNull();
+  });
+
+  it('buildTransitionPlan correctly constructs layers for standalone In transition', () => {
+    const cur = clip('clip_in', 10, 5);
+    const active: ActiveTransition = {
+      transition: { type: 'dissolve', duration: 1.0, params: { alignment: 'left' } },
+      from: null,
+      to: cur,
+      rawProgress: 0.3,
+      progress: 0.3,
+      windowStart: 10,
+      windowEnd: 11,
+    };
+
+    const plan = buildTransitionPlan(active);
+    expect(plan.from.visible).toBe(false);
+    expect(plan.to.visible).toBe(true);
+    expect(plan.to.opacity).toBeCloseTo(0.3);
+  });
+
+  it('buildTransitionPlan correctly constructs layers for standalone Out transition', () => {
+    const cur = clip('clip_out', 10, 5);
+    const active: ActiveTransition = {
+      transition: { type: 'dissolve', duration: 1.0, params: { alignment: 'right' } },
+      from: cur,
+      to: null,
+      rawProgress: 0.4,
+      progress: 0.4,
+      windowStart: 14,
+      windowEnd: 15,
+    };
+
+    const plan = buildTransitionPlan(active);
+    expect(plan.from.visible).toBe(true);
+    expect(plan.to.visible).toBe(false);
+    expect(plan.from.opacity).toBeCloseTo(0.6); // 1 - 0.4
+  });
+
+  it('getMaxTransitionDuration bounds standalone transitions to clip duration', () => {
+    const cur = clip('c', 0, 3.0);
+    const tracks = [{ clips: [cur] }];
+    const maxIn = getMaxTransitionDuration(tracks, 'c', 5, 'in');
+    expect(maxIn).toBeCloseTo(3.0);
+
+    const maxOut = getMaxTransitionDuration(tracks, 'c', 5, 'out');
+    expect(maxOut).toBeCloseTo(3.0);
+  });
+});
+
+

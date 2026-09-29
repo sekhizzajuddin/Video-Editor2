@@ -151,8 +151,13 @@ export interface ClipAudioSettings {
   ducking?: {
     enabled: boolean;
     duckVolume: number;   // 5 to 50% (default 20% background volume during speech)
-    fadeDuration: number; // 100 to 500 ms (default 200 ms)
+    duckDb?: number;      // e.g. -18 dB (reduction amount)
+    fadeDuration: number; // 100 to 800 ms (default 300 ms)
+    attackDuration?: number;  // ms ramp down before speech
+    holdDuration?: number;    // ms sustain after speech
+    releaseDuration?: number; // ms ramp up after speech
     threshold?: number;   // sensitivity threshold
+    appliedAt?: number;   // timestamp when auto ducking was applied
   };
   // AI Vocal / BGM Separation (Demucs)
   aiVocalSeparation?: {
@@ -1012,6 +1017,7 @@ export interface EditorState {
   activePipWindowId: string | null;
   colorClipboard: any | null;
   selectedTransitionClipId: string | null;
+  selectedTransitionPosition?: 'in' | 'out' | null;
   selectedKeyframeLines: { clipId: string; time: number }[];
 
   // Settings
@@ -1080,6 +1086,7 @@ export interface EditorState {
   showTeleprompter: boolean;
   showHelpMenu: boolean;
   showAiSpeedSyncModal: boolean;
+  showAutoDuckingModal: boolean;
   showWatermarkRemoverModal: boolean;
   watermarkRemoverTargetClipId: string | null;
   activeHelpSection: string | null;

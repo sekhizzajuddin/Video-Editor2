@@ -239,13 +239,14 @@ export function TransitionTarget({
     // Auto-attach the recommended sound effect as a tasteful default; the user
     // can change it or set it to "No Sound" in the Transition Settings panel.
     const defaultSound = getDefaultSoundForKind(probe.kind);
+    const defaultAlignment = position === 'in' ? 'left' : position === 'out' ? 'right' : 'center';
 
     const newTransition = {
       id: Math.random().toString(36).substr(2, 9),
       name,
       type: probe.kind,
       duration: Math.max(0.1, defaultDuration),
-      params: { alignment: 'center', kind: probe.kind },
+      params: { alignment: defaultAlignment, kind: probe.kind, standalone: position === 'in' || position === 'out' },
       soundEffect: defaultSound,
       soundVolume: 0.8,
     };
@@ -255,12 +256,13 @@ export function TransitionTarget({
     } else {
       useEditorStore.getState().updateClip(clipId, { transitionOut: newTransition });
     }
-    useEditorStore.getState().saveSnapshot();
+    useEditorStore.getState().saveSnapshot('Add Transition');
+    selectTransition(clipId, position);
   };
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    selectTransition(clipId);
+    selectTransition(clipId, position);
   };
 
   if (hasTransition) {
@@ -320,8 +322,33 @@ export function TransitionTarget({
       onDrop={handleDrop}
       onClick={(e) => {
         e.stopPropagation();
-        toast.info("Drag a transition effect here from the Effects panel to apply it.");
+        const state = useEditorStore.getState();
+        const clip = findClipDeep(state, clipId)?.clip;
+        const clipDuration = clip?.duration ?? 2.5;
+        const defaultDuration = Math.min(1.0, clipDuration * 0.4);
+        const defaultAlignment = position === 'in' ? 'left' : position === 'out' ? 'right' : 'center';
+        const defaultSound = getDefaultSoundForKind('dissolve');
+
+        const newTransition = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: 'Cross Dissolve',
+          type: 'dissolve',
+          duration: Math.max(0.1, defaultDuration),
+          params: { alignment: defaultAlignment, kind: 'dissolve', standalone: position === 'in' || position === 'out' },
+          soundEffect: defaultSound,
+          soundVolume: 0.8,
+        };
+
+        if (position === 'in') {
+          state.updateClip(clipId, { transitionIn: newTransition });
+        } else {
+          state.updateClip(clipId, { transitionOut: newTransition });
+        }
+        state.saveSnapshot('Add Transition');
+        selectTransition(clipId, position);
+        toast.success(`Added ${newTransition.name} (${defaultAlignment === 'left' ? 'Start at Cut' : defaultAlignment === 'right' ? 'End at Cut' : 'Center at Cut'})`);
       }}
+      title={position === 'in' ? "Click to add In-Transition (Start at Cut)" : position === 'out' ? "Click to add Out-Transition (End at Cut)" : "Click to add Cut Transition"}
       className="absolute top-0 bottom-0 z-30 flex flex-col items-center justify-center pointer-events-auto group cursor-pointer"
       style={{
         left: `${left + width / 2 - 12}px`,
@@ -335,7 +362,7 @@ export function TransitionTarget({
       <div className={`w-5 h-5 rounded-full border flex items-center justify-center shadow-md transition-all ${
         isDragOver
           ? 'bg-purple-600 border-purple-300 text-white scale-125'
-          : 'bg-[#252525] border-purple-500/60 text-purple-400 hover:text-white hover:scale-110 hover:border-purple-500'
+          : 'bg-[#252525] border-purple-500/60 text-purple-400 hover:text-white hover:scale-110 hover:border-purple-500 hover:bg-purple-600'
       }`}>
         <Plus className="w-3.5 h-3.5" />
       </div>

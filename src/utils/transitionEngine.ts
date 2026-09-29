@@ -52,10 +52,10 @@ export interface TransitionLike {
 /** A resolved transition occurring between two specific clips. */
 export interface ActiveTransition {
   transition: TransitionLike;
-  /** Outgoing clip (drawn first / underneath). */
-  from: any;
-  /** Incoming clip (drawn second / on top). */
-  to: any;
+  /** Outgoing clip (drawn first / underneath), or null if standalone In transition. */
+  from: any | null;
+  /** Incoming clip (drawn second / on top), or null if standalone Out transition. */
+  to: any | null;
   /** Eased 0..1 position through the transition window. */
   progress: number;
   /** Raw (un-eased) 0..1 position — used for strictly-linear effects like flash. */
@@ -394,8 +394,8 @@ export function getTransitionWindow(
   boundary: number,
   duration: number,
   alignment: TransitionAlignment,
-  fromClip?: { startTime: number; duration: number },
-  toClip?: { startTime: number; duration: number }
+  fromClip?: { startTime: number; duration: number } | null,
+  toClip?: { startTime: number; duration: number } | null
 ): { start: number; end: number; duration: number } {
   const safeDuration = Math.max(0, duration || 0);
 
@@ -415,8 +415,19 @@ export function getTransitionWindow(
   let end = start + safeDuration;
 
   // Never reach past the start of the outgoing clip or the end of the incoming one.
-  if (fromClip) start = Math.max(start, fromClip.startTime);
-  if (toClip) end = Math.min(end, toClip.startTime + toClip.duration);
+  if (fromClip) {
+    start = Math.max(start, fromClip.startTime);
+  } else if (toClip) {
+    // Standalone In: clamp start to toClip.startTime
+    start = Math.max(start, toClip.startTime);
+  }
+
+  if (toClip) {
+    end = Math.min(end, toClip.startTime + toClip.duration);
+  } else if (fromClip) {
+    // Standalone Out: clamp end to fromClip end
+    end = Math.min(end, fromClip.startTime + fromClip.duration);
+  }
 
   // Degenerate windows (duration 0, or clamped to nothing) are treated as absent.
   if (end <= start) return { start, end: start, duration: 0 };
@@ -428,20 +439,22 @@ export function getTransitionWindow(
  * Find the transition (if any) active at `time` on a single track.
  *
  * Rules:
- *  - Clips must be adjacent (gap under `maxGap`) — a transition across a visible
- *    gap is meaningless and used to render as a flash of background.
- *  - `transitionIn` on the incoming clip wins over `transitionOut` on the
- *    outgoing clip, matching the behaviour the audio mixer already assumed.
+ *  - Handles both joined cuts between adjacent clips AND standalone transitions
+ *    (e.g. clip-in or clip-out transitions where no adjacent clip is joined).
+ *  - For joined cuts, `transitionIn` on the incoming clip wins over `transitionOut`
+ *    on the outgoing clip.
+ *  - For standalone clips, a transition plays alone when alignment is "Start at Cut"
+ *    ('left') for In transitions, or "End at Cut" ('right') for Out transitions.
  *  - Only ONE transition can be active per track per frame. Overlapping windows
  *    are resolved deterministically by picking the one whose boundary is nearest
- *    to `time`; this prevents the double-composite flicker.
+ *    to `time`; this prevents double-composite flicker.
  */
 export function findActiveTransition(
   clips: any[],
   time: number,
   maxGap: number = 0.1
 ): ActiveTransition | null {
-  if (!clips || clips.length < 2) return null;
+  if (!clips || clips.length === 0) return null;
 
   // Work on a start-time-ordered copy so callers may pass unsorted tracks.
   const ordered = [...clips].sort((a, b) => a.startTime - b.startTime);
@@ -449,6 +462,7 @@ export function findActiveTransition(
   let best: ActiveTransition | null = null;
   let bestDistance = Infinity;
 
+  // 1. Scan joined cuts between adjacent clips
   for (let i = 1; i < ordered.length; i++) {
     const prev = ordered[i - 1];
     const cur = ordered[i];
@@ -481,6 +495,74 @@ export function findActiveTransition(
           windowStart: win.start,
           windowEnd: win.end,
         };
+      }
+    }
+  }
+
+  // 2. Scan standalone transitions (clips without an adjacent joining clip)
+  for (let i = 0; i < ordered.length; i++) {
+    const cur = ordered[i];
+    if (cur.disabled) continue;
+
+    // 2a. Standalone Transition In (clip start edge with no joined preceding clip)
+    if (cur.transitionIn && cur.transitionIn.duration > 0) {
+      const prev = i > 0 ? ordered[i - 1] : null;
+      const isJoinedPrev = prev && !prev.disabled && Math.abs(cur.startTime - (prev.startTime + prev.duration)) <= maxGap;
+      if (!isJoinedPrev) {
+        const alignment = cur.transitionIn.params?.alignment;
+        // User rule: plays alone if adjoint clip not found ONLY if user set the Transition Start At Cut in Alignment Setting ('left')
+        if (alignment === 'left') {
+          const boundary = cur.startTime;
+          const win = getTransitionWindow(boundary, cur.transitionIn.duration, 'left', null, cur);
+          if (win.duration > 0 && time >= win.start && time < win.end) {
+            const distance = Math.abs(time - boundary);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              const rawProgress = clamp01((time - win.start) / win.duration);
+              const norm = normalizeTransition(cur.transitionIn);
+              best = {
+                transition: cur.transitionIn,
+                from: null,
+                to: cur,
+                rawProgress,
+                progress: applyEasing(rawProgress, norm.easing),
+                windowStart: win.start,
+                windowEnd: win.end,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    // 2b. Standalone Transition Out (clip end edge with no joined succeeding clip)
+    if (cur.transitionOut && cur.transitionOut.duration > 0) {
+      const next = i + 1 < ordered.length ? ordered[i + 1] : null;
+      const isJoinedNext = next && !next.disabled && Math.abs(next.startTime - (cur.startTime + cur.duration)) <= maxGap;
+      if (!isJoinedNext) {
+        const alignment = cur.transitionOut.params?.alignment;
+        // User rule: plays alone if adjoint clip not found ONLY if user set the Transition End At Cut in Alignment Setting ('right')
+        if (alignment === 'right') {
+          const boundary = cur.startTime + cur.duration;
+          const win = getTransitionWindow(boundary, cur.transitionOut.duration, 'right', cur, null);
+          if (win.duration > 0 && time >= win.start && time < win.end) {
+            const distance = Math.abs(time - boundary);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              const rawProgress = clamp01((time - win.start) / win.duration);
+              const norm = normalizeTransition(cur.transitionOut);
+              best = {
+                transition: cur.transitionOut,
+                from: cur,
+                to: null,
+                rawProgress,
+                progress: applyEasing(rawProgress, norm.easing),
+                windowStart: win.start,
+                windowEnd: win.end,
+              };
+            }
+          }
+        }
       }
     }
   }
@@ -890,8 +972,38 @@ export function buildTransitionPlan(active: ActiveTransition): TransitionPlan {
     }
   }
 
-  from.visible = from.opacity > 0.001;
-  to.visible = to.opacity > 0.001;
+  // Standalone transition handling (when from or to clip is absent)
+  if (!active.from) {
+    from.visible = false;
+    from.opacity = 0;
+    if (norm.kind === 'fadeToBlack' || norm.kind === 'fadeToWhite') {
+      overlay.alpha = 1 - t;
+      to.opacity = 1;
+      to.visible = true;
+    } else if (norm.kind === 'flash') {
+      overlay.alpha = 1 - raw;
+      to.opacity = 1;
+      to.visible = true;
+    }
+  } else {
+    from.visible = from.opacity > 0.001;
+  }
+
+  if (!active.to) {
+    to.visible = false;
+    to.opacity = 0;
+    if (norm.kind === 'fadeToBlack' || norm.kind === 'fadeToWhite') {
+      overlay.alpha = t;
+      from.opacity = 1;
+      from.visible = true;
+    } else if (norm.kind === 'flash') {
+      overlay.alpha = raw;
+      from.opacity = 1 - raw;
+      from.visible = from.opacity > 0.001;
+    }
+  } else {
+    to.visible = to.opacity > 0.001;
+  }
 
   return { from, to, overlay, postEffect, postEffectAmount };
 }
@@ -1230,7 +1342,8 @@ export const TRANSITION_KIND_INFO: Array<{
 export function getMaxTransitionDuration(
   tracks: Array<{ clips: any[] }>,
   clipId: string,
-  fallback: number = 5
+  fallback: number = 5,
+  position?: 'in' | 'out' | null
 ): number {
   for (const track of tracks) {
     const ordered = [...(track.clips || [])].sort((a, b) => a.startTime - b.startTime);
@@ -1239,9 +1352,17 @@ export function getMaxTransitionDuration(
 
     const clip = ordered[idx];
     // Which cut does this clip's transition sit on?
-    const onIncomingEdge = !!clip.transitionIn;
+    const onIncomingEdge = position ? position === 'in' : !!clip.transitionIn;
     const neighbour = onIncomingEdge ? ordered[idx - 1] : ordered[idx + 1];
     if (!neighbour) return Math.min(fallback, clip.duration);
+
+    const gap = onIncomingEdge
+      ? clip.startTime - (neighbour.startTime + neighbour.duration)
+      : neighbour.startTime - (clip.startTime + clip.duration);
+
+    if (Math.abs(gap) > 0.034) {
+      return Math.min(fallback, clip.duration);
+    }
 
     // Half of the shorter clip on each side keeps a centred window inside both.
     const limit = Math.min(clip.duration, neighbour.duration);

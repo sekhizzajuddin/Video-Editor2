@@ -2705,8 +2705,8 @@ export async function renderCanvasEngine({
     const active = findActiveTransition(track.clips, currentTime);
     if (active) {
       activeTransitions.set(track.id, active);
-      transitionClipIds.add(active.from.id);
-      transitionClipIds.add(active.to.id);
+      if (active.from) transitionClipIds.add(active.from.id);
+      if (active.to) transitionClipIds.add(active.to.id);
     }
   }
 
@@ -3065,8 +3065,12 @@ export async function renderCanvasEngine({
         pctx.clearRect(0, 0, postBuf.width, postBuf.height);
         pctx.save();
         pctx.scale(bufScale, bufScale);
-        await drawTransitionLayer(active.from, plan.from, '__transition_from', pctx as CanvasRenderingContext2D, bufScale);
-        await drawTransitionLayer(active.to, plan.to, '__transition_to', pctx as CanvasRenderingContext2D, bufScale);
+        if (active.from && plan.from.visible) {
+          await drawTransitionLayer(active.from, plan.from, '__transition_from', pctx as CanvasRenderingContext2D, bufScale);
+        }
+        if (active.to && plan.to.visible) {
+          await drawTransitionLayer(active.to, plan.to, '__transition_to', pctx as CanvasRenderingContext2D, bufScale);
+        }
         drawTransitionOverlay(pctx as CanvasRenderingContext2D, plan.overlay, W, H);
         pctx.restore();
         applyTransitionPostEffect(pctx as CanvasRenderingContext2D, postBuf.width, postBuf.height, plan.postEffect, plan.postEffectAmount);
@@ -3075,8 +3079,12 @@ export async function renderCanvasEngine({
       return;
     }
 
-    await drawTransitionLayer(active.from, plan.from, '__transition_from');
-    await drawTransitionLayer(active.to, plan.to, '__transition_to');
+    if (active.from && plan.from.visible) {
+      await drawTransitionLayer(active.from, plan.from, '__transition_from');
+    }
+    if (active.to && plan.to.visible) {
+      await drawTransitionLayer(active.to, plan.to, '__transition_to');
+    }
 
     drawTransitionOverlay(ctx, plan.overlay, W, H);
   };

@@ -29,17 +29,20 @@ const AspectRatioConflictModal = React.lazy(() => import('@/components/AspectRat
 const HelpModal = React.lazy(() => import('@/components/HelpModal').then((m) => ({ default: m.HelpModal })));
 const AiSpeedSyncModal = React.lazy(() => import('@/components/AiSpeedSyncModal').then((m) => ({ default: m.AiSpeedSyncModal })));
 const CustomFxMakerModal = React.lazy(() => import('@/components/CustomFxMakerModal').then((m) => ({ default: m.CustomFxMakerModal })));
+const AutoDuckingModal = React.lazy(() => import('@/components/AutoDuckingModal').then((m) => ({ default: m.AutoDuckingModal })));
 
 type Sheet = 'none' | 'media' | 'properties';
 
 export function MobileApp() {
-  const { projectId, showExportModal, showSettingsModal, showAiSpeedSyncModal, setShowAiSpeedSyncModal, showCustomFxMakerModal, closeCustomFxMaker, selectedClipId } = useEditorStore(
+  const { projectId, showExportModal, showSettingsModal, showAiSpeedSyncModal, setShowAiSpeedSyncModal, showAutoDuckingModal, setShowAutoDuckingModal, showCustomFxMakerModal, closeCustomFxMaker, selectedClipId } = useEditorStore(
     useShallow((s) => ({
       projectId: s.projectId,
       showExportModal: s.showExportModal,
       showSettingsModal: s.showSettingsModal,
       showAiSpeedSyncModal: s.showAiSpeedSyncModal,
       setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
+      showAutoDuckingModal: s.showAutoDuckingModal,
+      setShowAutoDuckingModal: s.setShowAutoDuckingModal,
       showCustomFxMakerModal: s.showCustomFxMakerModal,
       closeCustomFxMaker: s.closeCustomFxMaker,
       selectedClipId: s.selectedClipId,
@@ -161,6 +164,11 @@ export function MobileApp() {
       {showAiSpeedSyncModal && (
         <Suspense fallback={null}>
           <AiSpeedSyncModal onClose={() => setShowAiSpeedSyncModal(false)} />
+        </Suspense>
+      )}
+      {showAutoDuckingModal && (
+        <Suspense fallback={null}>
+          <AutoDuckingModal onClose={() => setShowAutoDuckingModal(false)} />
         </Suspense>
       )}
       {showCustomFxMakerModal && (

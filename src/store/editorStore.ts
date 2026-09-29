@@ -431,6 +431,7 @@ interface EditorActions {
   setShowTeleprompter: (show: boolean) => void;
   setShowHelpMenu: (show: boolean, section?: string | null) => void;
   setShowAiSpeedSyncModal: (show: boolean) => void;
+  setShowAutoDuckingModal: (show: boolean) => void;
   setUseProxies: (use: boolean) => void;
   syncSelectedClips: () => void;
   setShowProgressBar: (show: boolean) => void;
@@ -490,9 +491,9 @@ interface EditorActions {
 
   // Transitions
   setShowTransitionLayer: (show: boolean) => void;
-  selectTransition: (clipId: string | null) => void;
-  updateTransition: (clipId: string, updates: Partial<Transition>) => void;
-  removeTransition: (clipId: string) => void;
+  selectTransition: (clipId: string | null, position?: 'in' | 'out' | null) => void;
+  updateTransition: (clipId: string, updates: Partial<Transition>, position?: 'in' | 'out' | null) => void;
+  removeTransition: (clipId: string, position?: 'in' | 'out' | null) => void;
 
   // Audio/Video Unlink
   unlinkAudio: (clipId: string) => void;
@@ -578,6 +579,7 @@ const initialState: EditorState = {
   activePipWindowId: null,
   colorClipboard: null,
   selectedTransitionClipId: null,
+  selectedTransitionPosition: null,
   selectedKeyframeLines: [],
   selectedTrackId: null,
   settings: {
@@ -647,6 +649,7 @@ const initialState: EditorState = {
   showTeleprompter: false,
   showHelpMenu: false,
   showAiSpeedSyncModal: false,
+  showAutoDuckingModal: false,
   showWatermarkRemoverModal: false,
   watermarkRemoverTargetClipId: null,
   customFxList: [],
@@ -3472,6 +3475,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           selectedClipId: null,
           selectedClipIds: [],
           selectedTransitionClipId: null,
+          selectedTransitionPosition: null,
           selectedKeyframeLines: [],
           selectedSpeedFrame: null,
         };
@@ -3482,6 +3486,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
           selectedClipId: id,
           selectedClipIds: [id],
           selectedTransitionClipId: null,
+          selectedTransitionPosition: null,
           selectedKeyframeLines: [],
           selectedSpeedFrame: null,
         };
@@ -3496,6 +3501,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         selectedClipId: newIds.length > 0 ? newIds[0] : null,
         selectedClipIds: newIds,
         selectedTransitionClipId: null,
+        selectedTransitionPosition: null,
         selectedSpeedFrame: null,
       };
     });
@@ -3506,6 +3512,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       selectedClipIds: clipIds,
       selectedClipId: clipIds[0] || null,
       selectedTransitionClipId: null,
+      selectedTransitionPosition: null,
       selectedSpeedFrame: null,
     });
   },
@@ -3516,10 +3523,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
   // Transitions
   setShowTransitionLayer: (show) => set({ showTransitionLayer: show }),
-  selectTransition: (clipId) => {
+  selectTransition: (clipId, position = null) => {
     setTrimPreviewTime(null);
     return set({
       selectedTransitionClipId: clipId,
+      selectedTransitionPosition: position,
       selectedClipId: null,
       selectedClipIds: [],
       selectedSpeedFrame: null,
@@ -3527,13 +3535,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   },
   // NOTE: a transition can live on EITHER the incoming clip (`transitionIn`) or
   // the outgoing one (`transitionOut`) — drag-and-drop assigns whichever edge the
-  // user dropped nearest. The original implementation only ever updated/removed
-  // `transitionIn`, so editing or deleting a transition that had been dropped on a
-  // clip's END silently did nothing. Both edges are now handled, and `params` are
-  // merged rather than replaced so partial updates (e.g. only `softness`) don't
-  // wipe out the other settings.
-  updateTransition: (clipId, updates) => {
+  // user dropped nearest. Both edges are handled with pinpoint precision via
+  // the optional `position` argument or state.selectedTransitionPosition.
+  updateTransition: (clipId, updates, position) => {
     set((state) => {
+      const targetPos = position ?? state.selectedTransitionPosition;
       const applyUpdate = (existing: Transition): Transition => ({
         ...existing,
         ...updates,
@@ -3542,6 +3548,13 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
 
       const patchClip = (clip: TimelineClip): TimelineClip => {
         if (clip.id !== clipId) return clip;
+        if (targetPos === 'in' && clip.transitionIn) {
+          return { ...clip, transitionIn: applyUpdate(clip.transitionIn) };
+        }
+        if (targetPos === 'out' && clip.transitionOut) {
+          return { ...clip, transitionOut: applyUpdate(clip.transitionOut) };
+        }
+        // Fallback when targetPos is not specified or neither matched:
         if (clip.transitionIn) {
           return { ...clip, transitionIn: applyUpdate(clip.transitionIn) };
         }
@@ -3563,12 +3576,19 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     });
     get().saveSnapshot('Update Transition');
   },
-  removeTransition: (clipId) => {
+  removeTransition: (clipId, position) => {
     set((state) => {
-      const stripClip = (clip: TimelineClip): TimelineClip =>
-        clip.id === clipId
-          ? { ...clip, transitionIn: undefined, transitionOut: undefined }
-          : clip;
+      const targetPos = position ?? state.selectedTransitionPosition;
+      const stripClip = (clip: TimelineClip): TimelineClip => {
+        if (clip.id !== clipId) return clip;
+        if (targetPos === 'in') {
+          return { ...clip, transitionIn: undefined };
+        }
+        if (targetPos === 'out') {
+          return { ...clip, transitionOut: undefined };
+        }
+        return { ...clip, transitionIn: undefined, transitionOut: undefined };
+      };
 
       const newTracks = state.tracks.map((track) => ({
         ...track,
@@ -3580,6 +3600,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         pipWindows: mapPipWindowClips(state.pipWindows, stripClip),
         selectedTransitionClipId:
           state.selectedTransitionClipId === clipId ? null : state.selectedTransitionClipId,
+        selectedTransitionPosition:
+          state.selectedTransitionClipId === clipId ? null : state.selectedTransitionPosition,
       };
     });
     get().saveSnapshot('Delete Transition');
@@ -4053,6 +4075,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
   setShowTeleprompter: (show) => set({ showTeleprompter: show }),
   setShowHelpMenu: (show, section = null) => set({ showHelpMenu: show, activeHelpSection: section }),
   setShowAiSpeedSyncModal: (show) => set({ showAiSpeedSyncModal: show }),
+  setShowAutoDuckingModal: (show) => set({ showAutoDuckingModal: show }),
   setShowWatermarkRemoverModal: (show) => set({ showWatermarkRemoverModal: show }),
   openWatermarkRemover: (clipId) => {
     const state = get();

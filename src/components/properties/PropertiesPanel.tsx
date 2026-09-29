@@ -375,6 +375,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     duplicateClip,
     splitClip,
     selectedTransitionClipId,
+    selectedTransitionPosition,
     updateTransition,
     removeTransition,
     addMasterKeyframe,
@@ -401,6 +402,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     updatePipWindowEnterExit,
     updateClipEnterExitAnimation,
     refreshClipPreviews,
+    setShowAutoDuckingModal,
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     selectedClipId: s.selectedClipId,
@@ -416,6 +418,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     duplicateClip: s.duplicateClip,
     splitClip: s.splitClip,
     selectedTransitionClipId: s.selectedTransitionClipId,
+    selectedTransitionPosition: s.selectedTransitionPosition,
     updateTransition: s.updateTransition,
     removeTransition: s.removeTransition,
     addMasterKeyframe: s.addMasterKeyframe,
@@ -440,6 +443,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     updatePipWindowEnterExit: s.updatePipWindowEnterExit,
     updateClipEnterExitAnimation: s.updateClipEnterExitAnimation,
     refreshClipPreviews: s.refreshClipPreviews,
+    setShowAutoDuckingModal: s.setShowAutoDuckingModal,
   })));
 
   const [mobileSubTab, setMobileSubTab] = useState<string>('');
@@ -959,13 +963,32 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   // properties panel appeared empty for half of all transitions.
   let selectedTransitionClip: any = null;
   let selectedTransition: any = null;
+  let activeTransitionPos: 'in' | 'out' = 'in';
   if (selectedTransitionClipId) {
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === selectedTransitionClipId);
-      if (clip && (clip.transitionIn || clip.transitionOut)) {
-        selectedTransitionClip = clip;
-        selectedTransition = clip.transitionIn || clip.transitionOut;
-        break;
+      if (clip) {
+        if (selectedTransitionPosition === 'in' && clip.transitionIn) {
+          selectedTransitionClip = clip;
+          selectedTransition = clip.transitionIn;
+          activeTransitionPos = 'in';
+          break;
+        } else if (selectedTransitionPosition === 'out' && clip.transitionOut) {
+          selectedTransitionClip = clip;
+          selectedTransition = clip.transitionOut;
+          activeTransitionPos = 'out';
+          break;
+        } else if (clip.transitionIn) {
+          selectedTransitionClip = clip;
+          selectedTransition = clip.transitionIn;
+          activeTransitionPos = 'in';
+          break;
+        } else if (clip.transitionOut) {
+          selectedTransitionClip = clip;
+          selectedTransition = clip.transitionOut;
+          activeTransitionPos = 'out';
+          break;
+        }
       }
     }
   }
@@ -1381,10 +1404,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     const kindInfo = TRANSITION_KIND_INFO.find((k) => k.kind === norm.kind);
     const supports = (feature: string) => !!kindInfo?.supports.includes(feature as any);
 
-    // Longest transition that still fits between the two neighbouring clips.
-    // Exceeding this is what produced the overlapping-window flicker, so the UI
-    // caps the slider rather than letting the renderer clamp silently.
-    const maxDuration = getMaxTransitionDuration(tracks, selectedTransitionClip.id);
+    // Longest transition that still fits between the neighbouring clip(s).
+    // Standalone transitions are bounded by the clip duration itself.
+    const maxDuration = getMaxTransitionDuration(tracks, selectedTransitionClip.id, 5, activeTransitionPos);
 
 
     // Patch helper: merges into params (the store also merges, but doing it here
@@ -1392,7 +1414,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     const setParam = (key: string, value: any) =>
       updateTransition(selectedTransitionClip.id, {
         params: { ...(selectedTransition.params || {}), [key]: value },
-      } as any);
+      } as any, activeTransitionPos);
 
     const directions: Array<{ v: string; label: string }> = [
       { v: 'left', label: 'Left' },
@@ -1534,7 +1556,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </svg>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-[var(--theme-text-primary)]">Transition Settings</h3>
+              <div className="flex items-center gap-1.5">
+                <h3 className="text-sm font-semibold text-[var(--theme-text-primary)]">Transition Settings</h3>
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase tracking-wider">
+                  {activeTransitionPos === 'in' ? 'Clip In' : 'Clip Out'}
+                </span>
+              </div>
               <p className="text-[11px] text-[var(--theme-text-muted)] truncate max-w-[180px]">
                 {selectedTransition.name || kindInfo?.label || selectedTransition.type}
               </p>
@@ -1587,7 +1614,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   val = maxDuration;
                   toast.warning('Transition limited by the length of the adjacent clips');
                 }
-                updateTransition(selectedTransitionClip.id, { duration: val });
+                updateTransition(selectedTransitionClip.id, { duration: val }, activeTransitionPos);
               }}
               className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
             />
@@ -1599,19 +1626,39 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
           {/* Alignment */}
           <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-3 space-y-2">
-            <label className="text-xs text-[var(--theme-text-primary)] font-semibold block">Alignment</label>
+            <div className="flex justify-between items-center">
+              <label className="text-xs text-[var(--theme-text-primary)] font-semibold block">Alignment</label>
+              <span className="text-[10px] text-purple-400 font-medium capitalize">
+                {activeTransitionPos === 'in' ? 'Clip In Edge' : 'Clip Out Edge'}
+              </span>
+            </div>
             <div className="relative">
               <select
                 value={alignment}
                 onChange={(e) => setParam('alignment', e.target.value)}
                 className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-[var(--theme-text-primary)] rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
               >
-                <option value="center">Center at Cut</option>
-                <option value="left">Start at Cut</option>
-                <option value="right">End at Cut</option>
+                <option value="left">Start at Cut (Clip In / Standalone In)</option>
+                <option value="center">Center at Cut (Joined Cut)</option>
+                <option value="right">End at Cut (Clip Out / Standalone Out)</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)] absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
+            {alignment === 'left' && (
+              <p className="text-[10px] text-purple-300/80">
+                Starts at cut boundary and reveals clip into view (recommended for Standalone Clip-In &amp; overlays).
+              </p>
+            )}
+            {alignment === 'right' && (
+              <p className="text-[10px] text-purple-300/80">
+                Finishes at cut boundary and transitions clip out to transparent (recommended for Standalone Clip-Out).
+              </p>
+            )}
+            {alignment === 'center' && (
+              <p className="text-[10px] text-purple-300/80">
+                Centers 50/50 across the cut between adjacent joined clips.
+              </p>
+            )}
           </div>
 
           {/* Easing */}
@@ -1620,7 +1667,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className="relative">
               <select
                 value={norm.easing}
-                onChange={(e) => updateTransition(selectedTransitionClip.id, { easing: e.target.value })}
+                onChange={(e) => updateTransition(selectedTransitionClip.id, { easing: e.target.value }, activeTransitionPos)}
                 className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-[var(--theme-text-primary)] rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer"
               >
                 {TRANSITION_EASINGS.map((e) => (
@@ -1740,7 +1787,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   updateTransition(selectedTransitionClip.id, {
                     soundEffect: val,
                     params: { ...(selectedTransition.params || {}), soundEffect: val },
-                  } as any);
+                  } as any, activeTransitionPos);
                 }}
                 className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-[var(--theme-text-primary)] rounded px-2.5 py-1.5 focus:outline-none focus:border-purple-500 appearance-none cursor-pointer pr-8"
               >
@@ -1807,7 +1854,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       updateTransition(selectedTransitionClip.id, {
                         soundVolume: val,
                         params: { ...(selectedTransition.params || {}), soundVolume: val },
-                      } as any);
+                      } as any, activeTransitionPos);
                     }}
                     className="w-full h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-purple-500 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
                   />
@@ -1850,7 +1897,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
           {/* Delete */}
           <button
-            onClick={() => removeTransition(selectedTransitionClip.id)}
+            onClick={() => removeTransition(selectedTransitionClip.id, activeTransitionPos)}
             className="w-full py-2 bg-red-600/10 hover:bg-red-600 border border-red-500/20 hover:border-red-500 text-red-400 hover:text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 mt-4"
           >
             <Trash2 className="w-3.5 h-3.5" /> Remove Transition
@@ -6316,23 +6363,32 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <span className="text-xs text-[var(--theme-text-primary)] font-semibold">AI Auto Audio Ducking</span>
                 </div>
                 <p className="text-[11px] text-[#90e0b0]">
-                  Analyze parallel clips for vocals using Demucs AI, and automatically generate ducking volume keyframes on this clip.
+                  Analyze parallel dialogue &amp; vocals across timeline tracks using high-precision VAD speech detection, and automatically generate ducking volume keyframes.
                 </p>
 
                 {isDuckingAudio ? (
                   <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[var(--theme-bg-subpanel)] rounded border border-[var(--theme-border)]">
                     <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
                     <span className="text-[10px] text-emerald-400 font-medium">
-                      Separating and Analyzing Vocals ({duckingProgress}%)...
+                      Scanning Dialogue &amp; Ducking Vocals ({duckingProgress}%)...
                     </span>
                   </div>
                 ) : (
-                  <button
-                    onClick={handleAudioDucking}
-                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" /> Analyze & Duck Audio
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAudioDucking}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> ⚡ Duck Audio
+                    </button>
+                    <button
+                      onClick={() => setShowAutoDuckingModal(true)}
+                      className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-emerald-300 rounded text-xs font-medium border border-emerald-500/30 transition-colors"
+                      title="Open Full Auto Ducking Studio"
+                    >
+                      Studio...
+                    </button>
+                  </div>
                 )}
                 
                 {selectedClip.animations?.['audio.volume'] && selectedClip.animations['audio.volume'].length > 0 && (
@@ -7721,23 +7777,32 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <span className="text-xs text-[var(--theme-text-primary)] font-semibold">AI Auto Audio Ducking</span>
                 </div>
                 <p className="text-[11px] text-[#90e0b0]">
-                  Analyze parallel clips for vocals using Demucs AI, and automatically generate ducking volume keyframes on this clip.
+                  Analyze parallel dialogue &amp; vocals across timeline tracks using high-precision VAD speech detection, and automatically generate ducking volume keyframes.
                 </p>
 
                 {isDuckingAudio ? (
                   <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[var(--theme-bg-subpanel)] rounded border border-[var(--theme-border)]">
                     <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
                     <span className="text-[10px] text-emerald-400 font-medium">
-                      Separating and Analyzing Vocals ({duckingProgress}%)...
+                      Scanning Dialogue &amp; Ducking Vocals ({duckingProgress}%)...
                     </span>
                   </div>
                 ) : (
-                  <button
-                    onClick={handleAudioDucking}
-                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" /> Analyze & Duck Audio
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAudioDucking}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> ⚡ Duck Audio
+                    </button>
+                    <button
+                      onClick={() => setShowAutoDuckingModal(true)}
+                      className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-emerald-300 rounded text-xs font-medium border border-emerald-500/30 transition-colors"
+                      title="Open Full Auto Ducking Studio"
+                    >
+                      Studio...
+                    </button>
+                  </div>
                 )}
                 
                 {selectedClip.animations?.['audio.volume'] && selectedClip.animations['audio.volume'].length > 0 && (

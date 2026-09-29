@@ -217,11 +217,45 @@ export class AudioMixer {
           const clipDuration = Math.max(0.001, clip.duration || audioBuffer.duration);
           const fadeIn = Math.min(clipDuration, Math.max(0, clip.audioSettings?.fadeIn || 0));
           const fadeOut = Math.min(clipDuration, Math.max(0, clip.audioSettings?.fadeOut || 0));
-          gainNode.gain.setValueAtTime(fadeIn > 0 ? 0 : volume, clipStart);
-          if (fadeIn > 0) gainNode.gain.linearRampToValueAtTime(volume, clipStart + fadeIn);
-          if (fadeOut > 0) {
-            gainNode.gain.setValueAtTime(volume, Math.max(clipStart, clipStart + clipDuration - fadeOut));
-            gainNode.gain.linearRampToValueAtTime(0, clipStart + clipDuration);
+
+          const volKeyframes = clip.animations?.['audio.volume'];
+          if (volKeyframes && volKeyframes.length > 0) {
+            const sorted = [...volKeyframes].sort((a: any, b: any) => a.time - b.time);
+            const trackDb = clip._trackVolume ?? 0;
+            const toGain = (val: number) => {
+              const db = trackDb + val;
+              return db <= -40 ? 0 : Math.pow(10, db / 20);
+            };
+
+            const firstGain = toGain(sorted[0].value);
+            gainNode.gain.setValueAtTime(fadeIn > 0 ? 0 : firstGain, clipStart);
+            if (fadeIn > 0) {
+              gainNode.gain.linearRampToValueAtTime(firstGain, clipStart + fadeIn);
+            }
+
+            for (let k = 0; k < sorted.length; k++) {
+              const kf = sorted[k];
+              const kfTime = clipStart + Math.max(0, Math.min(clipDuration, kf.time));
+              const kfGain = toGain(kf.value);
+              if (kfTime > clipStart) {
+                gainNode.gain.linearRampToValueAtTime(kfGain, kfTime);
+              } else {
+                gainNode.gain.setValueAtTime(kfGain, kfTime);
+              }
+            }
+
+            if (fadeOut > 0) {
+              const fadeOutStart = Math.max(clipStart, clipStart + clipDuration - fadeOut);
+              gainNode.gain.setValueAtTime(gainNode.gain.value, fadeOutStart);
+              gainNode.gain.linearRampToValueAtTime(0, clipStart + clipDuration);
+            }
+          } else {
+            gainNode.gain.setValueAtTime(fadeIn > 0 ? 0 : volume, clipStart);
+            if (fadeIn > 0) gainNode.gain.linearRampToValueAtTime(volume, clipStart + fadeIn);
+            if (fadeOut > 0) {
+              gainNode.gain.setValueAtTime(volume, Math.max(clipStart, clipStart + clipDuration - fadeOut));
+              gainNode.gain.linearRampToValueAtTime(0, clipStart + clipDuration);
+            }
           }
 
           // Preserve clip pan and basic bass/treble edits in the final mix.

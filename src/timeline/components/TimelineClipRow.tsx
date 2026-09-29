@@ -199,7 +199,9 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       });
   }, [needsWaveformProbe, isVirtualVisible, media.id, media.url, media.duration]);
 
-  const clipAnims = clip.animations?.['transform.x'] || [];
+  const clipAnims = (clip.animations?.['audio.volume'] && clip.animations['audio.volume'].length > 0)
+    ? clip.animations['audio.volume']
+    : (clip.animations?.['transform.x'] || []);
   const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
 
   const dragHandlersRef = useRef<{move: (e: any) => void, up: () => void, cancelRaf?: () => void} | null>(null);
@@ -826,6 +828,8 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
     return map;
   }, [track.clips]);
 
+  const selectedTransitionPosition = useEditorStore((s) => s.selectedTransitionPosition);
+
   return (
     <div
       data-track-id={track.id}
@@ -983,57 +987,141 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 
       {/* ✂️ Transitions Layer (uses memoised sortedClips) 
         ────────────────────────────────────────────── */}
-        {!track.locked && sortedClips.map((clip, idx) => {
-          if (idx === 0) return null;
-          const prevClip = sortedClips[idx - 1];
-          const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
-          
-          const isEligibleForTransition = gap > -0.034 && gap < 0.034;
-          if (isEligibleForTransition) {
-            // Hide transition targets if either adjacent clip is selected to allow easier trimming
-            if (selectedSet.has(clip.id) || selectedSet.has(prevClip.id)) return null;
+        {!track.locked && (() => {
+          const targets: React.ReactNode[] = [];
+          for (let idx = 0; idx < sortedClips.length; idx++) {
+            const clip = sortedClips[idx];
+            const prevClip = idx > 0 ? sortedClips[idx - 1] : null;
+            const nextClip = idx + 1 < sortedClips.length ? sortedClips[idx + 1] : null;
 
-            const intersectionTime = clip.startTime;
-          const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
-          
-          if (!hasTransition && !showTransitionLayer) return null;
-          
-          const transition = clip.transitionIn || prevClip.transitionOut;
-          const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
-          const activePosition = clip.transitionIn ? 'in' : 'out';
-          const duration = transition?.duration ?? 1.0;
-          const alignment = transition?.params?.alignment as 'center' | 'left' | 'right' || 'center';
-          
-          const widthSec = hasTransition ? duration : 0.4;
-          const widthPx = Math.max(16, widthSec * zoomLevel);
-          
-          let leftSec = intersectionTime - widthSec / 2;
-          if (alignment === 'left') {
-            leftSec = intersectionTime;
-          } else if (alignment === 'right') {
-            leftSec = intersectionTime - widthSec;
+            const isJoinedWithPrev = prevClip && Math.abs(clip.startTime - (prevClip.startTime + prevClip.duration)) < 0.034;
+            const isJoinedWithNext = nextClip && Math.abs(nextClip.startTime - (clip.startTime + clip.duration)) < 0.034;
+
+            // 1. START EDGE of `clip`
+            if (isJoinedWithPrev) {
+              // MERGED Transition Cut between prevClip and clip
+              if (!selectedSet.has(clip.id) && !selectedSet.has(prevClip.id)) {
+                const intersectionTime = clip.startTime;
+                const hasTransition = !!clip.transitionIn || !!prevClip.transitionOut;
+                if (hasTransition || showTransitionLayer) {
+                  const transition = clip.transitionIn || prevClip.transitionOut;
+                  const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
+                  const activePosition = clip.transitionIn ? 'in' : 'out';
+                  const duration = transition?.duration ?? 1.0;
+                  const alignment = (transition?.params?.alignment as 'center' | 'left' | 'right') || 'center';
+
+                  const widthSec = hasTransition ? duration : 0.4;
+                  const widthPx = Math.max(16, widthSec * zoomLevel);
+
+                  let leftSec = intersectionTime - widthSec / 2;
+                  if (alignment === 'left') {
+                    leftSec = intersectionTime;
+                  } else if (alignment === 'right') {
+                    leftSec = intersectionTime - widthSec;
+                  }
+                  const leftPx = leftSec * zoomLevel;
+                  const isSelected = selectedTransitionClipId === activeClipId && (!selectedTransitionPosition || selectedTransitionPosition === activePosition);
+
+                  targets.push(
+                    <TransitionTarget
+                      key={`trans-merged-${prevClip.id}-${clip.id}`}
+                      clipId={activeClipId}
+                      position={activePosition}
+                      trackId={track.id}
+                      left={leftPx}
+                      width={widthPx}
+                      hasTransition={hasTransition}
+                      transitionName={transition?.name}
+                      isSelected={isSelected}
+                      zoomLevel={zoomLevel}
+                    />
+                  );
+                }
+              }
+            } else {
+              // STANDALONE IN Transition at clip.startTime
+              if (!selectedSet.has(clip.id)) {
+                const intersectionTime = clip.startTime;
+                const hasTransition = !!clip.transitionIn;
+                if (hasTransition || showTransitionLayer) {
+                  const transition = clip.transitionIn;
+                  const duration = transition?.duration ?? 1.0;
+                  const alignment = (transition?.params?.alignment as 'center' | 'left' | 'right') || 'left';
+
+                  const widthSec = hasTransition ? duration : 0.4;
+                  const widthPx = Math.max(16, widthSec * zoomLevel);
+
+                  let leftSec = intersectionTime;
+                  if (alignment === 'center') {
+                    leftSec = intersectionTime - widthSec / 2;
+                  } else if (alignment === 'right') {
+                    leftSec = intersectionTime - widthSec;
+                  }
+                  const leftPx = leftSec * zoomLevel;
+                  const isSelected = selectedTransitionClipId === clip.id && (!selectedTransitionPosition || selectedTransitionPosition === 'in');
+
+                  targets.push(
+                    <TransitionTarget
+                      key={`trans-in-${clip.id}`}
+                      clipId={clip.id}
+                      position="in"
+                      trackId={track.id}
+                      left={leftPx}
+                      width={widthPx}
+                      hasTransition={hasTransition}
+                      transitionName={transition?.name}
+                      isSelected={isSelected}
+                      zoomLevel={zoomLevel}
+                    />
+                  );
+                }
+              }
+            }
+
+            // 2. END EDGE of `clip`
+            // If clip is joined with nextClip, the merged cut is handled by nextClip's start edge above.
+            // If NOT joined with nextClip, render STANDALONE OUT Transition at clip.startTime + clip.duration.
+            if (!isJoinedWithNext) {
+              if (!selectedSet.has(clip.id)) {
+                const intersectionTime = clip.startTime + clip.duration;
+                const hasTransition = !!clip.transitionOut;
+                if (hasTransition || showTransitionLayer) {
+                  const transition = clip.transitionOut;
+                  const duration = transition?.duration ?? 1.0;
+                  const alignment = (transition?.params?.alignment as 'center' | 'left' | 'right') || 'right';
+
+                  const widthSec = hasTransition ? duration : 0.4;
+                  const widthPx = Math.max(16, widthSec * zoomLevel);
+
+                  let leftSec = intersectionTime - widthSec;
+                  if (alignment === 'center') {
+                    leftSec = intersectionTime - widthSec / 2;
+                  } else if (alignment === 'left') {
+                    leftSec = intersectionTime;
+                  }
+                  const leftPx = leftSec * zoomLevel;
+                  const isSelected = selectedTransitionClipId === clip.id && (!selectedTransitionPosition || selectedTransitionPosition === 'out');
+
+                  targets.push(
+                    <TransitionTarget
+                      key={`trans-out-${clip.id}`}
+                      clipId={clip.id}
+                      position="out"
+                      trackId={track.id}
+                      left={leftPx}
+                      width={widthPx}
+                      hasTransition={hasTransition}
+                      transitionName={transition?.name}
+                      isSelected={isSelected}
+                      zoomLevel={zoomLevel}
+                    />
+                  );
+                }
+              }
+            }
           }
-          const leftPx = leftSec * zoomLevel;
-          
-          const isSelected = selectedTransitionClipId === activeClipId;
-          
-          return (
-            <TransitionTarget
-              key={`trans-${clip.id}`}
-              clipId={activeClipId}
-              position={activePosition}
-              trackId={track.id}
-              left={leftPx}
-              width={widthPx}
-              hasTransition={hasTransition}
-              transitionName={transition?.name}
-              isSelected={isSelected}
-              zoomLevel={zoomLevel}
-            />
-          );
-        }
-        return null;
-      })}
+          return targets;
+        })()}
     </div>
   );
 });

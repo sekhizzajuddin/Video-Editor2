@@ -1148,8 +1148,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // partway through the blend.
       const activeTransition = findActiveTransition(track.clips, ct);
       if (activeTransition) {
-        addIfNew(activeTransition.from, track, activeTransition.from.startTime);
-        addIfNew(activeTransition.to, track, activeTransition.to.startTime);
+        if (activeTransition.from) addIfNew(activeTransition.from, track, activeTransition.from.startTime);
+        if (activeTransition.to) addIfNew(activeTransition.to, track, activeTransition.to.startTime);
       }
     }
     return result;
@@ -2594,24 +2594,24 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       if (transTrack) {
         const active = findActiveTransition(transTrack.clips, ct);
-        if (active && (active.from.id === clipId || active.to.id === clipId)) {
-          const isOutgoing = active.from.id === clipId;
+        if (active && ((active.from && active.from.id === clipId) || (active.to && active.to.id === clipId))) {
+          const isOutgoing = active.from?.id === clipId;
           const other = isOutgoing ? active.to : active.from;
 
           // Special case: a transition placed on a SPLIT of one continuous source
           // (both sides share a mediaId and their media timelines are contiguous).
           // Cross-fading a source against itself causes comb filtering / flanging,
           // so we keep exactly one side audible and hard-mute the other.
-          const sameSource = other.mediaId === fullClip.mediaId;
+          const sameSource = other && other.mediaId === fullClip.mediaId;
           let contiguous = false;
-          if (sameSource) {
+          if (sameSource && active.from && active.to) {
             const boundary = active.to.startTime;
             const fromMediaTime = getMediaTimeForClip(active.from, boundary);
             const toMediaTime = getMediaTimeForClip(active.to, boundary);
             contiguous = Math.abs(fromMediaTime - toMediaTime) < 0.1;
           }
 
-          if (contiguous) {
+          if (contiguous && active.to) {
             // Play whichever side owns the current time; mute the other.
             isTransitionMuted = isOutgoing ? ct >= active.to.startTime : ct < active.to.startTime;
           } else {

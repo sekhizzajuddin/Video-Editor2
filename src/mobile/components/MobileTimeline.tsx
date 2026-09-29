@@ -136,6 +136,7 @@ export function MobileTimeline({
     activeTool,
     setActiveTool,
     selectedTransitionClipId,
+    selectedTransitionPosition,
     selectTransition,
     saveSnapshot,
     mediaLibrary,
@@ -153,6 +154,7 @@ export function MobileTimeline({
       selectedClipIds: s.selectedClipIds,
       selectClip: s.selectClip,
       selectedTransitionClipId: s.selectedTransitionClipId,
+      selectedTransitionPosition: s.selectedTransitionPosition,
       selectTransition: s.selectTransition,
       seek: s.seek,
       setIsScrubbing: s.setIsScrubbing,
@@ -1087,67 +1089,176 @@ export function MobileTimeline({
                   {/* Transitions Layer */}
                   {(() => {
                     const sortedClips = [...(track.clips || [])].sort((a, b) => a.startTime - b.startTime);
-                    return sortedClips.map((clip, idx) => {
-                      if (idx === 0) return null;
-                      const prevClip = sortedClips[idx - 1];
-                      const gap = clip.startTime - (prevClip.startTime + prevClip.duration);
-                      const isAdjacent = gap > -0.06 && gap < 0.06;
-                      const trans = clip.transitionIn || prevClip.transitionOut;
-                      const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
-                      const hasTransition = !!trans;
+                    const targets: React.ReactNode[] = [];
+                    for (let idx = 0; idx < sortedClips.length; idx++) {
+                      const clip = sortedClips[idx];
+                      const prevClip = idx > 0 ? sortedClips[idx - 1] : null;
+                      const nextClip = idx + 1 < sortedClips.length ? sortedClips[idx + 1] : null;
 
-                      if (!isAdjacent && !hasTransition) return null;
-                      
-                      // Hide transition targets if either adjacent clip is selected to allow easier trimming
-                      if (selectedClipId === clip.id || selectedClipId === prevClip.id) return null;
+                      const isJoinedWithPrev = prevClip && Math.abs(clip.startTime - (prevClip.startTime + prevClip.duration)) < 0.06;
+                      const isJoinedWithNext = nextClip && Math.abs(nextClip.startTime - (clip.startTime + clip.duration)) < 0.06;
 
-                      const intersectionTime = clip.startTime;
-                      const centerPos = intersectionTime * zoomLevel;
-                      const transDuration = trans?.duration || 0.5;
-                      const transWidth = Math.max(24, Math.min(60, transDuration * zoomLevel));
-                      const isTransSelected = selectedTransitionClipId === activeClipId;
+                      // 1. START EDGE
+                      if (isJoinedWithPrev) {
+                        // Merged cut
+                        if (selectedClipId !== clip.id && selectedClipId !== prevClip.id) {
+                          const trans = clip.transitionIn || prevClip.transitionOut;
+                          const activeClipId = clip.transitionIn ? clip.id : prevClip.id;
+                          const activePos = clip.transitionIn ? 'in' : 'out';
+                          const hasTransition = !!trans;
+                          const intersectionTime = clip.startTime;
+                          const centerPos = intersectionTime * zoomLevel;
+                          const transDuration = trans?.duration || 0.5;
+                          const transWidth = Math.max(24, Math.min(60, transDuration * zoomLevel));
+                          const isTransSelected = selectedTransitionClipId === activeClipId && (!selectedTransitionPosition || selectedTransitionPosition === activePos);
 
-                      if (hasTransition) {
-                        return (
-                          <div
-                            key={`trans-${prevClip.id}-${clip.id}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              selectTransition(activeClipId);
-                            }}
-                            className={`absolute top-1.5 bottom-1.5 z-30 flex items-center justify-center rounded-md border text-[9px] font-bold text-white shadow-lg cursor-pointer transition-transform active:scale-95 ${
-                              isTransSelected
-                                ? 'bg-purple-600 border-white ring-2 ring-purple-400'
-                                : 'bg-gradient-to-r from-purple-700 to-indigo-700 border-purple-300/80 hover:brightness-110'
-                            }`}
-                            style={{
-                              left: `${centerPos - transWidth / 2}px`,
-                              width: `${transWidth}px`,
-                            }}
-                            title={`Transition: ${trans.name}`}
-                          >
-                            <Sparkles className="h-3 w-3 text-purple-200" />
-                          </div>
-                        );
+                          if (hasTransition) {
+                            targets.push(
+                              <div
+                                key={`trans-merged-${prevClip.id}-${clip.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectTransition(activeClipId, activePos);
+                                }}
+                                className={`absolute top-1.5 bottom-1.5 z-30 flex items-center justify-center rounded-md border text-[9px] font-bold text-white shadow-lg cursor-pointer transition-transform active:scale-95 ${
+                                  isTransSelected
+                                    ? 'bg-purple-600 border-white ring-2 ring-purple-400'
+                                    : 'bg-gradient-to-r from-purple-700 to-indigo-700 border-purple-300/80 hover:brightness-110'
+                                }`}
+                                style={{
+                                  left: `${centerPos - transWidth / 2}px`,
+                                  width: `${transWidth}px`,
+                                }}
+                                title={`Transition: ${trans.name}`}
+                              >
+                                <Sparkles className="h-3 w-3 text-purple-200" />
+                              </div>
+                            );
+                          } else {
+                            targets.push(
+                              <div
+                                key={`trans-slot-merged-${prevClip.id}-${clip.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectTransition(clip.id, 'in');
+                                  if (onOpenTransitions) onOpenTransitions();
+                                }}
+                                className="absolute top-2.5 bottom-2.5 z-20 flex w-4 -ml-2 items-center justify-center rounded-full bg-white/20 hover:bg-purple-500 text-white/80 hover:text-white border border-white/30 backdrop-blur-sm cursor-pointer transition-all active:scale-110"
+                                style={{ left: `${centerPos}px` }}
+                                title="Add transition between clips"
+                              >
+                                <span className="text-[10px] font-black leading-none">+</span>
+                              </div>
+                            );
+                          }
+                        }
+                      } else {
+                        // Standalone In
+                        if (selectedClipId !== clip.id) {
+                          const trans = clip.transitionIn;
+                          const hasTransition = !!trans;
+                          const intersectionTime = clip.startTime;
+                          const centerPos = intersectionTime * zoomLevel;
+                          const transDuration = trans?.duration || 0.5;
+                          const transWidth = Math.max(24, Math.min(60, transDuration * zoomLevel));
+                          const isTransSelected = selectedTransitionClipId === clip.id && (!selectedTransitionPosition || selectedTransitionPosition === 'in');
+
+                          if (hasTransition) {
+                            targets.push(
+                              <div
+                                key={`trans-in-${clip.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectTransition(clip.id, 'in');
+                                }}
+                                className={`absolute top-1.5 bottom-1.5 z-30 flex items-center justify-center rounded-md border text-[9px] font-bold text-white shadow-lg cursor-pointer transition-transform active:scale-95 ${
+                                  isTransSelected
+                                    ? 'bg-purple-600 border-white ring-2 ring-purple-400'
+                                    : 'bg-gradient-to-r from-purple-700 to-indigo-700 border-purple-300/80 hover:brightness-110'
+                                }`}
+                                style={{
+                                  left: `${centerPos}px`,
+                                  width: `${transWidth}px`,
+                                }}
+                                title={`Transition In: ${trans.name}`}
+                              >
+                                <Sparkles className="h-3 w-3 text-purple-200" />
+                              </div>
+                            );
+                          } else {
+                            targets.push(
+                              <div
+                                key={`trans-slot-in-${clip.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectTransition(clip.id, 'in');
+                                  if (onOpenTransitions) onOpenTransitions();
+                                }}
+                                className="absolute top-2.5 bottom-2.5 z-20 flex w-4 -ml-2 items-center justify-center rounded-full bg-white/20 hover:bg-purple-500 text-white/80 hover:text-white border border-white/30 backdrop-blur-sm cursor-pointer transition-all active:scale-110"
+                                style={{ left: `${centerPos}px` }}
+                                title="Add In-Transition"
+                              >
+                                <span className="text-[10px] font-black leading-none">+</span>
+                              </div>
+                            );
+                          }
+                        }
                       }
 
-                      // Adjacent clips without transition
-                      return (
-                        <div
-                          key={`trans-slot-${prevClip.id}-${clip.id}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            selectTransition(clip.id);
-                            if (onOpenTransitions) onOpenTransitions();
-                          }}
-                          className="absolute top-2.5 bottom-2.5 z-20 flex w-4 -ml-2 items-center justify-center rounded-full bg-white/20 hover:bg-purple-500 text-white/80 hover:text-white border border-white/30 backdrop-blur-sm cursor-pointer transition-all active:scale-110"
-                          style={{ left: `${centerPos}px` }}
-                          title="Add transition between clips"
-                        >
-                          <span className="text-[10px] font-black leading-none">+</span>
-                        </div>
-                      );
-                    });
+                      // 2. END EDGE
+                      if (!isJoinedWithNext) {
+                        if (selectedClipId !== clip.id) {
+                          const trans = clip.transitionOut;
+                          const hasTransition = !!trans;
+                          const intersectionTime = clip.startTime + clip.duration;
+                          const centerPos = intersectionTime * zoomLevel;
+                          const transDuration = trans?.duration || 0.5;
+                          const transWidth = Math.max(24, Math.min(60, transDuration * zoomLevel));
+                          const isTransSelected = selectedTransitionClipId === clip.id && (!selectedTransitionPosition || selectedTransitionPosition === 'out');
+
+                          if (hasTransition) {
+                            targets.push(
+                              <div
+                                key={`trans-out-${clip.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectTransition(clip.id, 'out');
+                                }}
+                                className={`absolute top-1.5 bottom-1.5 z-30 flex items-center justify-center rounded-md border text-[9px] font-bold text-white shadow-lg cursor-pointer transition-transform active:scale-95 ${
+                                  isTransSelected
+                                    ? 'bg-purple-600 border-white ring-2 ring-purple-400'
+                                    : 'bg-gradient-to-r from-purple-700 to-indigo-700 border-purple-300/80 hover:brightness-110'
+                                }`}
+                                style={{
+                                  left: `${centerPos - transWidth}px`,
+                                  width: `${transWidth}px`,
+                                }}
+                                title={`Transition Out: ${trans.name}`}
+                              >
+                                <Sparkles className="h-3 w-3 text-purple-200" />
+                              </div>
+                            );
+                          } else {
+                            targets.push(
+                              <div
+                                key={`trans-slot-out-${clip.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectTransition(clip.id, 'out');
+                                  if (onOpenTransitions) onOpenTransitions();
+                                }}
+                                className="absolute top-2.5 bottom-2.5 z-20 flex w-4 -ml-2 items-center justify-center rounded-full bg-white/20 hover:bg-purple-500 text-white/80 hover:text-white border border-white/30 backdrop-blur-sm cursor-pointer transition-all active:scale-110"
+                                style={{ left: `${centerPos}px` }}
+                                title="Add Out-Transition"
+                              >
+                                <span className="text-[10px] font-black leading-none">+</span>
+                              </div>
+                            );
+                          }
+                        }
+                      }
+                    }
+                    return targets;
                   })()}
                 </div>
               );

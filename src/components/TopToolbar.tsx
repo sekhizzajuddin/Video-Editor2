@@ -23,6 +23,8 @@ import {
   User,
   Film,
   Eraser,
+  Volume2,
+  Zap,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -45,6 +47,7 @@ export function TopToolbar() {
     setShowTeleprompter,
     setShowHelpMenu,
     setShowAiSpeedSyncModal,
+    setShowAutoDuckingModal,
     openWatermarkRemover,
     resetProject,
     copyClip,
@@ -70,6 +73,7 @@ export function TopToolbar() {
     setShowTeleprompter: s.setShowTeleprompter,
     setShowHelpMenu: s.setShowHelpMenu,
     setShowAiSpeedSyncModal: s.setShowAiSpeedSyncModal,
+    setShowAutoDuckingModal: s.setShowAutoDuckingModal,
     openWatermarkRemover: s.openWatermarkRemover,
     resetProject: s.resetProject,
     copyClip: s.copyClip,
@@ -596,6 +600,19 @@ export function TopToolbar() {
         >
           <LinkIcon className="w-3.5 h-3.5 text-blue-500" />
           <span className="hidden sm:inline">AI Sync</span>
+        </button>
+
+        {/* AI Auto Ducking Button */}
+        <button
+          onClick={() => setShowAutoDuckingModal(true)}
+          title="AI Auto Audio Ducking (Auto-duck BGM volume during speech)"
+          className="px-2.5 py-1.5 text-xs rounded-md border flex items-center gap-1.5 font-medium transition-all hover:bg-indigo-500/10 hover:border-indigo-500/40 text-indigo-600 dark:text-indigo-400"
+          style={{
+            borderColor: 'var(--theme-border)',
+          }}
+        >
+          <Volume2 className="w-3.5 h-3.5 text-indigo-500" />
+          <span className="hidden sm:inline">AI Ducking</span>
         </button>
 
         {/* Watermark Remover Button */}
