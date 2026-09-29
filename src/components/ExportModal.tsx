@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers, Palette } from 'lucide-react';
+import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers, Palette, Type } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
@@ -50,6 +50,34 @@ export function ExportModal() {
     return list;
   }, [tracks]);
 
+  const textOverlayInfo = useMemo(() => {
+    const usedFonts = new Set<string>();
+    let count = 0;
+    let hasTransparent = false;
+
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        if (clip.disabled) continue;
+        const isText = clip.textSettings || clip.mediaId === 'text-placeholder' || clip.id?.startsWith('clip_subtitle') || clip.id?.startsWith('clip_typo') || track.type === 'text';
+        if (isText) {
+          count++;
+          const fam = clip.textSettings?.fontFamily || (clip as any).fontFamily || 'Inter';
+          usedFonts.add(fam);
+          const bg = clip.textSettings?.backgroundColor;
+          if (!bg || bg === 'transparent') {
+            hasTransparent = true;
+          }
+        }
+      }
+    }
+
+    return {
+      count,
+      hasTransparentText: count > 0 && hasTransparent,
+      usedFonts: Array.from(usedFonts),
+    };
+  }, [tracks]);
+
   const initialResolution = useMemo(() => {
     if (aspectRatio === '9:16') return RESOLUTION_PRESETS['9:16_1080'];
     if (aspectRatio === '1:1') return RESOLUTION_PRESETS['1:1_1080'];
@@ -85,11 +113,11 @@ export function ExportModal() {
         setExportScope('full');
       }
       setBatchStatus(null);
-      if (chromaKeyedClips.length > 0) {
+      if (chromaKeyedClips.length > 0 || textOverlayInfo.hasTransparentText) {
         setTransparentBackground(true);
       }
     }
-  }, [showExportModal, initialResolution, projectName, selectedExportRegionId, exportRegions, chromaKeyedClips]);
+  }, [showExportModal, initialResolution, projectName, selectedExportRegionId, exportRegions, chromaKeyedClips, textOverlayInfo.hasTransparentText]);
 
   const { exportState, startExport, cancelExport, downloadFile } = useExportEngine();
 
@@ -518,6 +546,60 @@ export function ExportModal() {
               ) : (
                 <p className="text-[10px] text-emerald-300/80">
                   Transparent alpha export enabled. WebM VP9 will preserve transparent green-screen cutouts.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Text & Title Overlay Status & Export Linkage */}
+          {textOverlayInfo.count > 0 && (
+            <div className="bg-amber-950/25 border border-amber-500/30 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center bg-amber-500/20 text-amber-400">
+                    <Type className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                      <span>Text &amp; Title Overlays Active ({textOverlayInfo.count} {textOverlayInfo.count === 1 ? 'clip' : 'clips'})</span>
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    </div>
+                    <div className="text-[10px] text-amber-400/80 flex items-center gap-1.5 mt-0.5">
+                      <span>Active fonts:</span>
+                      {textOverlayInfo.usedFonts.slice(0, 4).map((f: string, i: number) => (
+                        <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-black/50 text-[9px] font-mono border border-amber-500/30">
+                          {f}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {format === 'mp4' && textOverlayInfo.hasTransparentText && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormat('webm');
+                      setTransparentBackground(true);
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded shadow transition-colors flex items-center gap-1 shrink-0"
+                  >
+                    <span>Switch to WebM (Alpha)</span>
+                  </button>
+                )}
+              </div>
+              {format === 'mp4' ? (
+                textOverlayInfo.hasTransparentText ? (
+                  <p className="text-[10px] text-amber-300/90 bg-amber-950/30 p-1.5 rounded border border-amber-500/20">
+                    Note: MP4 (H.264) does not support transparent alpha channels (background flattens to solid black). If exporting transparent titles, lower-thirds, or motion graphics for OBS or video editors, switch to <strong>WebM (VP9)</strong> to preserve transparent alpha.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-amber-300/80">
+                    All text fonts, styles, and animation presets will be rendered frame-for-frame into the MP4 stream.
+                  </p>
+                )
+              ) : (
+                <p className="text-[10px] text-emerald-300/80">
+                  Transparent alpha export enabled. WebM VP9 will preserve transparent background behind titles and animated text.
                 </p>
               )}
             </div>

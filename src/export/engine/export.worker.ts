@@ -33,7 +33,7 @@ import { h264CodecCandidates } from '../quality';
 import { preRenderedMaskCache } from '@/utils/aiBackground';
 
 export type WorkerMessageType =
-  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null; mediaBuffers?: Record<string, ArrayBuffer>; aiBackgroundMasks?: Record<string, Array<{ key: number; bitmap: ImageBitmap }>> } }
+  | { type: 'START_EXPORT'; payload: { timeline: any; config: ExportWorkerConfig; audioData?: AudioExportPayload | null; fileHandle?: FileSystemFileHandle | null; mediaBuffers?: Record<string, ArrayBuffer>; aiBackgroundMasks?: Record<string, Array<{ key: number; bitmap: ImageBitmap }>>; fonts?: Array<{ family: string; buffer: ArrayBuffer }> } }
   | { type: 'CANCEL' };
 
 let isExporting = false;
@@ -50,7 +50,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessageType>) => {
         message.payload.audioData,
         message.payload.fileHandle,
         message.payload.mediaBuffers,
-        message.payload.aiBackgroundMasks
+        message.payload.aiBackgroundMasks,
+        message.payload.fonts
       );
       break;
     case 'CANCEL':
@@ -330,11 +331,26 @@ async function handleExport(
   audioData?: AudioExportPayload | null,
   fileHandle?: FileSystemFileHandle | null,
   mediaBuffers?: Record<string, ArrayBuffer>,
-  aiBackgroundMasks?: Record<string, Array<{ key: number; bitmap: ImageBitmap }>>
+  aiBackgroundMasks?: Record<string, Array<{ key: number; bitmap: ImageBitmap }>>,
+  fonts?: Array<{ family: string; buffer: ArrayBuffer }>
 ) {
   console.log('[ExportWorker] STARTING v10 - format-aware export', { width: config.width, height: config.height, fps: config.fps, aspect: config.aspectRatio, format: config.format });
   isExporting = true;
   isCancelled = false;
+
+  // Register fonts transferred from main thread into WorkerGlobalScope
+  if (fonts && fonts.length > 0 && typeof FontFace !== 'undefined' && (self as any).fonts?.add) {
+    for (const f of fonts) {
+      try {
+        const face = new FontFace(f.family, f.buffer);
+        await face.load();
+        (self as any).fonts.add(face);
+        console.log(`[ExportWorker] Registered font for export: ${f.family}`);
+      } catch (err) {
+        console.warn(`[ExportWorker] Failed to load font "${f.family}":`, err);
+      }
+    }
+  }
 
   // Hydrate AI Background Cutout masks transferred from main thread
   if (aiBackgroundMasks) {

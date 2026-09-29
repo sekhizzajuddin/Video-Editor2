@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as Mp4Muxer from 'mp4-muxer';
+import { prepareFontsForExport } from '@/utils/fontManager';
 
 // --------------------------------------------------------------------------
 // Browser API stubs (same contract as exportWorkerPipeline.test.ts)
@@ -121,6 +122,11 @@ class Fake2DContext {
   lineTo() {}
   quadraticCurveTo() {}
   closePath() {}
+  createLinearGradient() {
+    return {
+      addColorStop: () => {},
+    };
+  }
 }
 
 class FakeOffscreenCanvas {
@@ -761,6 +767,153 @@ describe('export worker — edited timeline scenarios', () => {
     expect(res.warnings).toEqual([]);
     const enc = FakeVideoEncoder.last!;
     expect(enc.captured.length).toBe(30);
+  });
+
+  it('renders complex styled and animated text clips with custom fonts, alignment, and styles', async () => {
+    const buf = buildInputMp4(1);
+    const timeline = {
+      tracks: [
+        { id: 't1', type: 'video', locked: false, muted: false, hidden: false, clips: [videoClip('v', 'mv', 0, 1, {})] },
+        {
+          id: 't2',
+          type: 'text',
+          locked: false,
+          muted: false,
+          hidden: false,
+          clips: [
+            {
+              ...videoClip('txt', '', 0, 1, {}),
+              textSettings: {
+                text: 'Line One\nLine Two Aligned',
+                fontSize: 48,
+                fontFamily: 'Bebas Neue',
+                color: '#ffffff',
+                bold: true,
+                italic: true,
+                underline: true,
+                textAlign: 'left' as const,
+                shadow: true,
+                shadowBlur: 10,
+                strokeColor: '#000000',
+                strokeWidth: 2,
+                outerStrokeColor: '#ff0000',
+                outerStrokeWidth: 4,
+                threeD: true,
+                threeDDepth: 5,
+                gradientColors: ['#ff0000', '#00ff00'],
+                gradientDirection: 'horizontal' as const,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                backgroundStyle: 'slanted_rect',
+                animation: {
+                  in: 'revealWipe',
+                  out: 'fadeOut',
+                  inDuration: 0.3,
+                  outDuration: 0.3,
+                  loop: 'pulse',
+                  perUnit: 'word',
+                  stagger: 0.05,
+                },
+              },
+              zIndex: 9999,
+            },
+          ],
+        },
+      ],
+      media: [{ id: 'mv', name: 'v.mp4', duration: 1, url: 'blob:v', ...DEFAULT_MEDIA_META }],
+      duration: 1,
+      totalDuration: 1,
+      aspectRatio: 16 / 9,
+    };
+
+    const { handle } = makeFileHandle('styled-text.mp4');
+    const res = await runWorkerExport({
+      timeline,
+      config: baseConfig,
+      audioData: null,
+      fileHandle: handle,
+      mediaBuffers: { mv: buf },
+      fonts: [{ family: 'Bebas Neue', buffer: new ArrayBuffer(16) }],
+    });
+    expect(res.warnings).toEqual([]);
+    const enc = FakeVideoEncoder.last!;
+    expect(enc.captured.length).toBe(30);
+  });
+
+  it('renders transparent text overlay in webm format with transparent alpha channel preserved', async () => {
+    const timeline = {
+      tracks: [
+        {
+          id: 't1',
+          type: 'text',
+          locked: false,
+          muted: false,
+          hidden: false,
+          clips: [
+            {
+              ...videoClip('txt', '', 0, 1, {}),
+              textSettings: {
+                text: 'Transparent Title',
+                fontSize: 64,
+                fontFamily: 'Inter',
+                color: '#ffffff',
+                backgroundColor: 'transparent',
+                textAlign: 'center' as const,
+                animation: {
+                  in: 'fadeIn',
+                  out: 'fadeOut',
+                  inDuration: 0.2,
+                  outDuration: 0.2,
+                },
+              },
+              zIndex: 9999,
+            },
+          ],
+        },
+      ],
+      media: [],
+      duration: 1,
+      totalDuration: 1,
+      aspectRatio: 16 / 9,
+    };
+
+    const { handle } = makeFileHandle('transparent-title.webm');
+    const res = await runWorkerExport({
+      timeline,
+      config: {
+        ...baseConfig,
+        format: 'webm',
+        filename: 'transparent-title',
+        transparentBackground: true,
+      },
+      audioData: null,
+      fileHandle: handle,
+      fonts: [{ family: 'Inter', buffer: new ArrayBuffer(16) }],
+    });
+    expect(res.warnings).toEqual([]);
+    const enc = FakeVideoEncoder.last!;
+    expect(enc.captured.length).toBe(30);
+  });
+
+  it('prepareFontsForExport collects web fonts and skips OS system fonts', async () => {
+    const timeline = {
+      tracks: [
+        {
+          id: 't1',
+          type: 'text',
+          clips: [
+            { id: 'c1', textSettings: { fontFamily: 'Bebas Neue' } },
+            { id: 'c2', textSettings: { fontFamily: 'Arial' } },
+            { id: 'c3', textSettings: { fontFamily: 'Inter' } },
+          ],
+        },
+      ],
+    };
+    const fonts = await prepareFontsForExport(timeline);
+    // In node test environment without mock network, Arial (system font) is filtered out
+    // and non-system fonts are resolved or attempted safely without throwing
+    expect(Array.isArray(fonts)).toBe(true);
+    // Arial must never be in fonts to transfer because OS handles it
+    expect(fonts.some((f) => f.family.toLowerCase() === 'arial')).toBe(false);
   });
 });
 

@@ -2254,8 +2254,10 @@ export async function renderCanvasEngine({
       if (ts.bold) fontStyle.push('bold');
       
       const fontWeightStyle = fontStyle.join(' ');
-      ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${ts.fontSize || 48}px ${ts.fontFamily || 'sans-serif'}`;
-      ctx.textAlign = 'center';
+      const fontFamily = ts.fontFamily ? `"${ts.fontFamily}", sans-serif` : 'sans-serif';
+      ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${ts.fontSize || 48}px ${fontFamily}`;
+      const textAlign = ts.textAlign || 'center';
+      ctx.textAlign = textAlign;
       ctx.textBaseline = 'middle';
       
       let textToRender = ts.text || 'Text';
@@ -2379,15 +2381,29 @@ export async function renderCanvasEngine({
 
           // Split line into units
           let units: { text: string; x: number; width: number }[] = [];
+          const lineTextWidth = ctx.measureText(lineText).width;
+          let cursorX = 0;
+          if (textAlign === 'left') {
+            cursorX = -(maxLineWidth / 2);
+          } else if (textAlign === 'right') {
+            cursorX = (maxLineWidth / 2) - lineTextWidth;
+          } else {
+            cursorX = -(lineTextWidth / 2);
+          }
+
           if (perUnit === 'character' || letterSpacingProg !== undefined || waveProgress !== undefined || scrambleProgress !== undefined) {
             // Per-character
-            let cursorX = -(ctx.measureText(lineText).width / 2);
             if (letterSpacingProg !== undefined) {
               // Animated letter spacing: compress or expand
-              const totalWidth = ctx.measureText(lineText).width;
               const extraSpacing = (1 - letterSpacingProg) * textHeight * 0.3;
               const totalExtraWidth = extraSpacing * (lineText.length - 1);
-              cursorX = -((totalWidth + totalExtraWidth) / 2);
+              if (textAlign === 'left') {
+                cursorX = -(maxLineWidth / 2);
+              } else if (textAlign === 'right') {
+                cursorX = (maxLineWidth / 2) - (lineTextWidth + totalExtraWidth);
+              } else {
+                cursorX = -((lineTextWidth + totalExtraWidth) / 2);
+              }
               for (let c = 0; c < lineText.length; c++) {
                 const ch = lineText[c];
                 const chW = ctx.measureText(ch).width;
@@ -2405,7 +2421,6 @@ export async function renderCanvasEngine({
           } else {
             // Per-word
             const words = lineText.split(/(\s+)/);
-            let cursorX = -(ctx.measureText(lineText).width / 2);
             for (const word of words) {
               const wW = ctx.measureText(word).width;
               units.push({ text: word, x: cursorX + wW / 2, width: wW });
@@ -2488,11 +2503,49 @@ export async function renderCanvasEngine({
             ctx.restore();
             unitIndex++;
           }
+
+          if (ts.underline) {
+            let lineStartX = -lineTextWidth / 2;
+            let lineEndX = lineTextWidth / 2;
+            if (textAlign === 'left') {
+              lineStartX = -maxLineWidth / 2;
+              lineEndX = -maxLineWidth / 2 + lineTextWidth;
+            } else if (textAlign === 'right') {
+              lineStartX = maxLineWidth / 2 - lineTextWidth;
+              lineEndX = maxLineWidth / 2;
+            }
+            ctx.save();
+            ctx.shadowColor = 'transparent';
+            ctx.beginPath();
+            ctx.strokeStyle = ts.color || '#ffffff';
+            ctx.lineWidth = Math.max(1, textHeight / 15);
+            const uY = lineY + textHeight * 0.45;
+            ctx.moveTo(lineStartX, uY);
+            ctx.lineTo(lineEndX, uY);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
       } else {
         // Standard whole-text rendering (original path)
         for (let i = 0; i < lines.length; i++) {
           const lineY = firstLineY + i * lineHeight;
+          const lineText = lines[i];
+          const lw = ctx.measureText(lineText).width;
+
+          let lineAnchorX = 0;
+          let lineStartX = -lw / 2;
+          let lineEndX = lw / 2;
+
+          if (textAlign === 'left') {
+            lineAnchorX = -maxLineWidth / 2;
+            lineStartX = -maxLineWidth / 2;
+            lineEndX = -maxLineWidth / 2 + lw;
+          } else if (textAlign === 'right') {
+            lineAnchorX = maxLineWidth / 2;
+            lineStartX = maxLineWidth / 2 - lw;
+            lineEndX = maxLineWidth / 2;
+          }
 
           // 3D text extrusion
           if (ts.threeD && ts.threeDDepth) {
@@ -2502,7 +2555,7 @@ export async function renderCanvasEngine({
               ctx.save();
               ctx.translate(d * 1.5, d * 1.5);
               ctx.fillStyle = `rgba(0,0,0,${shade * 0.6})`;
-              ctx.fillText(lines[i], 0, lineY);
+              ctx.fillText(lineText, lineAnchorX, lineY);
               ctx.restore();
             }
           }
@@ -2512,7 +2565,7 @@ export async function renderCanvasEngine({
             ctx.strokeStyle = ts.outerStrokeColor;
             ctx.lineWidth = (ts.outerStrokeWidth || 4) + (ts.strokeWidth || 0);
             ctx.lineJoin = 'round';
-            ctx.strokeText(lines[i], 0, lineY);
+            ctx.strokeText(lineText, lineAnchorX, lineY);
           }
 
           // Inner stroke
@@ -2520,23 +2573,22 @@ export async function renderCanvasEngine({
             ctx.strokeStyle = ts.strokeColor;
             ctx.lineWidth = ts.strokeWidth;
             ctx.lineJoin = 'round';
-            ctx.strokeText(lines[i], 0, lineY);
+            ctx.strokeText(lineText, lineAnchorX, lineY);
           }
 
           // Fill with gradient or solid
           ctx.fillStyle = textFillStyle;
-          ctx.fillText(lines[i], 0, lineY);
+          ctx.fillText(lineText, lineAnchorX, lineY);
 
           if (ts.underline) {
-             const lw = ctx.measureText(lines[i]).width;
              ctx.save();
              ctx.shadowColor = 'transparent';
              ctx.beginPath();
              ctx.strokeStyle = ts.color || '#ffffff';
              ctx.lineWidth = Math.max(1, textHeight / 15);
              const uY = lineY + textHeight * 0.45;
-             ctx.moveTo(-(lw / 2), uY);
-             ctx.lineTo((lw / 2), uY);
+             ctx.moveTo(lineStartX, uY);
+             ctx.lineTo(lineEndX, uY);
              ctx.stroke();
              ctx.restore();
           }

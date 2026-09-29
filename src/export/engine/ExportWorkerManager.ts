@@ -4,6 +4,7 @@ import { AudioMixer } from './AudioMixer';
 import { normalizeVideoBlobForExport } from './VideoNormalizer';
 import { getFileFromDB } from '@/utils/projectPersistence';
 import { ensureClipMasksReady, isEmptyMaskMarker } from '@/utils/aiBackground';
+import { prepareFontsForExport } from '@/utils/fontManager';
 
 export interface ExporterCallbacks {
   onProgress: (progress: number, currentFrame: number, eta: number) => void;
@@ -214,6 +215,20 @@ export class ExportWorkerManager {
       }
     }
 
+    // ── Prepare Text Fonts for Export Worker ─────────────────────────────────
+    // Collect binary font buffers for all fonts referenced in the timeline so
+    // OffscreenCanvas in the Web Worker renders identical fonts to preview.
+    let fontPayloads: Array<{ family: string; buffer: ArrayBuffer }> = [];
+    try {
+      this.checkActive(signal);
+      fontPayloads = await prepareFontsForExport(serializedTimeline);
+      for (const f of fontPayloads) {
+        transferables.push(f.buffer);
+      }
+    } catch (fontErr) {
+      console.warn('[ExportWorkerManager] prepareFontsForExport warning:', fontErr);
+    }
+
     // Install completion/error/cancel handlers BEFORE posting START_EXPORT.
     // This also makes synchronous worker adapters and fast startup errors safe.
     return new Promise<{filename: string, savedViaRuntime: boolean}>((resolve, reject) => {
@@ -265,6 +280,7 @@ export class ExportWorkerManager {
             fileHandle: this.options.fileHandle || null,
             mediaBuffers,
             aiBackgroundMasks: aiMaskPayload,
+            fonts: fontPayloads,
           },
         }, transferables);
         // Blobs/data now belong to the worker. download() only needs the output

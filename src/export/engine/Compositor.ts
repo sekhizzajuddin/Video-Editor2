@@ -1146,6 +1146,14 @@ export class Compositor {
    */
   private computeTextAnimation(clip: any, timestampSeconds?: number) {
     const out = { opacity: 1, scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0, rotation: 0 };
+
+    // Reset per-frame text animation flags to prevent stale state leaking across frames
+    delete clip.__revealWipeProgress;
+    delete clip.__letterSpacingProgress;
+    delete clip.__waveProgress;
+    delete clip.__scrambleProgress;
+    delete clip.__colorCyclePhase;
+
     const anim = clip?.textSettings?.animation;
     if (!anim) return out;
 
@@ -1411,6 +1419,15 @@ export class Compositor {
           clip.__colorCyclePhase = (t * 360) % 360;
           break;
       }
+    } else {
+      // Hold phase: keep intro's completed state so wipe / spacing remains stable
+      if (anim.in === 'revealWipe') {
+        clip.__revealWipeProgress = 1;
+      } else if (anim.in === 'letterSpacing') {
+        clip.__letterSpacingProgress = 1;
+      } else if (anim.in === 'scramble') {
+        clip.__scrambleProgress = 1;
+      }
     }
 
     return out;
@@ -1497,8 +1514,10 @@ export class Compositor {
     if (ts.bold) fontStyle.push('bold');
     const fontWeightStyle = fontStyle.join(' ');
     const fontSize = ts.fontSize || 48;
-    ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${fontSize}px ${ts.fontFamily || 'sans-serif'}`;
-    ctx.textAlign = 'center';
+    const fontFamily = ts.fontFamily ? `"${ts.fontFamily}", sans-serif` : 'sans-serif';
+    ctx.font = `${fontWeightStyle ? fontWeightStyle + ' ' : ''}${fontSize}px ${fontFamily}`;
+    const textAlign = ts.textAlign || 'center';
+    ctx.textAlign = textAlign;
     ctx.textBaseline = 'middle';
 
     const lines = String(text).split('\n');
@@ -1601,15 +1620,29 @@ export class Compositor {
       for (let i = 0; i < lines.length; i++) {
         const lineY = firstLineY + i * lineHeight;
         const lineText = lines[i];
+        const lineTextWidth = ctx.measureText(lineText).width;
+
+        let cursorX = 0;
+        if (textAlign === 'left') {
+          cursorX = -(maxLineWidth / 2);
+        } else if (textAlign === 'right') {
+          cursorX = (maxLineWidth / 2) - lineTextWidth;
+        } else {
+          cursorX = -(lineTextWidth / 2);
+        }
 
         let units: { text: string; x: number; width: number }[] = [];
         if (perUnit === 'character' || letterSpacingProg !== undefined || waveProgress !== undefined || scrambleProgress !== undefined) {
-          let cursorX = -(ctx.measureText(lineText).width / 2);
           if (letterSpacingProg !== undefined) {
-            const totalWidth = ctx.measureText(lineText).width;
             const extraSpacing = (1 - letterSpacingProg) * fontSize * 0.3;
             const totalExtraWidth = extraSpacing * (lineText.length - 1);
-            cursorX = -((totalWidth + totalExtraWidth) / 2);
+            if (textAlign === 'left') {
+              cursorX = -(maxLineWidth / 2);
+            } else if (textAlign === 'right') {
+              cursorX = (maxLineWidth / 2) - (lineTextWidth + totalExtraWidth);
+            } else {
+              cursorX = -((lineTextWidth + totalExtraWidth) / 2);
+            }
             for (let c = 0; c < lineText.length; c++) {
               const ch = lineText[c];
               const chW = ctx.measureText(ch).width;
@@ -1626,7 +1659,6 @@ export class Compositor {
           }
         } else {
           const words = lineText.split(/(\s+)/);
-          let cursorX = -(ctx.measureText(lineText).width / 2);
           for (const word of words) {
             const wW = ctx.measureText(word).width;
             units.push({ text: word, x: cursorX + wW / 2, width: wW });
@@ -1700,10 +1732,47 @@ export class Compositor {
           ctx.restore();
           unitIndex++;
         }
+
+        if (ts.underline) {
+          let lineStartX = -lineTextWidth / 2;
+          let lineEndX = lineTextWidth / 2;
+          if (textAlign === 'left') {
+            lineStartX = -maxLineWidth / 2;
+            lineEndX = -maxLineWidth / 2 + lineTextWidth;
+          } else if (textAlign === 'right') {
+            lineStartX = maxLineWidth / 2 - lineTextWidth;
+            lineEndX = maxLineWidth / 2;
+          }
+          ctx.save();
+          ctx.shadowColor = 'transparent';
+          ctx.beginPath();
+          ctx.strokeStyle = ts.color || '#ffffff';
+          ctx.lineWidth = Math.max(1, fontSize / 15);
+          ctx.moveTo(lineStartX, lineY + fontSize * 0.45);
+          ctx.lineTo(lineEndX, lineY + fontSize * 0.45);
+          ctx.stroke();
+          ctx.restore();
+        }
       }
     } else {
       for (let i = 0; i < lines.length; i++) {
         const lineY = firstLineY + i * lineHeight;
+        const lineText = lines[i];
+        const lw = ctx.measureText(lineText).width;
+
+        let lineAnchorX = 0;
+        let lineStartX = -lw / 2;
+        let lineEndX = lw / 2;
+
+        if (textAlign === 'left') {
+          lineAnchorX = -maxLineWidth / 2;
+          lineStartX = -maxLineWidth / 2;
+          lineEndX = -maxLineWidth / 2 + lw;
+        } else if (textAlign === 'right') {
+          lineAnchorX = maxLineWidth / 2;
+          lineStartX = maxLineWidth / 2 - lw;
+          lineEndX = maxLineWidth / 2;
+        }
 
         if (ts.threeD && ts.threeDDepth) {
           const depth = ts.threeDDepth || 3;
@@ -1712,7 +1781,7 @@ export class Compositor {
             ctx.save();
             ctx.translate(d * 1.5, d * 1.5);
             ctx.fillStyle = `rgba(0,0,0,${shade * 0.6})`;
-            ctx.fillText(lines[i], 0, lineY);
+            ctx.fillText(lineText, lineAnchorX, lineY);
             ctx.restore();
           }
         }
@@ -1721,28 +1790,27 @@ export class Compositor {
           ctx.strokeStyle = ts.outerStrokeColor;
           ctx.lineWidth = (ts.outerStrokeWidth || 4) + (ts.strokeWidth || 0);
           ctx.lineJoin = 'round';
-          ctx.strokeText(lines[i], 0, lineY);
+          ctx.strokeText(lineText, lineAnchorX, lineY);
         }
 
         if (ts.strokeColor && ts.strokeWidth) {
           ctx.strokeStyle = ts.strokeColor;
           ctx.lineWidth = ts.strokeWidth;
           ctx.lineJoin = 'round';
-          ctx.strokeText(lines[i], 0, lineY);
+          ctx.strokeText(lineText, lineAnchorX, lineY);
         }
 
         ctx.fillStyle = textFillStyle;
-        ctx.fillText(lines[i], 0, lineY);
+        ctx.fillText(lineText, lineAnchorX, lineY);
 
         if (ts.underline) {
-          const lw = ctx.measureText(lines[i]).width;
           ctx.save();
           ctx.shadowColor = 'transparent';
           ctx.beginPath();
           ctx.strokeStyle = ts.color || '#ffffff';
           ctx.lineWidth = Math.max(1, fontSize / 15);
-          ctx.moveTo(-lw / 2, lineY + fontSize * 0.45);
-          ctx.lineTo(lw / 2, lineY + fontSize * 0.45);
+          ctx.moveTo(lineStartX, lineY + fontSize * 0.45);
+          ctx.lineTo(lineEndX, lineY + fontSize * 0.45);
           ctx.stroke();
           ctx.restore();
         }
