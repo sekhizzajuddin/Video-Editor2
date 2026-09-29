@@ -125,7 +125,7 @@ export class ExportWorkerManager {
       const startAt = typeof this.options.config.startAt === 'number' ? Math.max(0, this.options.config.startAt) : 0;
       const endAt = typeof this.options.config.endAt === 'number' && this.options.config.endAt > startAt
         ? this.options.config.endAt
-        : (serializedTimeline.duration || 10);
+        : (serializedTimeline.totalDuration || serializedTimeline.duration || 10);
       const rangeDuration = Math.max(0.1, endAt - startAt);
 
       const audioMixer = new AudioMixer();

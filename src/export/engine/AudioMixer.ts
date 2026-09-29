@@ -168,14 +168,23 @@ export class AudioMixer {
         return null; // No audio to mix
       }
 
+      const decodedAudioCache = new Map<string, AudioBuffer>();
+
       for (const clip of audioClips) {
         // Yield to browser event loop between clips to keep UI responsive and prevent tab watchdog crash
         await new Promise((resolve) => setTimeout(resolve, 0));
         try {
-          const arrayBuffer = clip._blob instanceof Blob
-            ? await clip._blob.arrayBuffer()
-            : await (await fetch(clip._url)).arrayBuffer();
-          const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+          const cacheKey = clip.mediaId || clip._url || (clip._blob ? (clip as any).id : null);
+          let audioBuffer: AudioBuffer | undefined = cacheKey ? decodedAudioCache.get(cacheKey) : undefined;
+          if (!audioBuffer) {
+            const arrayBuffer = clip._blob instanceof Blob
+              ? await clip._blob.arrayBuffer()
+              : await (await fetch(clip._url)).arrayBuffer();
+            audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+            if (cacheKey && audioBuffer) {
+              decodedAudioCache.set(cacheKey, audioBuffer);
+            }
+          }
 
           // Apply the effective vocal pitch (manual Pitch Shift + Vocal Tone +
           // auto vocal-match) with a phase vocoder — phase-coherent, so the
@@ -270,15 +279,16 @@ export class AudioMixer {
 
             // Schedule a BufferSource for each speed segment
             for (const seg of speedSegments) {
+              // Yield to event loop between WSOLA time-stretch processing to prevent UI lockup
+              await new Promise((resolve) => setTimeout(resolve, 0));
               try {
-                const segTimelineStart = clipStart + seg.startOffset;
+                const segTimelineStart = Math.max(0, clipStart + seg.startOffset);
                 const segTimelineDur = Math.max(0.001, seg.endOffset - seg.startOffset);
-                const segSourceOffset = seg.sourceStart;
-                const segSourceDuration = Math.max(0.001, seg.sourceEnd - seg.sourceStart);
+                const segSourceOffset = Math.max(0, seg.sourceStart);
 
-                // Skip segments with invalid source ranges
-                if (segSourceOffset < 0 || segSourceOffset >= (buffer as AudioBuffer).duration) continue;
-                const clampedSourceEnd = Math.min(seg.sourceEnd, (buffer as AudioBuffer).duration);
+                const bufDur = (buffer as AudioBuffer).duration || 0;
+                if (bufDur <= 0 || segSourceOffset >= bufDur) continue;
+                const clampedSourceEnd = Math.min(seg.sourceEnd, bufDur);
                 const clampedSourceDur = Math.max(0.001, clampedSourceEnd - segSourceOffset);
 
                 const segSource = ctx.createBufferSource();
@@ -292,20 +302,18 @@ export class AudioMixer {
                     segSourceOffset,
                     segSourceOffset + clampedSourceDur
                   );
-                  segSource.buffer = stretched as AudioBuffer;
-                  segSource.playbackRate.value = 1.0;
-                  segSource.connect(vocalF1);
-                  // Clamp play duration to actual stretched buffer length to prevent
-                  // BufferSourceNode.start() from throwing when floating-point rounding
-                  // makes the stretched buffer slightly shorter than segTimelineDur
-                  const maxDur = (stretched as AudioBuffer).duration;
-                  segSource.start(segTimelineStart, 0, Math.min(segTimelineDur, maxDur));
+                  if (stretched && (stretched as AudioBuffer).duration > 0) {
+                    segSource.buffer = stretched as AudioBuffer;
+                    segSource.playbackRate.value = 1.0;
+                    segSource.connect(vocalF1);
+                    const maxDur = (stretched as AudioBuffer).duration;
+                    segSource.start(segTimelineStart, 0, Math.min(segTimelineDur, maxDur));
+                  }
                 } else {
                   // Native resampling (alters pitch along with speed)
                   segSource.buffer = buffer as AudioBuffer;
-                  segSource.playbackRate.value = seg.speed;
+                  segSource.playbackRate.value = Math.max(0.01, seg.speed);
                   segSource.connect(vocalF1);
-                  const bufDur = (buffer as AudioBuffer).duration;
                   const maxSafeDur = Math.max(0.001, bufDur - segSourceOffset - 0.0001);
                   const safeDur = Math.min(clampedSourceDur, maxSafeDur);
                   segSource.start(segTimelineStart, segSourceOffset, safeDur);
@@ -375,27 +383,33 @@ export class AudioMixer {
 
         await new Promise((resolve) => setTimeout(resolve, 0));
         try {
-          let audioBuffer: AudioBuffer | null = null;
-          if (ts.soundEffect.startsWith('media:')) {
-            const mediaId = ts.soundEffect.replace(/^media:/, '');
-            let blob = ts.customBlob;
-            if (!blob) {
-              try {
-                blob = (await getFileFromDB(mediaId)) || undefined;
-              } catch {}
-            }
-            if (blob) {
+          const cacheKey = ts.soundEffect.startsWith('media:') ? ts.soundEffect : null;
+          let audioBuffer: AudioBuffer | null = cacheKey ? (decodedAudioCache.get(cacheKey) || null) : null;
+          if (!audioBuffer) {
+            if (ts.soundEffect.startsWith('media:')) {
+              const mediaId = ts.soundEffect.replace(/^media:/, '');
+              let blob = ts.customBlob;
+              if (!blob) {
+                try {
+                  blob = (await getFileFromDB(mediaId)) || undefined;
+                } catch {}
+              }
+              if (blob) {
+                const arrayBuffer = await blob.arrayBuffer();
+                audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+              } else if (ts.customUrl) {
+                const resp = await fetch(ts.customUrl);
+                const arrayBuffer = await resp.arrayBuffer();
+                audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+              }
+            } else {
+              const blob = await synthesizeTransitionSoundWav(ts.soundEffect, ts.duration);
               const arrayBuffer = await blob.arrayBuffer();
               audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-            } else if (ts.customUrl) {
-              const resp = await fetch(ts.customUrl);
-              const arrayBuffer = await resp.arrayBuffer();
-              audioBuffer = await ctx.decodeAudioData(arrayBuffer);
             }
-          } else {
-            const blob = await synthesizeTransitionSoundWav(ts.soundEffect, ts.duration);
-            const arrayBuffer = await blob.arrayBuffer();
-            audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+            if (cacheKey && audioBuffer) {
+              decodedAudioCache.set(cacheKey, audioBuffer);
+            }
           }
 
           if (audioBuffer) {

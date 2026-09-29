@@ -176,6 +176,17 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
 
   const [r, g, b] = useMemo(() => parseRGB(color ?? 'rgba(255,255,255,1)'), [color]);
 
+  // Free canvas GPU surface only upon true unmount (virtualization)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    return () => {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -243,14 +254,6 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
       ? `rgba(${r},${g},${b},0.45)`
       : `rgba(${r},${g},${b},0.15)`;
     ctx.fillRect(0, cy - 0.5, W, 1);
-
-    return () => {
-      // Free canvas GPU surface immediately when unmounted (virtualization)
-      if (canvas) {
-        canvas.width = 0;
-        canvas.height = 0;
-      }
-    };
   }, [peaks, width, height, small, r, g, b]);
 
   return (

@@ -36,6 +36,7 @@ import {
 } from '@/utils/speedRamp';
 import { invalidateFrameStripCache } from '@/timeline/components/FrameStripOverlay';
 import { saveFileToDB, deleteFileFromDB, saveProjectToDB, loadProjectFromDB, clearProjectDB, saveTemplatesToDB, getTemplatesFromDB, resolveMediaItemFromDB, setActiveProject, saveProjectMeta } from '@/utils/projectPersistence';
+import { saveWaveformToDisk } from '@/utils/diskMediaCache';
 import { getAnimatedValue } from '@/utils/keyframes';
 import { serializeProjectData, saveProjectToHandle } from '@/utils/fileSystemAccess';
 import { cleanupClipBackgroundState } from '@/utils/aiBackground';
@@ -1482,6 +1483,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
         m.id === mediaId ? { ...m, waveformPeaks: peaks } : m
       ),
     }));
+    // Persist full peaks to Temp SSD Storage (IndexedDB) under mediaId so waveforms survive project autosave/reload
+    if (peaks && peaks.length > 0) {
+      saveWaveformToDisk(mediaId, peaks).catch(() => {});
+    }
   },
 
   refreshClipPreviews: async (clipId) => {
@@ -1533,7 +1538,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       // Re-extract audio waveform for video or audio
       if (media.type === 'audio' || media.type === 'video') {
         try {
-          waveformPeaks = await extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration });
+          waveformPeaks = await extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration, mediaId: media.id });
         } catch (e) {
           console.warn('Waveform extraction failed:', e);
         }

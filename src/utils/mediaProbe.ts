@@ -257,6 +257,9 @@ export async function extractWaveformFromUrl(
 
   // Save full-fidelity waveform to Temp SSD Storage (IndexedDB)
   saveWaveformToDisk(cacheKey, normalizedPeaks).catch(() => {});
+  if (opts?.mediaId && opts.mediaId !== url) {
+    saveWaveformToDisk(opts.mediaId, normalizedPeaks).catch(() => {});
+  }
 
   // For RAM and in-memory Zustand store: cap to 4,000 samples LOD
   // (4,000 samples spans a 4K screen at 1 sample/pixel, using only ~32 KB per clip instead of 15 MB)

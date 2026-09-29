@@ -46,10 +46,10 @@ function openDiskCacheDB(): Promise<IDBDatabase | null> {
   return dbPromise;
 }
 
-// Bounded in-memory hot cache (LRU, max 4 items) for immediate UI access
+// Bounded in-memory hot cache (LRU, max 50 items) for immediate UI access
 const hotWaveforms = new Map<string, number[]>();
 const hotFrameStrips = new Map<string, string[]>();
-const MAX_HOT_ITEMS = 4;
+const MAX_HOT_ITEMS = 50;
 
 function touchLru<K, V>(map: Map<K, V>, key: K, val: V, maxItems: number) {
   map.delete(key);

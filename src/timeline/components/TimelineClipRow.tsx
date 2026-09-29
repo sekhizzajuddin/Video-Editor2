@@ -33,7 +33,7 @@ const EMPTY_PIP_ARRAY: PipWindow[] = [];
 
 const VIDEO_WAVEFORM_HEIGHT = 18;
 const inFlightWaveformProbes = new Set<string>();
-const failedWaveformProbes = new Set<string>();
+const failedWaveformProbes = new Map<string, { count: number; lastFailed: number }>();
 
 // Listen for refresh events to clear failed probe cache
 if (typeof window !== 'undefined') {
@@ -155,8 +155,11 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   );
   const left = Number.isFinite(clip.startTime) && Number.isFinite(zoomLevel) ? clip.startTime * zoomLevel : 0;
   const clipHeight = (trackType === 'text' || trackType === 'fx' ? THIN_TRACK_HEIGHT : DEFAULT_TRACK_HEIGHT) - 8;
+  const failedProbeInfo = failedWaveformProbes.get(media.id);
   const isVideoWithAudio =
-    media.type === 'video' && hasAudiblePeaks(media.waveformPeaks);
+    media.type === 'video' &&
+    (hasAudiblePeaks(media.waveformPeaks) ||
+      (media.waveformPeaks === undefined && (failedProbeInfo?.count || 0) < 3));
   const mainVisualHeight = isVideoWithAudio ? Math.max(16, clipHeight - VIDEO_WAVEFORM_HEIGHT) : clipHeight;
 
   // Auto-probe waveform for video and audio clips that have not yet extracted waveform peaks,
@@ -167,36 +170,44 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     media.url &&
     !media.url.startsWith('PENDING_') &&
     !inFlightWaveformProbes.has(media.id) &&
-    !failedWaveformProbes.has(media.id);
+    ((failedProbeInfo?.count || 0) < 3 || Date.now() - (failedProbeInfo?.lastFailed || 0) > 15000);
 
   useEffect(() => {
     if (!needsWaveformProbe || !isVirtualVisible) return;
     inFlightWaveformProbes.add(media.id);
     import('@/utils/mediaProbe')
-      .then(({ extractWaveformFromUrl }) => extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration }))
+      .then(({ extractWaveformFromUrl }) =>
+        extractWaveformFromUrl(media.url, undefined, { hintDuration: media.duration, mediaId: media.id })
+      )
       .then((peaks) => {
         if (peaks && peaks.length > 0 && peaks.some((p) => p > 0.005)) {
           (useEditorStore.getState() as any).setMediaWaveformPeaks?.(media.id, peaks);
+          failedWaveformProbes.delete(media.id);
         } else {
-          // Video has no audible audio — don't retry
-          failedWaveformProbes.add(media.id);
+          // Video has no audible audio — record failure count
+          const prev = failedWaveformProbes.get(media.id)?.count || 0;
+          failedWaveformProbes.set(media.id, { count: prev + 1, lastFailed: Date.now() });
         }
       })
       .catch(() => {
-        // Video may not have audio track — mark as failed to prevent infinite retries
-        failedWaveformProbes.add(media.id);
+        // Video may not have audio track — record failure count
+        const prev = failedWaveformProbes.get(media.id)?.count || 0;
+        failedWaveformProbes.set(media.id, { count: prev + 1, lastFailed: Date.now() });
       })
       .finally(() => {
         inFlightWaveformProbes.delete(media.id);
       });
-  }, [needsWaveformProbe, media.id, media.url, media.duration]);
+  }, [needsWaveformProbe, isVirtualVisible, media.id, media.url, media.duration]);
 
   const clipAnims = clip.animations?.['transform.x'] || [];
   const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
 
-  const dragHandlersRef = useRef<{move: (e: MouseEvent) => void, up: () => void} | null>(null);
+  const dragHandlersRef = useRef<{move: (e: any) => void, up: () => void, cancelRaf?: () => void} | null>(null);
 
-  const selectedSpeedFrame = useEditorStore((s) => s.selectedSpeedFrame);
+  // Scoped selector: only re-render this clip when its own speed frame is selected/deselected
+  const selectedSpeedFrameId = useEditorStore(
+    (s) => (s.selectedSpeedFrame?.clipId === clip.id ? s.selectedSpeedFrame.frameId : null)
+  );
   const addSpeedFrame = useEditorStore((s) => s.addSpeedFrame);
   const selectSpeedFrame = useEditorStore((s) => s.selectSpeedFrame);
   const updateSpeedFrameLine = useEditorStore((s) => s.updateSpeedFrameLine);
@@ -217,21 +228,42 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
     const startX = e.clientX;
     const startOffset = currentOffset;
+    let rafId: number | null = null;
+    let latestOffset = currentOffset;
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaX = moveEvent.clientX - startX;
-      const newOffset = startOffset + deltaX / zoomLevel;
-      updateSpeedFrameLine(clip.id, frameId, newOffset);
+      latestOffset = startOffset + deltaX / zoomLevel;
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          updateSpeedFrameLine(clip.id, frameId, latestOffset);
+        });
+      }
     };
 
     const onPointerUp = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        updateSpeedFrameLine(clip.id, frameId, latestOffset);
+      }
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       dragHandlersRef.current = null;
       commitSpeedFrameDrag();
     };
 
-    dragHandlersRef.current = { move: onPointerMove as any, up: onPointerUp as any };
+    dragHandlersRef.current = {
+      move: onPointerMove as any,
+      up: onPointerUp as any,
+      cancelRaf: () => {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+      },
+    };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
   };
@@ -244,21 +276,42 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 
     const startX = e.clientX;
     const startOffset = currentOffset;
+    let rafId: number | null = null;
+    let latestOffset = currentOffset;
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       const deltaX = moveEvent.clientX - startX;
-      const newOffset = startOffset + deltaX / zoomLevel;
-      updateSpeedFrameScrew(clip.id, frameId, newOffset);
+      latestOffset = startOffset + deltaX / zoomLevel;
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          updateSpeedFrameScrew(clip.id, frameId, latestOffset);
+        });
+      }
     };
 
     const onPointerUp = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        updateSpeedFrameScrew(clip.id, frameId, latestOffset);
+      }
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       dragHandlersRef.current = null;
       commitSpeedFrameDrag();
     };
 
-    dragHandlersRef.current = { move: onPointerMove as any, up: onPointerUp as any };
+    dragHandlersRef.current = {
+      move: onPointerMove as any,
+      up: onPointerUp as any,
+      cancelRaf: () => {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+      },
+    };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
   };
@@ -268,6 +321,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     return () => {
       const h = dragHandlersRef.current;
       if (h) {
+        h.cancelRaf?.();
         window.removeEventListener('pointermove', h.move);
         window.removeEventListener('pointerup', h.up);
         // P1 FIX: keyframe drags attach MOUSE events (mousemove/mouseup) while
@@ -619,8 +673,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
         <>
           {/* Speed Frame lines and diamond heads */}
           {clip.speedFrames.map((sf) => {
-            const isFrameSelected =
-              selectedSpeedFrame?.clipId === clip.id && selectedSpeedFrame?.frameId === sf.id;
+            const isFrameSelected = selectedSpeedFrameId === sf.id;
             const posX = sf.timelineOffset * zoomLevel;
 
             return (

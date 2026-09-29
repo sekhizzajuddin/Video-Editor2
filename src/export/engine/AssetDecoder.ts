@@ -152,12 +152,13 @@ export class AssetDecoder {
 
     // A media item may be reused later with a source-time reset or a forward cut/jump.
     // A backwards request (transition overlap) or a forward jump across cut/deleted
-    // segments (> 0.5s) must NOT walk sequential frames — restart the iterator
-    // at the requested time instead.
+    // segments (> 2.5s) must NOT walk sequential frames — restart the iterator
+    // at the requested time instead. Higher threshold (2.5s) prevents demuxer thrashing
+    // and decoder crashes during high-speed frames (up to 75x at 30fps).
     if (
       this.lastRequestedTime >= 0 &&
       (timestampSeconds + 0.0005 < this.lastRequestedTime ||
-       timestampSeconds - this.lastRequestedTime > 0.5)
+       timestampSeconds - this.lastRequestedTime > 2.5)
     ) {
       this.restartIteratorAt(timestampSeconds);
     }
