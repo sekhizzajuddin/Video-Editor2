@@ -3,6 +3,9 @@ import {
   buildSpeedFramesFromAnchors,
   buildAnchorsFromWordTimings,
   detectTtsExtraSentences,
+  detectSubCharacterInterruption,
+  isVocalExpression,
+  syncVideoClipWithTts,
   GEMINI_SPEED_SYNC_MODELS,
   GROQ_WHISPER_MODELS,
   GROQ_REASONING_MODELS,
@@ -945,6 +948,238 @@ describe('aiSpeedSync', () => {
         globalThis.fetch = originalFetch;
         useEditorStore.getState().updateSettings({ groqApiKey: '' });
       }
+    });
+  });
+
+  describe('Vocal Expression Filtering', () => {
+    it('identifies non-speech vocal expressions, laughter, humming, and bracketed tags', () => {
+      expect(isVocalExpression('haha')).toBe(true);
+      expect(isVocalExpression('hahaha')).toBe(true);
+      expect(isVocalExpression('hehe')).toBe(true);
+      expect(isVocalExpression('hmm')).toBe(true);
+      expect(isVocalExpression('hmmm')).toBe(true);
+      expect(isVocalExpression('humm')).toBe(true);
+      expect(isVocalExpression('uh')).toBe(true);
+      expect(isVocalExpression('um')).toBe(true);
+      expect(isVocalExpression('erm')).toBe(true);
+      expect(isVocalExpression('[laughs]')).toBe(true);
+      expect(isVocalExpression('(laughter)')).toBe(true);
+      expect(isVocalExpression('*chuckles*')).toBe(true);
+      expect(isVocalExpression('[music]')).toBe(true);
+      expect(isVocalExpression('[applause]')).toBe(true);
+      expect(isVocalExpression('sigh')).toBe(true);
+      expect(isVocalExpression('gasp')).toBe(true);
+
+      // Real dialogue words must NOT be flagged as vocal expressions
+      expect(isVocalExpression('hello')).toBe(false);
+      expect(isVocalExpression('today')).toBe(false);
+      expect(isVocalExpression('human')).toBe(false);
+      expect(isVocalExpression('home')).toBe(false);
+      expect(isVocalExpression('great')).toBe(false);
+      expect(isVocalExpression('video')).toBe(false);
+    });
+
+    it('buildAnchorsFromWordTimings ignores vocal expressions and aligns speech accurately', () => {
+      const videoWords = [
+        { word: 'Hello', time: 0.2, endTime: 0.5 },
+        { word: 'everyone', time: 0.6, endTime: 1.0 },
+        { word: 'today', time: 1.2, endTime: 1.6 },
+        { word: 'we', time: 1.7, endTime: 1.9 },
+        { word: 'explore', time: 2.0, endTime: 2.5 },
+      ];
+
+      // TTS audio contains laughs, humming, and filler expressions
+      const ttsWords = [
+        { word: 'Hello', time: 0.1, endTime: 0.4 },
+        { word: 'haha', time: 0.5, endTime: 0.8 },
+        { word: '[laughter]', time: 0.9, endTime: 1.2 },
+        { word: 'everyone', time: 1.3, endTime: 1.7 },
+        { word: 'hmm', time: 1.8, endTime: 2.0 },
+        { word: 'today', time: 2.1, endTime: 2.4 },
+        { word: 'we', time: 2.5, endTime: 2.7 },
+        { word: 'explore', time: 2.8, endTime: 3.2 },
+      ];
+
+      const anchors = buildAnchorsFromWordTimings(videoWords, ttsWords, 4.0, 4.0);
+
+      // The vocal expressions must be ignored and the 5 real words matched
+      const matchedAnchors = anchors.filter((a) => a.matched);
+      expect(matchedAnchors.length).toBe(5);
+      expect(matchedAnchors[0].phrase).toBe('Hello');
+      expect(matchedAnchors[1].phrase).toBe('everyone');
+      expect(matchedAnchors[2].phrase).toBe('today');
+      expect(matchedAnchors[3].phrase).toBe('we');
+      expect(matchedAnchors[4].phrase).toBe('explore');
+    });
+  });
+
+  describe('Sub-Character Interruption Detection & Shift', () => {
+    it('detects a sub-character delivering extra dialogue between two known sentences of main character', () => {
+      // Main character sentence 1: "Welcome back to the channel"
+      // Sub-character: "Yes that is great tell us more" (7 words)
+      // Main character sentence 2: "Today we will see the new update"
+      const videoWords = [
+        // Sentence 1 (Main Character)
+        { word: 'Welcome', time: 0.2, endTime: 0.6 },
+        { word: 'back', time: 0.7, endTime: 1.0 },
+        { word: 'to', time: 1.05, endTime: 1.2 },
+        { word: 'the', time: 1.25, endTime: 1.4 },
+        { word: 'channel', time: 1.45, endTime: 1.9 },
+        // Sub-Character interruption in video
+        { word: 'Yes', time: 2.4, endTime: 2.7 },
+        { word: 'that', time: 2.75, endTime: 3.0 },
+        { word: 'is', time: 3.05, endTime: 3.2 },
+        { word: 'great', time: 3.25, endTime: 3.6 },
+        { word: 'tell', time: 3.7, endTime: 4.0 },
+        { word: 'us', time: 4.05, endTime: 4.2 },
+        { word: 'more', time: 4.25, endTime: 4.6 },
+        // Sentence 2 (Main Character resumes)
+        { word: 'Today', time: 5.2, endTime: 5.6 },
+        { word: 'we', time: 5.65, endTime: 5.8 },
+        { word: 'will', time: 5.85, endTime: 6.0 },
+        { word: 'see', time: 6.05, endTime: 6.3 },
+        { word: 'the', time: 6.35, endTime: 6.5 },
+        { word: 'new', time: 6.55, endTime: 6.8 },
+        { word: 'update', time: 6.85, endTime: 7.3 },
+      ];
+
+      // TTS Voiceover (Main Character ONLY - no sub-character lines)
+      const ttsWords = [
+        // Sentence 1
+        { word: 'Welcome', time: 0.2, endTime: 0.6 },
+        { word: 'back', time: 0.65, endTime: 0.95 },
+        { word: 'to', time: 1.0, endTime: 1.15 },
+        { word: 'the', time: 1.2, endTime: 1.35 },
+        { word: 'channel', time: 1.4, endTime: 1.8 },
+        // Sentence 2 directly follows
+        { word: 'Today', time: 2.2, endTime: 2.6 },
+        { word: 'we', time: 2.65, endTime: 2.8 },
+        { word: 'will', time: 2.85, endTime: 3.0 },
+        { word: 'see', time: 3.05, endTime: 3.3 },
+        { word: 'the', time: 3.35, endTime: 3.5 },
+        { word: 'new', time: 3.55, endTime: 3.8 },
+        { word: 'update', time: 3.85, endTime: 4.3 },
+      ];
+
+      const interruption = detectSubCharacterInterruption(videoWords, ttsWords, 8.0, 5.0);
+      expect(interruption).not.toBeNull();
+      expect(interruption?.detected).toBe(true);
+      expect(interruption?.subCharacterWords).toEqual(['Yes', 'that', 'is', 'great', 'tell', 'us', 'more']);
+      expect(interruption?.ttsSplitTime).toBeCloseTo(2.0, 1);
+      expect(interruption?.subCharacterVideoEnd).toBeCloseTo(5.2, 1);
+    });
+
+    it('syncVideoClipWithTts splits TTS, shifts second segment, and paces video cleanly', async () => {
+      const store = useEditorStore.getState();
+
+      const videoClip: TimelineClip = {
+        id: 'v_dialogue_1',
+        mediaId: 'm_video_1',
+        trackId: 't1',
+        startTime: 0,
+        duration: 8.0,
+        trimStart: 0,
+        trimEnd: 0,
+        speed: 1.0,
+        opacity: 1,
+        transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+        effects: [],
+      };
+
+      const ttsClip: TimelineClip = {
+        id: 'a_tts_1',
+        mediaId: 'm_tts_1',
+        trackId: 't2',
+        startTime: 0,
+        duration: 5.0,
+        trimStart: 0,
+        trimEnd: 0,
+        speed: 1.0,
+        opacity: 1,
+        transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+        effects: [],
+      };
+
+      store.tracks = [
+        { id: 't1', name: 'Video 1', type: 'video', clips: [videoClip], muted: false, locked: false, volume: 100 },
+        { id: 't2', name: 'Audio 1', type: 'audio', clips: [ttsClip], muted: false, locked: false, volume: 100 },
+      ];
+      store.mediaLibrary = [
+        { id: 'm_video_1', name: 'Scene.mp4', url: 'blob:video', type: 'video', duration: 8.0 },
+        { id: 'm_tts_1', name: 'TTS.wav', url: 'blob:tts', type: 'audio', duration: 5.0 },
+      ];
+
+      const mockExtractAudio = vi.fn().mockImplementation(async (clip: TimelineClip) => {
+        return {
+          wavBlob: new Blob(['audio'], { type: 'audio/wav' }),
+          duration: clip.duration,
+          hasAudio: true,
+          rmsEnergy: 0.1,
+        };
+      });
+
+      const videoWords = [
+        { word: 'Welcome', time: 0.2, endTime: 0.6 },
+        { word: 'back', time: 0.7, endTime: 1.0 },
+        { word: 'channel', time: 1.45, endTime: 1.9 },
+        // Sub-character
+        { word: 'Yes', time: 2.4, endTime: 2.7 },
+        { word: 'indeed', time: 2.75, endTime: 3.2 },
+        { word: 'tell', time: 3.3, endTime: 3.7 },
+        { word: 'us', time: 3.8, endTime: 4.2 },
+        // MC resumes
+        { word: 'Today', time: 5.0, endTime: 5.4 },
+        { word: 'we', time: 5.5, endTime: 5.8 },
+        { word: 'explore', time: 5.9, endTime: 6.4 },
+      ];
+
+      const ttsWords = [
+        { word: 'Welcome', time: 0.2, endTime: 0.6 },
+        { word: 'back', time: 0.65, endTime: 0.95 },
+        { word: 'channel', time: 1.4, endTime: 1.8 },
+        // MC sentence 2
+        { word: 'Today', time: 2.2, endTime: 2.6 },
+        { word: 'we', time: 2.65, endTime: 2.8 },
+        { word: 'explore', time: 2.9, endTime: 3.4 },
+      ];
+
+      const mockRunGemini = vi.fn().mockResolvedValue({
+        anchors: [],
+        successfulModel: 'MockModel',
+        summary: 'Mock summary',
+        verdict: { ttsHasSpeech: true, videoHasSpeech: true, sameContent: false },
+        videoWords,
+        ttsWords,
+      });
+
+      const result = await syncVideoClipWithTts(
+        'v_dialogue_1',
+        'a_tts_1',
+        { alignStartTime: true, provider: 'gemini' },
+        undefined,
+        mockExtractAudio,
+        mockRunGemini
+      );
+
+      expect(result.subCharacterInterruptionDetected).toBe(true);
+      expect(result.subCharacterWords?.length).toBeGreaterThan(0);
+      expect(result.ttsSplitApplied).toBe(true);
+
+      // Verify TTS track has been split into 3 segments:
+      // 1: initial sentence before sub-character
+      // 2: shifted sentence where main character resumes
+      // 3: trailing dialogue split after video clip ends
+      const currentTracks = useEditorStore.getState().tracks;
+      const audioTrack = currentTracks.find(t => t.id === 't2');
+      expect(audioTrack?.clips.length).toBe(3);
+
+      expect(audioTrack?.clips[0].startTime).toBe(0);
+      // Segment 2 must be shifted forward to where the sub-character finishes (5.0s)
+      const seg2 = audioTrack?.clips[1];
+      expect(seg2?.startTime).toBeCloseTo(5.0, 1);
+      // Segment 3 must start at the video clip end
+      const seg3 = audioTrack?.clips[2];
+      expect(seg3?.startTime).toBeGreaterThan(6.0);
     });
   });
 });

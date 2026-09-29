@@ -2018,6 +2018,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (!entry) {
           entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
         }
+        // AUDIO SPLIT FALLBACK: match any existing audio element sharing this mediaId
+        if (!entry && (clip.trackType === 'audio' || (clip.clip as any)?.type === 'audio')) {
+          for (const [, e] of pool) {
+            if (e.type === 'audio' && e.mediaId === clip.mediaId && e.el) {
+              entry = e;
+              break;
+            }
+          }
+        }
         if (!entry) continue;
 
         const mediaItem = mediaMap.get(clip.mediaId);
@@ -2111,7 +2120,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const AUDIO_PLL_P = 0.15;                // Proportional gain
           const AUDIO_PLL_I = 0.02;                // Integral gain
 
-          if (playing && !isReversing) {
+          if (playing && !isReversing && !store.isBuffering) {
             // Immediate resume if suspended (no requestIdleCallback delay!)
             if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
               entry.audioCtx.resume().catch(() => {});
@@ -2292,15 +2301,23 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // another clip on the SAME element is still active — never pause the
       // shared element in that case, or the still-playing segment would freeze
       // for the rest of the tick.
-      const playingEls = new Set<HTMLMediaElement>();
-      for (const id of playingIds) {
-        const e = pool.get(id);
-        if (e) playingEls.add(e.el);
-      }
-      for (const [clipId, entry] of pool) {
-        if (!playingIds.has(clipId)) {
-          if (!playingEls.has(entry.el) && !entry.el.paused) entry.el.pause();
-          pendingSeeksRef.current.delete(clipId);
+      if (!playing || store.isBuffering) {
+        for (const [, entry] of pool) {
+          if (entry.el && !entry.el.paused) {
+            try { entry.el.pause(); } catch {}
+          }
+        }
+      } else {
+        const playingEls = new Set<HTMLMediaElement>();
+        for (const id of playingIds) {
+          const e = pool.get(id);
+          if (e) playingEls.add(e.el);
+        }
+        for (const [clipId, entry] of pool) {
+          if (!playingIds.has(clipId)) {
+            if (!playingEls.has(entry.el) && !entry.el.paused) entry.el.pause();
+            pendingSeeksRef.current.delete(clipId);
+          }
         }
       }
 
@@ -2643,6 +2660,34 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
     }
   }, [tracks, isPrimary]);
+
+  // ---- Immediate pause sweep on isPlaying -> false transition ----
+  useEffect(() => {
+    if (!isPrimary) return;
+    const unsub = useEditorStore.subscribe((state, previous) => {
+      if (previous.isPlaying && !state.isPlaying) {
+        const pool = poolRef.current;
+        if (pool) {
+          for (const [, entry] of pool) {
+            if (entry.el && !entry.el.paused) {
+              try { entry.el.pause(); } catch {}
+            }
+          }
+        }
+        const container = getMediaPoolContainer();
+        if (container) {
+          const els = container.querySelectorAll('audio, video');
+          els.forEach((el) => {
+            const m = el as HTMLMediaElement;
+            if (!m.paused) {
+              try { m.pause(); } catch {}
+            }
+          });
+        }
+      }
+    });
+    return unsub;
+  }, [isPrimary]);
 
   // ---- Zustand subscription for paused seek (scrubbing) ----
   useEffect(() => {

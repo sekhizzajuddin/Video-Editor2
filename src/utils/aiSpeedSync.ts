@@ -135,6 +135,10 @@ export interface AiSpeedSyncResult {
   matchingSentenceCount?: number;
   totalTtsSentences?: number;
   splitReason?: string;
+  subCharacterInterruptionDetected?: boolean;
+  subCharacterDuration?: number;
+  subCharacterWords?: string[];
+  subCharacterShiftTime?: number;
 }
 
 /**
@@ -978,6 +982,29 @@ function wordsMatch(w1: string, w2: string): boolean {
 }
 
 /**
+ * Detects non-speech vocal expressions and filler sounds such as:
+ * - laughter: haha, hehe, hihi, [laughter], (laughs), *chuckles*
+ * - humming / hesitation / sighs: hmm, humm, uh, um, erm, ah, oh, [sigh], [gasp]
+ * - audio event markers: [music], [applause], etc.
+ *
+ * These are ignored by the alignment engine so word synchronization
+ * stays locked strictly onto actual dialogue words.
+ */
+const VOCAL_EXPRESSION_REGEX = /^(ha(ha)+|he(he)+|hi(hi)+|ja(ja)+|h+m+|h+u+m+|u+h+|u+m+|e+r+m?|a+h+|o+h+|o+o+h+|m+h+m+|m+|sigh|gasp|groan|chuckle|giggle|snicker|laughter|laughs?)$/i;
+
+export function isVocalExpression(rawWord: string): boolean {
+  if (!rawWord) return false;
+  const trimmed = rawWord.trim();
+  // Tagged sound effects like [laughs], (laughter), *gasp*, <cough>, [music]
+  if (/^[\[\(\*<].*[\]\)\*>]$/.test(trimmed)) {
+    return true;
+  }
+  const clean = trimmed.toLowerCase().replace(/[^a-z]/g, '');
+  if (!clean) return true;
+  return VOCAL_EXPRESSION_REGEX.test(clean);
+}
+
+/**
  * Deterministic word-level alignment: matches TTS word timings against video
  * word timings and builds anchors — the alignment MATH is done here, not left
  * to the model (the AI only marks word timings in both audios).
@@ -1005,8 +1032,8 @@ export function buildAnchorsFromWordTimings(
   const normalize = (w: string) =>
     (w || '').toLowerCase().replace(/[.,!?،۔؟;:\"'`\-–—()\[\]{}]/g, '').trim();
 
-  const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
-  const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+  const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
+  const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
   if (vWords.length === 0 || tWords.length === 0) return [];
 
   const rawAnchors: SyncAnchor[] = [];
@@ -1125,8 +1152,8 @@ export function detectTtsExtraSentences(params: {
   // 1. TIER 1 (PRIMARY): Word-level Acoustic Alignment
   // Words are ground-truth dialogue timings from Whisper.
   if (videoWords && ttsWords && videoWords.length > 0 && ttsWords.length > 0) {
-    const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
-    const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+    const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
+    const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
 
     if (vWords.length >= 2 && tWords.length >= 2) {
       let vi = 0;
@@ -1240,6 +1267,137 @@ export function detectTtsExtraSentences(params: {
   }
 
   return { hasMoreSentences: false, matchingCutoffTime: 0 };
+}
+
+export interface SubCharacterInterruption {
+  detected: boolean;
+  block1LastVideoWordIdx: number;
+  block1LastTtsWordIdx: number;
+  block2FirstVideoWordIdx: number;
+  block2FirstTtsWordIdx: number;
+  ttsSplitTime: number;                // in seconds from TTS start (cutoff after block 1)
+  subCharacterVideoStart: number;       // in seconds from video start (video interruption start)
+  subCharacterVideoEnd: number;         // in seconds from video start (video interruption end)
+  interruptionDuration: number;        // subCharacterVideoEnd - subCharacterVideoStart
+  subCharacterWords: string[];
+}
+
+/**
+ * Detects whether a sub-character in the video clip delivers 1-2 extra sentences
+ * between two known dialogue sentences of the main character (represented by TTS).
+ *
+ * Pattern:
+ * - Video: [MC Sentence 1] -> [Sub-character 1-2 sentences] -> [MC Sentence 2]
+ * - TTS:   [MC Sentence 1] -> [MC Sentence 2]
+ *
+ * When detected:
+ * - TTS will be split at the end of MC Sentence 1 (ttsSplitTime).
+ * - TTS Segment 2 will be shifted on the timeline to start where MC Sentence 2 begins in video (subCharacterVideoEnd).
+ * - The video clip plays at natural 1.0x speed during the sub-character interruption.
+ */
+export function detectSubCharacterInterruption(
+  videoWords: SyncWordTiming[],
+  ttsWords: SyncWordTiming[],
+  videoDuration: number,
+  ttsDuration: number
+): SubCharacterInterruption | null {
+  const normalize = (w: string) =>
+    (w || '').toLowerCase().replace(/[.,!?،۔؟;:\"'`\-–—()\[\]{}]/g, '').trim();
+
+  const filteredV = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
+  const filteredT = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
+
+  if (filteredV.length < 5 || filteredT.length < 4) return null;
+
+  let vi = 0;
+  let lastBlock1Ti = -1;
+  let lastBlock1Vi = -1;
+  let block1MatchCount = 0;
+
+  for (let ti = 0; ti < filteredT.length; ti++) {
+    const tNorm = normalize(filteredT[ti].word);
+    let matchIdx = -1;
+    for (let look = 0; look <= 1; look++) {
+      const cand = filteredV[vi + look];
+      if (!cand) break;
+      if (wordsMatch(normalize(cand.word), tNorm)) {
+        matchIdx = vi + look;
+        break;
+      }
+    }
+    if (matchIdx >= 0) {
+      block1MatchCount++;
+      lastBlock1Ti = ti;
+      lastBlock1Vi = matchIdx;
+      vi = matchIdx + 1;
+    } else {
+      // We hit a mismatch! Check if there's a sub-character gap in video
+      if (block1MatchCount >= 2 && lastBlock1Vi >= 0 && lastBlock1Ti >= 0 && lastBlock1Ti < filteredT.length - 2) {
+        const nextTi = lastBlock1Ti + 1;
+        const nextTWord = filteredT[nextTi];
+        const nextTNorm = normalize(nextTWord.word);
+
+        // Search further ahead in video (skipping the sub-character interruption)
+        for (let skip = 2; skip <= 30; skip++) {
+          const candVi = lastBlock1Vi + skip;
+          if (candVi >= filteredV.length) break;
+
+          if (wordsMatch(normalize(filteredV[candVi].word), nextTNorm)) {
+            // Verify Block 2 match continuation
+            let block2Matches = 1;
+            let checkVi = candVi + 1;
+            for (let checkTi = nextTi + 1; checkTi < Math.min(filteredT.length, nextTi + 6); checkTi++) {
+              const expectedNorm = normalize(filteredT[checkTi].word);
+              let foundNext = false;
+              for (let lookAhead = 0; lookAhead <= 4; lookAhead++) {
+                if (checkVi + lookAhead < filteredV.length && wordsMatch(normalize(filteredV[checkVi + lookAhead].word), expectedNorm)) {
+                  block2Matches++;
+                  checkVi = checkVi + lookAhead + 1;
+                  foundNext = true;
+                  break;
+                }
+              }
+              if (!foundNext) break;
+            }
+
+            if (block2Matches >= 2) {
+              const subWords = filteredV.slice(lastBlock1Vi + 1, candVi).map((w) => w.word);
+              const b1TWord = filteredT[lastBlock1Ti];
+              const b2TWord = filteredT[nextTi];
+              const b1VWord = filteredV[lastBlock1Vi];
+              const b2VWord = filteredV[candVi];
+
+              const b1TEnd = b1TWord.endTime && b1TWord.endTime > b1TWord.time ? b1TWord.endTime : (b1TWord.time + 0.25);
+              const b1VEnd = b1VWord.endTime && b1VWord.endTime > b1VWord.time ? b1VWord.endTime : (b1VWord.time + 0.25);
+
+              const ttsSplitTime = Number(((b1TEnd + b2TWord.time) / 2).toFixed(3));
+              const subCharacterVideoStart = Number(b1VEnd.toFixed(3));
+              const subCharacterVideoEnd = Number(b2VWord.time.toFixed(3));
+              const interruptionDuration = Number((subCharacterVideoEnd - subCharacterVideoStart).toFixed(3));
+
+              if (interruptionDuration >= 0.5 && ttsSplitTime > 0.3 && ttsSplitTime < ttsDuration - 0.3) {
+                return {
+                  detected: true,
+                  block1LastVideoWordIdx: lastBlock1Vi,
+                  block1LastTtsWordIdx: lastBlock1Ti,
+                  block2FirstVideoWordIdx: candVi,
+                  block2FirstTtsWordIdx: nextTi,
+                  ttsSplitTime,
+                  subCharacterVideoStart,
+                  subCharacterVideoEnd,
+                  interruptionDuration,
+                  subCharacterWords: subWords,
+                };
+              }
+            }
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -1508,6 +1666,197 @@ export async function syncVideoClipWithTts(
     // expected; the cadence/word mapping still works via TTS timings.
   }
 
+  // ── Multi-Character / Sub-Character Interruption Detection ──────────────
+  // When a sub-character in the video clip delivers 1-2 sentences between
+  // known sentences of the main character:
+  // 1. Split TTS at the end of the first known sentence.
+  // 2. Shift the second TTS segment forward to start where the extra words end and known words start.
+  // 3. Build speed frames: Section 1 aligns with TTS 1; the interruption gap plays at natural 1.0x speed; Section 2 aligns with shifted TTS 2.
+  // 4. If TTS Segment 2 extends beyond video clip end, split TTS again at clip end.
+  const subInterruption = (analysis.videoWords && analysis.ttsWords)
+    ? detectSubCharacterInterruption(
+        analysis.videoWords,
+        analysis.ttsWords,
+        videoAudio.duration,
+        ttsAudio.duration
+      )
+    : null;
+
+  if (subInterruption) {
+    onProgress?.(70, `Sub-character dialogue detected (${subInterruption.subCharacterWords.length} words): splitting & shifting TTS...`);
+    console.log(`[AiSpeedSync] Sub-character dialogue detected in video between ${subInterruption.subCharacterVideoStart}s and ${subInterruption.subCharacterVideoEnd}s (${subInterruption.subCharacterWords.join(' ')}). Splitting TTS at ${subInterruption.ttsSplitTime}s and shifting second segment...`);
+
+    const alignStart = options.alignStartTime !== false;
+    const baseTimelineStart = alignStart ? ttsClip.startTime : videoClip.startTime;
+
+    // 1. Split TTS at the end of the 1st known sentence
+    const splitTimelineTime = ttsClip.startTime + subInterruption.ttsSplitTime;
+    const splitResult1 = store.splitClip(ttsClip.id, splitTimelineTime, false);
+    const leftClipId = splitResult1?.leftId;
+    const rightClipId = splitResult1?.rightId || ttsClip.id;
+
+    // 2. Shift the 2nd TTS segment forward to start where the extra words end in the video clip
+    const resumeTimeline = baseTimelineStart + subInterruption.subCharacterVideoEnd;
+    store.updateClip(rightClipId, { startTime: resumeTimeline });
+
+    // 3. Build anchors:
+    const normalize = (w: string) =>
+      (w || '').toLowerCase().replace(/[.,!?،۔؟;:\"'`\-–—()\[\]{}]/g, '').trim();
+
+    const vWords = analysis.videoWords!.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
+    const tWords = analysis.ttsWords!.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0 && !isVocalExpression(w.word));
+
+    const anchors: SyncAnchor[] = [];
+
+    // Block 1 word anchors
+    let vi = 0;
+    for (let ti = 0; ti <= subInterruption.block1LastTtsWordIdx; ti++) {
+      const tWord = tWords[ti];
+      const tNorm = normalize(tWord.word);
+      for (let look = 0; look <= 4; look++) {
+        const cand = vWords[vi + look];
+        if (!cand || vi + look > subInterruption.block1LastVideoWordIdx) break;
+        if (wordsMatch(normalize(cand.word), tNorm)) {
+          anchors.push({
+            videoTime: Number(cand.time.toFixed(3)),
+            ttsTime: Number(tWord.time.toFixed(3)),
+            phrase: tWord.word,
+            matched: true,
+          });
+          vi = vi + look + 1;
+          break;
+        }
+      }
+    }
+
+    // Anchor at the end of the sub-character gap:
+    // In video, this is subCharacterVideoEnd.
+    // On the timeline (relative to video clip startTime), this is subCharacterVideoEnd.
+    // The deltaTimeline equals deltaSource, ensuring exactly 1.0x natural speed playback during sub-character speech!
+    anchors.push({
+      videoTime: subInterruption.subCharacterVideoEnd,
+      ttsTime: subInterruption.subCharacterVideoEnd,
+      phrase: 'Sub-character dialogue (1.0x)',
+    });
+
+    // Block 2 word anchors (Main Character resumes)
+    let vi2 = subInterruption.block2FirstVideoWordIdx;
+    for (let ti = subInterruption.block2FirstTtsWordIdx; ti < tWords.length; ti++) {
+      const tWord = tWords[ti];
+      const tNorm = normalize(tWord.word);
+      for (let look = 0; look <= 4; look++) {
+        const cand = vWords[vi2 + look];
+        if (!cand) break;
+        if (wordsMatch(normalize(cand.word), tNorm)) {
+          const timelineOffset = subInterruption.subCharacterVideoEnd + (tWord.time - subInterruption.ttsSplitTime);
+          anchors.push({
+            videoTime: Number(cand.time.toFixed(3)),
+            ttsTime: Number(timelineOffset.toFixed(3)),
+            phrase: tWord.word,
+            matched: true,
+          });
+          vi2 = vi2 + look + 1;
+          break;
+        }
+      }
+    }
+
+    // Determine newDuration of the video clip
+    const lastAnchor = anchors[anchors.length - 1];
+    const remainingVideoSource = Math.max(0, videoAudio.duration - lastAnchor.videoTime);
+    const videoTotalTimeline = lastAnchor.ttsTime + Math.min(remainingVideoSource, 1.5);
+    const newDuration = Math.max(0.5, Number(videoTotalTimeline.toFixed(3)));
+
+    // 4. Calculate Speed Frames
+    onProgress?.(85, 'Calculating Speed Frames for multi-character dialogue...');
+    const { speedFrames, fixedSourceEnd, segments } = buildSpeedFramesFromAnchors(
+      videoClip,
+      { ...ttsClip, duration: newDuration },
+      anchors,
+      videoMedia?.duration
+    );
+
+    // 5. Check if TTS Segment 2 extends beyond video clip end: split again if needed
+    const videoClipEndTimeline = baseTimelineStart + newDuration;
+    const currentTracks2 = useEditorStore.getState().tracks;
+    const freshRightClip = findClipInTracks(currentTracks2, rightClipId, store.pipWindows);
+    let secondSplitApplied = false;
+    let trailingTtsId: string | undefined;
+
+    if (freshRightClip) {
+      const rightEnd = freshRightClip.startTime + freshRightClip.duration;
+      if (rightEnd > videoClipEndTimeline + 0.25) {
+        onProgress?.(90, 'TTS extends beyond video clip: splitting trailing TTS dialogue...');
+        const splitResult2 = store.splitClip(rightClipId, videoClipEndTimeline, false);
+        secondSplitApplied = true;
+        trailingTtsId = splitResult2?.rightId;
+      }
+    }
+
+    // 6. Update video clip in store
+    const muteOriginal = options.muteOriginalAudio !== false;
+    const updatedClip: TimelineClip = {
+      ...videoClip,
+      startTime: baseTimelineStart,
+      duration: newDuration,
+      speed: 1.0,
+      speedFrames,
+      speedFrameSourceEnd: fixedSourceEnd,
+      audioSettings: muteOriginal
+        ? {
+            ...(videoClip.audioSettings || {}),
+            pan: 0,
+            fadeIn: 0,
+            fadeOut: 0,
+            bass: 0,
+            treble: 0,
+            pitch: 0,
+            voiceFormant: 0,
+            preservePitch: true,
+            humanize: false,
+            volume: 0,
+            muted: true,
+          }
+        : videoClip.audioSettings,
+    };
+    updatedClip.speedRamp = calculateSpeedFramesRamp(updatedClip, videoMedia?.duration);
+
+    store.updateClip(videoClip.id, updatedClip);
+    store.selectClip(videoClip.id);
+    store.recalcTotalDuration();
+    store.saveSnapshot('AI Speed Sync (Multi-Character Shift & Speed Frames)');
+
+    // Invalidate media pool cache and dispatch frame update
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('procut-evict-media-cache', { detail: { id: ttsClip.mediaId } }));
+      window.dispatchEvent(new Event('procut-frame-updated'));
+    }
+
+    onProgress?.(100, `Done! Synced with ${successfulModel}`);
+
+    return {
+      videoClipId,
+      ttsClipId,
+      anchors,
+      speedFrames,
+      segments,
+      newDuration,
+      successfulModel,
+      summary,
+      alignmentMode: 'word-level',
+      verdict,
+      stretchFrameCount: 0,
+      ttsSplitApplied: true,
+      ttsSplitPoint: subInterruption.ttsSplitTime,
+      ttsRemainingClipId: rightClipId,
+      subCharacterInterruptionDetected: true,
+      subCharacterDuration: subInterruption.interruptionDuration,
+      subCharacterWords: subInterruption.subCharacterWords,
+      subCharacterShiftTime: resumeTimeline,
+      splitReason: `Sub-character dialogue detected (${subInterruption.subCharacterWords.length} words). TTS split at ${subInterruption.ttsSplitTime.toFixed(2)}s and shifted to ${resumeTimeline.toFixed(2)}s.`,
+    };
+  }
+
   // ── Sentence Matching Detection: split TTS if it has more sentences ─────
   const ttsExtraInfo = detectTtsExtraSentences({
     videoWords: analysis.videoWords,
@@ -1646,6 +1995,12 @@ export async function syncVideoClipWithTts(
       ? 'AI Speed Sync (Split TTS & Applied Speed Frames)'
       : 'AI Speed Sync with TTS'
   );
+
+  // Invalidate media pool cache and dispatch frame update
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('procut-evict-media-cache', { detail: { id: ttsClip.mediaId } }));
+    window.dispatchEvent(new Event('procut-frame-updated'));
+  }
 
   onProgress?.(100, `Done! Synced with ${successfulModel}`);
 
