@@ -648,7 +648,7 @@ export async function runGroqSpeedSync(
   let videoWords: SyncWordTiming[] | undefined;
   let videoSentences: SpeedSyncSentence[] | undefined;
   let videoText = '';
-  let successfulWhisperModel = preferredWhisperModel;
+  let successfulWhisperModel: string | undefined = preferredWhisperModel;
 
   if (videoAudioBlob) {
     try {
