@@ -149,11 +149,16 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     }
 
     if (trimStart !== undefined && clipDuration !== undefined) {
-      const mediaDuration = Math.max(0.01, media?.duration || clipDuration || 1);
       const effectiveSpeed = Math.max(0.01, speed || 1);
+      const consumedMedia = clipDuration * effectiveSpeed;
+      const mediaDuration = Math.max(
+        0.01,
+        (media?.duration && media.duration > 0)
+          ? Math.max(media.duration, trimStart + consumedMedia)
+          : (trimStart + consumedMedia)
+      );
       
       const safeTrimStart = Math.max(0, Math.min(mediaDuration - 0.01, trimStart));
-      const consumedMedia = clipDuration * effectiveSpeed;
       
       const startRatio = Math.max(0, Math.min(0.999, safeTrimStart / mediaDuration));
       const endRatio = Math.max(startRatio + 0.001, Math.min(1, (safeTrimStart + consumedMedia) / mediaDuration));

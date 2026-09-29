@@ -67,7 +67,8 @@ export interface SyncAnchor {
 
 export interface SyncWordTiming {
   word: string;
-  time: number; // seconds from the respective audio slice start
+  time: number; // seconds from the respective audio slice start (word start)
+  endTime?: number; // seconds from the respective audio slice start (word end)
 }
 
 /**
@@ -166,6 +167,16 @@ export async function extractClipAudioToWav(
       const fileBlob = await getFileFromDB(mediaId);
       if (fileBlob) {
         arrayBuffer = await fileBlob.arrayBuffer();
+        if (typeof window !== 'undefined') {
+          const state = useEditorStore.getState();
+          const mediaItem = state.mediaLibrary.find(m => m.id === mediaId);
+          if (mediaItem) {
+            try {
+              const freshUrl = URL.createObjectURL(fileBlob);
+              state.updateMediaMetadata(mediaId, { url: freshUrl });
+            } catch {}
+          }
+        }
       }
     } catch {}
   }
@@ -207,6 +218,35 @@ export async function extractClipAudioToWav(
     let sumSquares = 0;
     for (let i = 0; i < data.length; i++) sumSquares += data[i] * data[i];
     const rmsEnergy = Math.sqrt(sumSquares / Math.max(1, data.length));
+
+    // Ensure media library has waveform peaks for the ENTIRE media duration so waveforms never disappear
+    if (mediaId && typeof window !== 'undefined') {
+      try {
+        const state = useEditorStore.getState();
+        const mediaItem = state.mediaLibrary.find(m => m.id === mediaId);
+        if (mediaItem && (!mediaItem.waveformPeaks || !mediaItem.waveformPeaks.some(p => p > 0.005))) {
+          const fullAudioData = decodedBuffer.getChannelData(0);
+          const targetPeaks = 400;
+          const step = Math.max(1, Math.floor(fullAudioData.length / targetPeaks));
+          const freshPeaks: number[] = new Array(targetPeaks);
+          for (let pIdx = 0; pIdx < targetPeaks; pIdx++) {
+            const startP = pIdx * step;
+            const endP = Math.min(startP + step, fullAudioData.length);
+            let mPeak = 0;
+            for (let k = startP; k < endP; k++) {
+              const val = Math.abs(fullAudioData[k]);
+              if (val > mPeak) mPeak = val;
+            }
+            freshPeaks[pIdx] = Number(mPeak.toFixed(4));
+          }
+          state.setMediaWaveformPeaks(mediaId, freshPeaks);
+          state.updateMediaMetadata(mediaId, {
+            duration: decodedBuffer.duration,
+            waveformPeaks: freshPeaks,
+          });
+        }
+      } catch {}
+    }
 
     return { wavBlob, duration: actualSpan, hasAudio: true, rmsEnergy };
   } catch (decodeErr) {
@@ -590,6 +630,7 @@ export async function transcribeWithGroqWhisper(
       const words: SyncWordTiming[] = (data?.words || []).map((w: any) => ({
         word: (w.word || '').trim(),
         time: Number((typeof w.start === 'number' ? w.start : 0).toFixed(3)),
+        endTime: Number((typeof w.end === 'number' ? w.end : (typeof w.start === 'number' ? w.start + 0.3 : 0.3)).toFixed(3)),
       })).filter((w: SyncWordTiming) => w.word.length > 0 && Number.isFinite(w.time));
 
       const sentences: SpeedSyncSentence[] = (data?.segments || []).map((s: any) => ({
@@ -914,6 +955,47 @@ Return ONLY strict JSON matching this structure:
  * - No word matches at all: returns [] → caller falls back to the AI's
  *   cadence anchors.
  */
+/**
+ * Fuzzy word matching to handle minor transcription discrepancies, contractions, and plural endings.
+ */
+function wordsMatch(w1: string, w2: string): boolean {
+  if (w1 === w2) return true;
+  if (!w1 || !w2) return false;
+  const minLen = Math.min(w1.length, w2.length);
+  if (minLen >= 4 && (w1.startsWith(w2.slice(0, minLen - 1)) || w2.startsWith(w1.slice(0, minLen - 1)))) {
+    return true;
+  }
+  if (w1.length >= 5 && w2.length >= 5 && Math.abs(w1.length - w2.length) <= 1) {
+    let diff = 0;
+    const len = Math.min(w1.length, w2.length);
+    for (let i = 0; i < len; i++) {
+      if (w1[i] !== w2[i]) diff++;
+      if (diff > 1) break;
+    }
+    if (diff <= 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Deterministic word-level alignment: matches TTS word timings against video
+ * word timings and builds anchors — the alignment MATH is done here, not left
+ * to the model (the AI only marks word timings in both audios).
+ *
+ * Handles every wording mismatch case:
+ * - Equal wording: 1:1 word pairs → anchors at each matched word.
+ * - TTS has EXTRA words (TTS wording fuller than the video, e.g. the AI video
+ *   skips filler the TTS speaks): unmatched TTS words are covered by linear
+ *   interpolation through the surrounding matched anchors — the video content
+ *   between them is stretched/compressed to fit, and a trailing-hold anchor
+ *   keeps the video near its last matched position instead of compressing its
+ *   remaining content fast.
+ * - Video has EXTRA words (video speaks more than the TTS): unmatched video
+ *   words are simply consumed faster — the interpolation through matched
+ *   anchors compresses them.
+ * - No word matches at all: returns [] → caller falls back to the AI's
+ *   cadence anchors.
+ */
 export function buildAnchorsFromWordTimings(
   videoWords: SyncWordTiming[],
   ttsWords: SyncWordTiming[],
@@ -945,7 +1027,7 @@ export function buildAnchorsFromWordTimings(
     for (let look = 0; look <= 8; look++) {
       const cand = vWords[vi + look];
       if (!cand) break;
-      if (normalize(cand.word) === tNorm) { matchIdx = vi + look; break; }
+      if (wordsMatch(normalize(cand.word), tNorm)) { matchIdx = vi + look; break; }
     }
 
     if (matchIdx >= 0) {
@@ -987,16 +1069,13 @@ export function buildAnchorsFromWordTimings(
   const anchors: SyncAnchor[] = rawAnchors;
 
   // Trailing hold — "TTS wording is better than video clip": when the TTS
-  // keeps speaking after the video's last matched word, HOLD the video near
-  // that position (slow creep through a little of its remaining content)
-  // instead of compressing all remaining content fast at the end. The clip-end
-  // boundary alone would map the whole remaining source span across the
-  // trailing TTS duration and rush it.
+  // keeps speaking after the video's last matched word, advance smoothly rather
+  // than freezing.
   const lastAnchor = anchors[anchors.length - 1];
   const trailing = ttsDuration - 0.05 - lastAnchor.ttsTime;
   if (trailing > 0.15) {
     const remainingSpan = Math.max(0, videoDuration - 0.05 - lastAnchor.videoTime);
-    const holdAdvance = Math.min(remainingSpan, trailing * 0.15);
+    const holdAdvance = Math.min(remainingSpan, trailing * 0.85);
     anchors.push({
       videoTime: Number((lastAnchor.videoTime + holdAdvance).toFixed(3)),
       ttsTime: Number((ttsDuration - 0.05).toFixed(3)),
@@ -1040,7 +1119,91 @@ export function detectTtsExtraSentences(params: {
     ttsDuration,
   } = params;
 
-  // 1. Check explicit sentence breakdown: TTS has more sentences than video
+  const normalize = (w: string) =>
+    (w || '').toLowerCase().replace(/[.,!?،۔؟;:"'`\-–—()[\]{}]/g, '').trim();
+
+  // 1. TIER 1 (PRIMARY): Word-level Acoustic Alignment
+  // Words are ground-truth dialogue timings from Whisper.
+  if (videoWords && ttsWords && videoWords.length > 0 && ttsWords.length > 0) {
+    const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+    const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
+
+    if (vWords.length >= 2 && tWords.length >= 2) {
+      let vi = 0;
+      let lastMatchedTi = -1;
+      let matchCount = 0;
+
+      for (let ti = 0; ti < tWords.length; ti++) {
+        const tNorm = normalize(tWords[ti].word);
+        let matchIdx = -1;
+        for (let look = 0; look <= 10; look++) {
+          const cand = vWords[vi + look];
+          if (!cand) break;
+          if (wordsMatch(normalize(cand.word), tNorm)) {
+            matchIdx = vi + look;
+            break;
+          }
+        }
+        if (matchIdx >= 0) {
+          lastMatchedTi = ti;
+          vi = matchIdx + 1;
+          matchCount++;
+        }
+      }
+
+      // Check if TTS has trailing words after the last match
+      if (matchCount >= 2 && lastMatchedTi >= 0 && lastMatchedTi < tWords.length - 1) {
+        const remainingTtsWords = tWords.slice(lastMatchedTi + 1);
+        const lastWord = tWords[lastMatchedTi];
+        const lastWordEnd = (lastWord.endTime && lastWord.endTime > lastWord.time)
+          ? lastWord.endTime
+          : (lastWord.time + 0.25);
+        const nextWord = remainingTtsWords[0];
+        const nextWordStart = nextWord.time;
+        const remainingDuration = ttsDuration - lastWordEnd;
+
+        // User requested: Apply exact split where its last match to the Video Clip
+        if (remainingTtsWords.length >= 1 && remainingDuration >= 0.20) {
+          let cutoff = nextWordStart > lastWordEnd
+            ? (lastWordEnd + nextWordStart) / 2
+            : (lastWordEnd + 0.05);
+
+          // If AI reasoning provided a cutoff in the pause between last matched word and next word, use it
+          if (
+            typeof geminiMatchingCutoffTime === 'number' &&
+            geminiMatchingCutoffTime >= lastWord.time &&
+            geminiMatchingCutoffTime <= (nextWordStart + 0.1)
+          ) {
+            cutoff = geminiMatchingCutoffTime;
+          } else if (ttsSentences && ttsSentences.length >= 2) {
+            const sentMatch = ttsSentences.find(s => (lastWord.time >= s.startTime && lastWord.time <= s.endTime) || Math.abs(s.endTime - lastWordEnd) < 0.4);
+            const sentIdx = sentMatch ? ttsSentences.indexOf(sentMatch) : -1;
+            if (sentIdx >= 0 && sentIdx < ttsSentences.length - 1) {
+              const currentSent = ttsSentences[sentIdx];
+              const nextSent = ttsSentences[sentIdx + 1];
+              if (nextSent.startTime > currentSent.endTime) {
+                cutoff = (currentSent.endTime + nextSent.startTime) / 2;
+              }
+            }
+          }
+
+          cutoff = Math.max(0.15, Math.min(ttsDuration - 0.15, cutoff));
+
+          if (cutoff > 0.15 && cutoff < ttsDuration - 0.15) {
+            return {
+              hasMoreSentences: true,
+              matchingCutoffTime: Number(cutoff.toFixed(3)),
+              matchingSentenceCount: 1,
+              totalTtsSentences: 2,
+              reason: `Exact split at word "${lastWord.word}" (${cutoff.toFixed(2)}s). TTS has ${remainingTtsWords.length} extra spoken words after video dialogue ends.`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 2. TIER 2: Explicit sentence segments (when words list is omitted or has no matches)
   if (videoSentences && ttsSentences && videoSentences.length > 0 && ttsSentences.length > videoSentences.length) {
     const matchedSentencesCount = videoSentences.length;
     const lastMatchedTtsSentence = ttsSentences[matchedSentencesCount - 1];
@@ -1062,7 +1225,7 @@ export function detectTtsExtraSentences(params: {
     }
   }
 
-  // 2. Check explicit AI flag and cutoff timestamp
+  // 3. TIER 3: Explicit AI flag and cutoff timestamp
   if (
     geminiHasMoreSentences === true &&
     typeof geminiMatchingCutoffTime === 'number' &&
@@ -1074,67 +1237,6 @@ export function detectTtsExtraSentences(params: {
       matchingCutoffTime: Number(geminiMatchingCutoffTime.toFixed(3)),
       reason: 'AI detected that TTS continues with additional sentences beyond the video clip dialogue.',
     };
-  }
-
-  // 3. Word-level analysis with punctuation & duration gap
-  if (videoWords && ttsWords && videoWords.length > 0 && ttsWords.length > 0) {
-    const normalize = (w: string) =>
-      (w || '').toLowerCase().replace(/[.,!?،۔؟;:"'`\-–—()[\]{}]/g, '').trim();
-
-    const vWords = videoWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
-    const tWords = ttsWords.filter((w) => Number.isFinite(w.time) && normalize(w.word).length > 0);
-
-    if (vWords.length >= 2 && tWords.length >= 3) {
-      let vi = 0;
-      let lastMatchedTi = -1;
-      let maxVi = -1;
-      let matchCount = 0;
-
-      for (let ti = 0; ti < tWords.length; ti++) {
-        const tNorm = normalize(tWords[ti].word);
-        let matchIdx = -1;
-        for (let look = 0; look <= 8; look++) {
-          const cand = vWords[vi + look];
-          if (!cand) break;
-          if (normalize(cand.word) === tNorm) {
-            matchIdx = vi + look;
-            break;
-          }
-        }
-        if (matchIdx >= 0) {
-          lastMatchedTi = ti;
-          maxVi = Math.max(maxVi, matchIdx);
-          vi = matchIdx + 1;
-          matchCount++;
-        }
-      }
-
-      // If we matched the video speech near completion (at least 65% of words or within 2 words of the end)
-      const nearVideoEnd = maxVi >= vWords.length - Math.max(2, Math.floor(vWords.length * 0.35));
-
-      if (matchCount >= 2 && nearVideoEnd && lastMatchedTi >= 0 && lastMatchedTi < tWords.length - 1) {
-        const remainingTtsWords = tWords.slice(lastMatchedTi + 1);
-        const lastMatchedTime = tWords[lastMatchedTi].time;
-        const nextWordTime = remainingTtsWords[0].time;
-        const remainingDuration = ttsDuration - lastMatchedTime;
-
-        // User requested EXACT SPLIT where it last matches the Video Clip
-        // We bypass all extra heuristics (punctuation, word count) and just split exactly here.
-        if (remainingTtsWords.length > 0) {
-          // Calculate clean split point in the pause between sentences
-          let cutoff = (lastMatchedTime + nextWordTime) / 2;
-          cutoff = Math.max(lastMatchedTime + 0.05, Math.min(nextWordTime - 0.05, cutoff));
-
-          if (cutoff > 0.1 && cutoff < ttsDuration - 0.1) {
-            return {
-              hasMoreSentences: true,
-              matchingCutoffTime: Number(cutoff.toFixed(3)),
-              reason: `Exact split applied: TTS has ${remainingTtsWords.length} trailing spoken words after video dialogue ends.`,
-            };
-          }
-        }
-      }
-    }
   }
 
   return { hasMoreSentences: false, matchingCutoffTime: 0 };
@@ -1165,41 +1267,64 @@ export function buildSpeedFramesFromAnchors(
 
   // Convert each anchor into a SpeedFrame
   const validFrames: SpeedFrame[] = [];
-  // BUG 3 FIX: Initialize lastOffset to -0.06 so the first anchor at
-  // ttsTime=0.05s (clamped minimum) passes the `> lastOffset + 0.05` check.
-  // Previously, lastOffset=0 caused any anchor at ttsTime ≤ 0.10s to fail
-  // `0.05 > 0 + 0.05 = false`, silently dropping the critical first-word anchor.
-  let lastOffset = -0.06;
-  let lastSource = trimStart - 0.02;
+  let lastOffset = -0.15;
+  let lastSource = trimStart - 0.05;
+
+  const MIN_SPEED_FRAME_INTERVAL = 0.15; // 150ms minimum spacing between speed frames
+  const MIN_SEGMENT_SPEED = 0.35;        // safe minimum playback rate for decoder
+  const MAX_SEGMENT_SPEED = 2.5;         // safe maximum playback rate for decoder
 
   for (let i = 0; i < anchors.length; i++) {
     const anchor = anchors[i];
     const offset = Math.max(0.05, Math.min(newDuration - 0.05, anchor.ttsTime));
-    const src = Math.max(trimStart + 0.02, Math.min(fixedSourceEnd - 0.02, trimStart + anchor.videoTime));
+    const rawSrc = Math.max(trimStart + 0.02, Math.min(fixedSourceEnd - 0.02, trimStart + anchor.videoTime));
 
-    if (offset > lastOffset + 0.05 && src > lastSource + 0.01) {
-      validFrames.push({
-        id: `sf_ai_${i + 1}_${Math.random().toString(36).substring(2, 7)}`,
-        timelineOffset: Number(offset.toFixed(4)),
-        sourceTime: Number(src.toFixed(4)),
-      });
-      lastOffset = offset;
-      lastSource = src;
+    // Monotonicity check: reject non-chronological or backwards video anchors
+    if (rawSrc <= lastSource + 0.01) {
+      continue;
+    }
+
+    let src = rawSrc;
+
+    if (validFrames.length === 0) {
+      if (offset >= 0.05) {
+        validFrames.push({
+          id: `sf_ai_${i + 1}_${Math.random().toString(36).substring(2, 7)}`,
+          timelineOffset: Number(offset.toFixed(4)),
+          sourceTime: Number(src.toFixed(4)),
+        });
+        lastOffset = offset;
+        lastSource = src;
+      }
+    } else if (offset >= lastOffset + MIN_SPEED_FRAME_INTERVAL) {
+      const deltaT = offset - lastOffset;
+      // Clamp implied segment speed so hardware decoders never thrash or stall
+      const minSrc = lastSource + deltaT * MIN_SEGMENT_SPEED;
+      const maxSrc = lastSource + deltaT * MAX_SEGMENT_SPEED;
+      src = Math.max(minSrc, Math.min(maxSrc, src));
+      src = Math.max(trimStart + 0.02, Math.min(fixedSourceEnd - 0.02, src));
+
+      if (src > lastSource + 0.01) {
+        validFrames.push({
+          id: `sf_ai_${i + 1}_${Math.random().toString(36).substring(2, 7)}`,
+          timelineOffset: Number(offset.toFixed(4)),
+          sourceTime: Number(src.toFixed(4)),
+        });
+        lastOffset = offset;
+        lastSource = src;
+      }
     }
   }
 
-  // BUG 1 FIX: When a trailing hold (stretch) anchor exists, cap fixedSourceEnd
-  // to the hold anchor's source position plus a small advance. Without this fix,
-  // the segment boundary at clip end still mapped to the FULL original source
-  // duration, causing all unconsumed video (often 1-3s) to be crammed into the
-  // final 50ms → 30x-50x speed spike at the very end of the clip.
-  // Now the clip ends near the last meaningful content instead of rushing forward.
+  // Trailing segment handling: ensure natural pacing rather than a slow crawl or freeze
   const hasStretchAnchor = anchors.some(a => a.stretch);
   if (hasStretchAnchor && validFrames.length > 0) {
     const lastFrame = validFrames[validFrames.length - 1];
-    // Cap source end just slightly past the last frame's source position
-    // so the final segment has a gentle crawl instead of a speed explosion
-    const stretchSourceEnd = lastFrame.sourceTime + 0.05;
+    const remainingTime = Math.max(0.05, newDuration - lastFrame.timelineOffset);
+    const remainingSource = Math.max(0, fixedSourceEnd - lastFrame.sourceTime);
+    // Natural pacing: advance source at normal video speed (~0.85x - 1.0x) rather than freezing at 0.01x
+    const naturalAdvance = Math.min(remainingSource, remainingTime * effectiveSpeed);
+    const stretchSourceEnd = lastFrame.sourceTime + Math.max(0.15, naturalAdvance);
     if (stretchSourceEnd < fixedSourceEnd) {
       fixedSourceEnd = stretchSourceEnd;
     }

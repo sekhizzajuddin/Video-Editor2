@@ -2177,7 +2177,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // 1.5s drift at 2x speed — far too wide.
           const speedScale = Math.max(1, currentSegmentSpeed);
           const VIDEO_HARD_SEEK_THRESHOLD = hasSpeedFramesOnly
-            ? Math.max(0.12, 0.15 * speedScale)
+            ? Math.max(0.35, 0.40 * speedScale)
             : (isRamped ? Math.max(0.45, 0.75 * speedScale) : 0.45);
           const VIDEO_PLL_THRESHOLD = hasSpeedFramesOnly
             ? Math.max(0.02, 0.03 * speedScale)

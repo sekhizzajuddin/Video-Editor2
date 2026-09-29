@@ -159,10 +159,10 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
     media.type === 'video' && hasAudiblePeaks(media.waveformPeaks);
   const mainVisualHeight = isVideoWithAudio ? Math.max(16, clipHeight - VIDEO_WAVEFORM_HEIGHT) : clipHeight;
 
-  // Auto-probe waveform for video clips that have not yet extracted waveform peaks,
+  // Auto-probe waveform for video and audio clips that have not yet extracted waveform peaks,
   // or whose peaks are all zeros (silent extraction from a previous attempt).
   const needsWaveformProbe =
-    media.type === 'video' &&
+    (media.type === 'video' || media.type === 'audio') &&
     !hasAudiblePeaks(media.waveformPeaks) &&
     media.url &&
     !media.url.startsWith('PENDING_') &&
