@@ -115,7 +115,8 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   setMarkerContextMenu,
   handleRulerPointerDown,
 }: TimelineRulerProps) {
-  // Double-click on the ruler (not on a marker) deselects any active clip/track/transition.
+  // Double-click on the ruler (not on a marker) deselects any active clip/track/transition,
+  // UNLESS the click time falls within the duration of a selected clip.
   const handleDoubleClick = (e: React.MouseEvent) => {
     // Don't deselect when double-clicking a marker — its onClick handler already
     // moves the playhead and that's a deliberate user action.
@@ -125,16 +126,55 @@ export const TimelineRuler = React.memo(function TimelineRuler({
       target.closest('.procut-timeline-marker') !== null;
     if (isMarker) return;
     const state = useEditorStore.getState();
-    if (
-      state.selectedClipId !== null ||
-      (state.selectedClipIds && state.selectedClipIds.length > 0) ||
-      state.selectedTransitionClipId !== null ||
-      state.selectedTrackId !== null
-    ) {
-      state.selectClip(null);
-      state.selectClips([]);
-      state.selectTransition(null);
-      state.selectTrack(null);
+
+    const rulerEl = rulerContainerRef.current;
+    const innerDiv = rulerEl?.firstElementChild as HTMLElement | null;
+    let clickTime = 0;
+    if (innerDiv) {
+      const innerRect = innerDiv.getBoundingClientRect();
+      const absX = e.clientX - innerRect.left;
+      clickTime = Math.max(0, absX / zoomLevel);
+    } else {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const currentScrollLeft = rulerEl?.scrollLeft ?? state.scrollLeft;
+      const x = e.clientX - rect.left + currentScrollLeft;
+      clickTime = Math.max(0, x / zoomLevel);
+    }
+
+    const selectedIds = new Set<string>();
+    if (state.selectedClipIds && state.selectedClipIds.length > 0) {
+      state.selectedClipIds.forEach((id: string) => selectedIds.add(id));
+    } else if (state.selectedClipId) {
+      selectedIds.add(state.selectedClipId);
+    }
+
+    let isWithinSelectedClip = false;
+    if (selectedIds.size > 0) {
+      for (const track of state.tracks) {
+        for (const clip of track.clips) {
+          if (selectedIds.has(clip.id)) {
+            if (clickTime >= clip.startTime && clickTime <= clip.startTime + clip.duration) {
+              isWithinSelectedClip = true;
+              break;
+            }
+          }
+        }
+        if (isWithinSelectedClip) break;
+      }
+    }
+
+    if (!isWithinSelectedClip) {
+      if (
+        state.selectedClipId !== null ||
+        (state.selectedClipIds && state.selectedClipIds.length > 0) ||
+        state.selectedTransitionClipId !== null ||
+        state.selectedTrackId !== null
+      ) {
+        state.selectClip(null);
+        state.selectClips([]);
+        state.selectTransition(null);
+        state.selectTrack(null);
+      }
     }
   };
 
@@ -350,19 +390,41 @@ export const TimelineRuler = React.memo(function TimelineRuler({
               }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
-                // Double-clicking a marker also deselects; user wants to
-                // focus on the marker, not the active clip.
                 const state = useEditorStore.getState();
-                if (
-                  state.selectedClipId !== null ||
-                  (state.selectedClipIds && state.selectedClipIds.length > 0) ||
-                  state.selectedTransitionClipId !== null ||
-                  state.selectedTrackId !== null
-                ) {
-                  state.selectClip(null);
-                  state.selectClips([]);
-                  state.selectTransition(null);
-                  state.selectTrack(null);
+                const selectedIds = new Set<string>();
+                if (state.selectedClipIds && state.selectedClipIds.length > 0) {
+                  state.selectedClipIds.forEach((id: string) => selectedIds.add(id));
+                } else if (state.selectedClipId) {
+                  selectedIds.add(state.selectedClipId);
+                }
+
+                let isWithinSelectedClip = false;
+                if (selectedIds.size > 0) {
+                  for (const tr of state.tracks) {
+                    for (const cl of tr.clips) {
+                      if (selectedIds.has(cl.id)) {
+                        if (marker.time >= cl.startTime && marker.time <= cl.startTime + cl.duration) {
+                          isWithinSelectedClip = true;
+                          break;
+                        }
+                      }
+                    }
+                    if (isWithinSelectedClip) break;
+                  }
+                }
+
+                if (!isWithinSelectedClip) {
+                  if (
+                    state.selectedClipId !== null ||
+                    (state.selectedClipIds && state.selectedClipIds.length > 0) ||
+                    state.selectedTransitionClipId !== null ||
+                    state.selectedTrackId !== null
+                  ) {
+                    state.selectClip(null);
+                    state.selectClips([]);
+                    state.selectTransition(null);
+                    state.selectTrack(null);
+                  }
                 }
               }}
             >

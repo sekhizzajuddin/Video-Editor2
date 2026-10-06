@@ -167,6 +167,69 @@ function DesktopApp() {
   const isDraggingRight = useRef(false);
   const isDraggingTimeline = useRef(false);
 
+  // Split clip at playhead — supports selected clip, selected track, or unselected media at playhead
+  const handleSplitAtPlayhead = useCallback(() => {
+    const state = useEditorStore.getState();
+    const t = state.currentTime;
+
+    // 1. If clips are explicitly selected, split those intersecting playhead
+    if (state.selectedClipIds && state.selectedClipIds.length > 0) {
+      let splitted = false;
+      state.selectedClipIds.forEach((id) => {
+        const c = findClipInTracks(tracks, id, state.pipWindows);
+        if (c && t > c.startTime && t < c.startTime + c.duration) {
+          splitClip(id, t);
+          splitted = true;
+        }
+      });
+      if (splitted) return;
+    } else if (state.selectedClipId) {
+      const c = findClipInTracks(tracks, state.selectedClipId, state.pipWindows);
+      if (c && t > c.startTime && t < c.startTime + c.duration) {
+        splitClip(state.selectedClipId, t);
+        return;
+      }
+    }
+
+    // 2. If a track is explicitly selected, try splitting the clip under playhead on that track
+    if (state.selectedTrackId) {
+      const track = tracks.find((tr) => tr.id === state.selectedTrackId);
+      if (track) {
+        const clip = track.clips.find((c) => t > c.startTime && t < c.startTime + c.duration);
+        if (clip) {
+          splitClip(clip.id, t);
+          return;
+        }
+      }
+    }
+
+    // 3. Fallback: Find media at playhead across all unlocked tracks (no clip selection required!)
+    const clipsAtPlayhead: { clip: any; track: any }[] = [];
+    tracks.forEach((track) => {
+      if (track.locked) return;
+      track.clips.forEach((clip) => {
+        if (t > clip.startTime && t < clip.startTime + clip.duration) {
+          clipsAtPlayhead.push({ clip, track });
+        }
+      });
+    });
+
+    if (clipsAtPlayhead.length === 1) {
+      // Single track media at this position: split directly without requiring selection!
+      splitClip(clipsAtPlayhead[0].clip.id, t);
+    } else if (clipsAtPlayhead.length > 1) {
+      // Multiple clips at playhead: prefer video track, or split first unlocked clip
+      const preferred = clipsAtPlayhead.find((item) => item.track.type === 'video') || clipsAtPlayhead[0];
+      splitClip(preferred.clip.id, t);
+    } else {
+      if (state.selectedClipIds?.length || state.selectedClipId) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "Playhead is not over selected clip(s).", type: 'warning' }}));
+      } else {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "No media at playhead position to split.", type: 'warning' }}));
+      }
+    }
+  }, [tracks, splitClip]);
+
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -372,35 +435,7 @@ function DesktopApp() {
           break;
         }
         case 'split_clip': {
-          const state = useEditorStore.getState();
-          const t = state.currentTime;
-          
-          if (state.selectedClipIds && state.selectedClipIds.length > 0) {
-            let splitted = false;
-            state.selectedClipIds.forEach(id => {
-              const c = findClipInTracks(tracks, id, state.pipWindows);
-              if (c && t > c.startTime && t < c.startTime + c.duration) {
-                splitClip(id, t);
-                splitted = true;
-              }
-            });
-            if (!splitted) {
-              window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "Playhead is not over selected clip(s).", type: 'warning' }}));
-            }
-          } else if (state.selectedTrackId) {
-            const track = tracks.find(tr => tr.id === state.selectedTrackId);
-            if (track) {
-              const clip = track.clips.find((c) => t > c.startTime && t < c.startTime + c.duration);
-              if (clip) {
-                splitClip(clip.id, t);
-              } else {
-                window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "No clip at playhead on selected track.", type: 'warning' }}));
-              }
-            }
-          } else {
-            console.warn("Select a clip or track to split.");
-            window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "Please select a clip or track to split first.", type: 'warning' }}));
-          }
+          handleSplitAtPlayhead();
           break;
         }
         case 'lift_clip': {
@@ -689,35 +724,7 @@ function DesktopApp() {
                         key={tool.id}
                         onClick={() => {
                           if (tool.id === 'split') {
-                            const state = useEditorStore.getState();
-                            const t = state.currentTime;
-                            
-                            if (state.selectedClipIds && state.selectedClipIds.length > 0) {
-                              let splitted = false;
-                              state.selectedClipIds.forEach(id => {
-                                const c = findClipInTracks(tracks, id, state.pipWindows);
-                                if (c && t > c.startTime && t < c.startTime + c.duration) {
-                                  splitClip(id, t);
-                                  splitted = true;
-                                }
-                              });
-                              if (!splitted) {
-                                window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "Playhead is not over selected clip(s).", type: 'warning' }}));
-                              }
-                            } else if (state.selectedTrackId) {
-                              const track = tracks.find(tr => tr.id === state.selectedTrackId);
-                              if (track) {
-                                const clip = track.clips.find((c) => t > c.startTime && t < c.startTime + c.duration);
-                                if (clip) {
-                                  splitClip(clip.id, t);
-                                } else {
-                                  window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "No clip at playhead on selected track.", type: 'warning' }}));
-                                }
-                              }
-                            } else {
-                              console.warn("Select a clip or track to split.");
-                              window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: "Please select a clip or track to split first.", type: 'warning' }}));
-                            }
+                            handleSplitAtPlayhead();
                           } else {
                             setActiveTool(tool.id);
                           }

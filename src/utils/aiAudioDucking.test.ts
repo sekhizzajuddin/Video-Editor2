@@ -235,4 +235,66 @@ describe('applyAutoDuckingToTrack', () => {
     expect(result.success).toBe(false);
     expect(result.duckedClipsCount).toBe(0);
   });
+
+  it('correctly classifies vocal amplitude levels: High Max (50%), Mid (~25%), Low (~5%), and None (100%)', async () => {
+    const { getBgmVolumeForAmplitude } = await import('./aiAudioDucking');
+
+    // Vocal High Max -> 50%
+    const high = getBgmVolumeForAmplitude(0.75);
+    expect(high.level).toBe('high');
+    expect(high.volume).toBeCloseTo(0.50);
+
+    // Vocal Mid -> ~25%
+    const mid = getBgmVolumeForAmplitude(0.35, { duckAmountDb: -12 });
+    expect(mid.level).toBe('mid');
+    expect(mid.volume).toBeCloseTo(0.25);
+
+    // Vocal Low -> ~5%
+    const low = getBgmVolumeForAmplitude(0.08);
+    expect(low.level).toBe('low');
+    expect(low.volume).toBeCloseTo(0.05);
+
+    // Vocal None -> 100%
+    const none = getBgmVolumeForAmplitude(0.005);
+    expect(none.level).toBe('none');
+    expect(none.volume).toBeCloseTo(1.0);
+  });
+
+  it('combines Track 1 and Track 2 vocal audio into a spectrum against Track 3 BGM', async () => {
+    const { buildCombinedVocalSpectrum } = await import('./aiAudioDucking');
+
+    // Track 1 has speech from 2s to 6s
+    const clipTrack1 = makeClip('vocal_1', 2, 4);
+    const mediaTrack1 = {
+      id: 'media_vocal_1',
+      name: 'Voice 1',
+      type: 'audio' as const,
+      duration: 4,
+      waveformPeaks: [0.8, 0.8, 0.8, 0.8], // High vocal
+    };
+
+    // Track 2 has soft voice from 8s to 12s
+    const clipTrack2 = makeClip('vocal_2', 8, 4);
+    const mediaTrack2 = {
+      id: 'media_vocal_2',
+      name: 'Voice 2',
+      type: 'audio' as const,
+      duration: 4,
+      waveformPeaks: [0.08, 0.08, 0.08, 0.08], // Low vocal
+    };
+
+    // Track 3 is BGM from 0s to 15s
+    const bgmClip = makeClip('bgm', 0, 15);
+
+    const tracks: TimelineTrack[] = [
+      { id: 'track_1', name: 'Vocal 1', type: 'audio', clips: [clipTrack1] },
+      { id: 'track_2', name: 'Vocal 2', type: 'audio', clips: [clipTrack2] },
+      { id: 'track_3', name: 'BGM Track', type: 'audio', clips: [bgmClip] },
+    ];
+
+    const spectrum = await buildCombinedVocalSpectrum(tracks, [mediaTrack1, mediaTrack2], 'track_3');
+    expect(spectrum.totalVocalDuration).toBeGreaterThan(0);
+    expect(spectrum.vocalHighSeconds).toBeGreaterThan(0);
+    expect(spectrum.vocalLowSeconds).toBeGreaterThan(0);
+  });
 });

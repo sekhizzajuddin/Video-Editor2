@@ -103,6 +103,9 @@ export function AutoDuckingModal({ onClose }: AutoDuckingModalProps) {
     duckedClipsCount: number;
     speechIntervalsCount: number;
     totalSpeechDuration: number;
+    vocalHighDuration?: number;
+    vocalMidDuration?: number;
+    vocalLowDuration?: number;
   } | null>(null);
 
   // Selected BGM track details
@@ -214,6 +217,9 @@ export function AutoDuckingModal({ onClose }: AutoDuckingModalProps) {
           duckedClipsCount: result.duckedClipsCount,
           speechIntervalsCount: result.speechIntervalsCount,
           totalSpeechDuration: result.totalSpeechDuration,
+          vocalHighDuration: result.vocalHighDuration,
+          vocalMidDuration: result.vocalMidDuration,
+          vocalLowDuration: result.vocalLowDuration,
         });
 
         toast.success(
@@ -447,6 +453,55 @@ export function AutoDuckingModal({ onClose }: AutoDuckingModalProps) {
             />
           </div>
 
+          {/* 4-Tier Vocal Spectrum De-Amplification Rules */}
+          <div className="bg-black/20 rounded-xl p-3.5 border border-white/5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Multi-Track Vocal Spectrum Rules</span>
+              </span>
+              <span className="text-[10px] text-indigo-400 font-mono">Dynamic Curve</span>
+            </div>
+            <p className="text-[10px] text-slate-400">
+              Combines Tracks 1 &amp; 2 into a unified spectrum, de-amplifying BGM where vocals exist with S-curve smoothing:
+            </p>
+
+            <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+              <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col">
+                <span className="text-indigo-300 font-semibold flex items-center gap-1">
+                  <span>🔊 High Max</span>
+                </span>
+                <span className="text-slate-400 text-[9px] mt-0.5">Vocal ≥ 50%</span>
+                <span className="text-white font-mono font-bold mt-1 text-[11px]">BGM 50%</span>
+                <span className="text-[9px] text-slate-400">-6 dB cut</span>
+              </div>
+              <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 flex flex-col">
+                <span className="text-blue-300 font-semibold flex items-center gap-1">
+                  <span>🔉 Mid Vocal</span>
+                </span>
+                <span className="text-slate-400 text-[9px] mt-0.5">Vocal 15–50%</span>
+                <span className="text-white font-mono font-bold mt-1 text-[11px]">BGM ~25%</span>
+                <span className="text-[9px] text-slate-400">{duckAmountDb} dB</span>
+              </div>
+              <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-500/20 flex flex-col">
+                <span className="text-purple-300 font-semibold flex items-center gap-1">
+                  <span>🔈 Low Vocal</span>
+                </span>
+                <span className="text-slate-400 text-[9px] mt-0.5">Vocal 2–15%</span>
+                <span className="text-white font-mono font-bold mt-1 text-[11px]">BGM ~5%</span>
+                <span className="text-[9px] text-purple-300/80">Whisper protect</span>
+              </div>
+              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex flex-col">
+                <span className="text-emerald-300 font-semibold flex items-center gap-1">
+                  <span>🔇 Silence</span>
+                </span>
+                <span className="text-slate-400 text-[9px] mt-0.5">No Voice</span>
+                <span className="text-emerald-400 font-mono font-bold mt-1 text-[11px]">BGM 100%</span>
+                <span className="text-[9px] text-emerald-400/80">Full music</span>
+              </div>
+            </div>
+          </div>
+
           {/* Pacing & Transitions */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-black/20 rounded-xl p-3 border border-white/5 space-y-2">
@@ -521,15 +576,32 @@ export function AutoDuckingModal({ onClose }: AutoDuckingModalProps) {
 
           {/* Result Banner */}
           {lastResult && (
-            <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center gap-2.5 text-xs text-emerald-300">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <div>
-                <p className="font-semibold">
-                  Auto Ducking Applied Successfully!
+            <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 space-y-2 text-xs text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <p className="font-semibold text-emerald-200">
+                  AI Spectrum Ducking Applied Successfully!
                 </p>
-                <p className="text-[11px] text-emerald-400/80">
-                  Ducked {lastResult.speechIntervalsCount} vocal sections ({lastResult.totalSpeechDuration}s total speech) across {lastResult.duckedClipsCount} BGM clip(s).
-                </p>
+              </div>
+              <p className="text-[11px] text-emerald-400/80">
+                Processed {lastResult.totalSpeechDuration}s total vocal speech across {lastResult.duckedClipsCount} BGM clip(s).
+              </p>
+              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                <div className="px-2 py-1 rounded bg-black/30 border border-white/5 text-[10px]">
+                  <span className="text-slate-400 block">High Vocals:</span>
+                  <span className="font-mono text-emerald-300 font-bold">{lastResult.vocalHighDuration ?? 0}s</span>
+                  <span className="text-[9px] text-slate-500 block">Ducked to 50%</span>
+                </div>
+                <div className="px-2 py-1 rounded bg-black/30 border border-white/5 text-[10px]">
+                  <span className="text-slate-400 block">Mid Vocals:</span>
+                  <span className="font-mono text-emerald-300 font-bold">{lastResult.vocalMidDuration ?? 0}s</span>
+                  <span className="text-[9px] text-slate-500 block">Ducked to ~25%</span>
+                </div>
+                <div className="px-2 py-1 rounded bg-black/30 border border-white/5 text-[10px]">
+                  <span className="text-slate-400 block">Low / Soft:</span>
+                  <span className="font-mono text-emerald-300 font-bold">{lastResult.vocalLowDuration ?? 0}s</span>
+                  <span className="text-[9px] text-slate-500 block">Ducked to ~5%</span>
+                </div>
               </div>
             </div>
           )}

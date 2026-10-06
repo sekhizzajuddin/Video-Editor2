@@ -104,12 +104,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   // P0 FIX: Universal mutable batch buffer to avoid GC pressure from fresh
   // array allocations at 60Hz across ALL drag/resize/ripple/slip operations.
   const batchBufferRef = useRef<Array<{clipId: string; changes: Partial<TimelineClip>}>>([]); 
-  const pendingClipClickSeekRef = useRef<{
-    time: number;
-    startX: number;
-    startY: number;
-    timerId: any;
-  } | null>(null); 
 
 
   const {
@@ -677,25 +671,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return;
       }
 
-      // UNIVERSAL LOGIC: Do NOT move playhead immediately on pointerdown.
-      // After release of click, playhead will move to the clicked point.
-      // But if user clicks and holds (>350ms) or drags (>3px), playhead will not move.
-      if (pendingClipClickSeekRef.current?.timerId) {
-        clearTimeout(pendingClipClickSeekRef.current.timerId);
-      }
-      const timerId = setTimeout(() => {
-        if (pendingClipClickSeekRef.current) {
-          pendingClipClickSeekRef.current = null;
-        }
-      }, 350);
-
-      pendingClipClickSeekRef.current = {
-        time: Math.max(0, clickTime),
-        startX: e.clientX,
-        startY: e.clientY,
-        timerId,
-      };
-
       const latestTracks = getLatestTracks(clip.id);
 
       if (activeTool === 'trackSelect') {
@@ -930,12 +905,60 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         time = Math.max(0, x / zoomLevel);
       }
 
-      // Clicking the ruler always deselects every clip and speed frame — nothing should stay
-      // selected when the user jumps to a time.
+      // Clicking the ruler deselects selected clip(s) UNLESS the click time falls within the selected clip's duration.
+      // (E.g. a 10s clip from 40s to 50s remains selected when clicking or scrubbing within 40s to 50s).
       const st = useEditorStore.getState();
-      if (st.selectedClipIds.length > 0 || st.selectedClipId || st.selectedSpeedFrame) {
-        st.selectClip(null);
-        st.selectSpeedFrame(null, null);
+      const selectedIds = new Set<string>();
+      if (st.selectedClipIds && st.selectedClipIds.length > 0) {
+        st.selectedClipIds.forEach(id => selectedIds.add(id));
+      } else if (st.selectedClipId) {
+        selectedIds.add(st.selectedClipId);
+      }
+
+      let isWithinSelectedClip = false;
+      if (selectedIds.size > 0) {
+        for (const track of st.tracks) {
+          for (const clip of track.clips) {
+            if (selectedIds.has(clip.id)) {
+              if (time >= clip.startTime && time <= clip.startTime + clip.duration) {
+                isWithinSelectedClip = true;
+                break;
+              }
+            }
+          }
+          if (isWithinSelectedClip) break;
+        }
+
+        if (!isWithinSelectedClip && st.pipWindows) {
+          for (const pip of Object.values(st.pipWindows)) {
+            let parentClip: TimelineClip | undefined;
+            for (const t of st.tracks) {
+              parentClip = t.clips.find((c) => c.id === pip.parentClipId);
+              if (parentClip) break;
+            }
+            const parentStart = parentClip ? parentClip.startTime + (pip.relativeStartTime || 0) : 0;
+            for (const track of pip.tracks) {
+              for (const clip of track.clips) {
+                if (selectedIds.has(clip.id)) {
+                  const clipStart = parentStart + clip.startTime;
+                  if (time >= clipStart && time <= clipStart + clip.duration) {
+                    isWithinSelectedClip = true;
+                    break;
+                  }
+                }
+              }
+              if (isWithinSelectedClip) break;
+            }
+            if (isWithinSelectedClip) break;
+          }
+        }
+      }
+
+      if (!isWithinSelectedClip) {
+        if (st.selectedClipIds.length > 0 || st.selectedClipId || st.selectedSpeedFrame) {
+          st.selectClip(null);
+          st.selectSpeedFrame(null, null);
+        }
       }
 
       const wasPlaying = st.isPlaying;
@@ -976,18 +999,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const rulerDownXRef = useRef<number>(0);
 
   const handlePointerMove = (e: PointerEvent) => {
-    // If pointer moved beyond 3px threshold, cancel pending click-release seek
-    if (pendingClipClickSeekRef.current) {
-      const dx = e.clientX - pendingClipClickSeekRef.current.startX;
-      const dy = e.clientY - pendingClipClickSeekRef.current.startY;
-      if (Math.hypot(dx, dy) > 3) {
-        if (pendingClipClickSeekRef.current.timerId) {
-          clearTimeout(pendingClipClickSeekRef.current.timerId);
-        }
-        pendingClipClickSeekRef.current = null;
-      }
-    }
-
     if (isScrubbing && !resizeState && !dragState && !slipState && !slideState) {
       if (wasPlayingOnRulerDownRef.current && Math.abs(e.clientX - rulerDownXRef.current) > 4) {
         // User dragged during playback — switch from "click to jump" to full scrubbing mode (pause playback)
@@ -1600,17 +1611,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   };
 
   const handlePointerUp = () => {
-    // UNIVERSAL LOGIC: Move playhead after release of click on clip (if user didn't drag or hold)
-    if (pendingClipClickSeekRef.current) {
-      if (pendingClipClickSeekRef.current.timerId) {
-        clearTimeout(pendingClipClickSeekRef.current.timerId);
-      }
-      const targetTime = pendingClipClickSeekRef.current.time;
-      pendingClipClickSeekRef.current = null;
-      seek(targetTime);
-      window.dispatchEvent(new Event('procut-frame-updated'));
-    }
-
     if (scrubRafIdRef.current !== null) {
       cancelAnimationFrame(scrubRafIdRef.current);
       scrubRafIdRef.current = null;

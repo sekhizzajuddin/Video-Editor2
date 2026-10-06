@@ -115,16 +115,37 @@ export function MobileToolRail({
           split = true;
         }
       });
-      if (!split) toast.warning('Playhead is not over the selected clip.');
+      if (split) return;
     } else if (targetId) {
       const c = findClipInTracks(state.tracks, targetId, state.pipWindows);
       if (c && t > c.startTime + 0.01 && t < c.startTime + c.duration - 0.01) {
         splitClip(targetId, t);
-      } else {
-        toast.warning('Playhead is not over the clip.');
+        return;
       }
+    }
+
+    // Fallback: Single track or unselected media at playhead
+    const clipsAtPlayhead: { clip: any; track: any }[] = [];
+    state.tracks.forEach((track) => {
+      if (track.locked) return;
+      track.clips.forEach((clip) => {
+        if (t > clip.startTime + 0.01 && t < clip.startTime + clip.duration - 0.01) {
+          clipsAtPlayhead.push({ clip, track });
+        }
+      });
+    });
+
+    if (clipsAtPlayhead.length === 1) {
+      splitClip(clipsAtPlayhead[0].clip.id, t);
+    } else if (clipsAtPlayhead.length > 1) {
+      const preferred = clipsAtPlayhead.find((item) => item.track.type === 'video') || clipsAtPlayhead[0];
+      splitClip(preferred.clip.id, t);
     } else {
-      toast.warning('Select a clip first.');
+      if (state.selectedClipIds.length > 0 || targetId) {
+        toast.warning('Playhead is not over the selected clip.');
+      } else {
+        toast.warning('No media at playhead position to split.');
+      }
     }
   };
 

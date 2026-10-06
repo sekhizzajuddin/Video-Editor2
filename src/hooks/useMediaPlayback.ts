@@ -968,7 +968,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
   // Throttled time for the reactive audio-parameter effect (see below). Exact values
   // are always read via useEditorStore.getState() inside the effect body.
-  const audioParamTime = usePlaybackTime(10);
+  const audioParamTime = usePlaybackTime(25);
 
   const pendingSeeksRef = useRef<Map<string, number>>(new Map());
   const lastActiveClipIdsRef = useRef<Set<string>>(new Set());
@@ -2421,7 +2421,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
 
       const ctxTime = entry.audioCtx?.currentTime || 0;
-      const rampTime = 0.08;
+      const hasVolumeAnim = Boolean(fullClip.animations?.['audio.volume']?.length);
+      const rampTime = hasVolumeAnim ? 0.04 : 0.08;
 
       // Total vocal pitch: manual Pitch Shift + Vocal Tone + auto vocal-match
       // correction (see src/utils/vocalTone.ts).
@@ -2643,10 +2644,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (entry.el.volume !== elVolume) entry.el.volume = elVolume;
       }
     }
-    // PERF: keyed off `audioParamTime` (10 Hz) rather than raw `currentTime` (~33 Hz).
-    // Fades, keyframed volume and transition ramps are all applied through
-    // AudioParam.setTargetAtTime with an 80 ms time-constant, so a 100 ms update
-    // cadence is inaudible while cutting this effect's cost by ~3×.
+    // PERF: keyed off `audioParamTime` (25 Hz) rather than raw `currentTime` (~33 Hz).
+    // Fades, keyframed volume and transition ramps are applied through AudioParam.setTargetAtTime
+    // (40ms time-constant for keyframed volume animations, 80ms for static fades) for instant, click-free response.
   }, [tracks, volume, isMuted, muteTimelineAudio, playbackSpeed, audioParamTime, isPlaying, mediaLibrary, isPrimary, previewSuspended]);
 
   // ---- Cleanup orphaned analysers ----

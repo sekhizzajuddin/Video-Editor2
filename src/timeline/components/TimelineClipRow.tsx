@@ -366,6 +366,15 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
+        selectClip(clip.id);
+        const rect = e.currentTarget.getBoundingClientRect();
+        const clickOffsetPx = e.clientX - rect.left;
+        const clickTime = Math.max(
+          clip.startTime,
+          Math.min(clip.startTime + clip.duration, clip.startTime + clickOffsetPx / zoomLevel)
+        );
+        useEditorStore.getState().seek(clickTime);
+        window.dispatchEvent(new Event('procut-frame-updated'));
         if (media.type === 'compound') {
           enterCompoundClip(clip.id);
         }

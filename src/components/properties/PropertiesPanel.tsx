@@ -70,7 +70,7 @@ import { aiVocalSeparator } from '@/utils/aiVocalSeparator';
 import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
 const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
-import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
+import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult, TimelineClip } from '@/types';
 import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine, getMediaTimeForClip } from '@/utils/speedRamp';
 import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
 import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
@@ -94,6 +94,64 @@ import PipTab from './tabs/PipTab';
 import { ENTER_EXIT_PRESETS } from '@/utils/clipEnterExitEngine';
 import { checkDesktopAiStatus, hasUserSkippedDesktopPrompt } from '@/utils/desktopAiBridge';
 import { DesktopAiCutoutModal } from '@/components/DesktopAiCutoutModal';
+
+const DEFAULT_INACTIVE_CLIP: TimelineClip = {
+  id: '__inactive_clip__',
+  name: 'No clip selected',
+  mediaId: '',
+  trackId: '',
+  startTime: 0,
+  duration: 5,
+  trimStart: 0,
+  trimEnd: 0,
+  transform: {
+    x: 0,
+    y: 0,
+    scale: 100,
+    rotation: 0,
+    rotationX: 0,
+    rotationY: 0,
+    rotationZ: 0,
+    blendIntensity: 100,
+    flipH: false,
+    flipV: false,
+  },
+  crop: { top: 0, bottom: 0, left: 0, right: 0 },
+  opacity: 1,
+  speed: 1,
+  effects: [],
+  animations: {},
+  colorFilters: {
+    temperature: 0,
+    tint: 0,
+    exposure: 0,
+    contrast: 100,
+    saturation: 100,
+    blur: 0,
+    fadedFilm: 0,
+    vignette: 0,
+  },
+  audioSettings: {
+    volume: 0,
+    pan: 0,
+    fadeIn: 0,
+    fadeOut: 0,
+    bass: 0,
+    mid: 0,
+    treble: 0,
+    muted: false,
+    preservePitch: true,
+    pitch: 0,
+    voiceFormant: 0,
+    tone: 0,
+    vocalMatchEnabled: false,
+    humanize: false,
+    denoise: 0,
+    compression: 0,
+    deEsser: 0,
+    warmth: 0,
+  },
+};
 
 const KeyframeIcon = ({ active, onClick }: { active: boolean; onClick: (e: React.MouseEvent) => void }) => (
   <button
@@ -740,13 +798,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     }
   }
 
+  const rawSelectedClip = selectedClip;
+  const isClipSelected = Boolean(rawSelectedClip);
+  if (!selectedClip) {
+    selectedClip = DEFAULT_INACTIVE_CLIP;
+  }
+
   const [isSeparating, setIsSeparating] = useState(false);
   const [isNormalizing, setIsNormalizing] = useState(false);
   const [bgAnalysisStatus, setBgAnalysisStatus] = useState<any>({ status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
   const [showCutoutRefine, setShowCutoutRefine] = useState(false);
 
   useEffect(() => {
-    if (!selectedClip || !selectedClip.aiBackground?.enabled) {
+    if (!rawSelectedClip || !rawSelectedClip.aiBackground?.enabled) {
       setBgAnalysisStatus({ status: 'idle', progress: 0, processedFrames: 0, totalFrames: 0 });
       return;
     }
@@ -982,14 +1046,17 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const primarySelectedId = selectedClipId || (selectedClipIds.length > 0 ? selectedClipIds[0] : null);
 
   const updateClip = useCallback((clipId: string, updates: any, options?: { ripple?: boolean }) => {
+    if (!rawSelectedClip || clipId === '__inactive_clip__') return;
     storeUpdateClip(clipId, updates, options);
-  }, [storeUpdateClip]);
+  }, [storeUpdateClip, rawSelectedClip]);
 
   const removeClip = useCallback((clipId: string) => {
+    if (!rawSelectedClip || clipId === '__inactive_clip__') return;
     storeRemoveClip(clipId);
-  }, [storeRemoveClip]);
+  }, [storeRemoveClip, rawSelectedClip]);
 
   const enableClipCutout = useCallback((clipId: string) => {
+    if (!rawSelectedClip || clipId === '__inactive_clip__') return;
     const found = findClipDeep(useEditorStore.getState(), clipId);
     if (!found) return;
     const clip = found.clip;
@@ -1022,11 +1089,13 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         true
       );
     }
-  }, [mediaLibrary, updateClip]);
+  }, [mediaLibrary, updateClip, rawSelectedClip]);
 
   // Check if a given tab is supported by the clip & track
   const isTabSupportedForClip = useCallback((tab: PropertiesTab, clip: any, track: any): boolean => {
-    if (!clip) return tab === 'thumbnail';
+    if (!rawSelectedClip || clip?.id === '__inactive_clip__') {
+      return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects' || tab === 'thumbnail';
+    }
     if (tab === 'thumbnail') return true;
     // PIP tab available when clip is a PIP parent or inside a PIP window
     if (tab === 'pip') return !!(clip.pipWindowIds?.length || isPipClip);
@@ -1045,7 +1114,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     
     // Standard video/image clip supports: transform, mask, color, speed, audio, effects
     return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects';
-  }, [isPipClip]);
+  }, [isPipClip, rawSelectedClip]);
 
   const getDefaultTabForClip = useCallback((clip: any, track: any): PropertiesTab => {
     if (track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
@@ -1092,7 +1161,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   // Auto-switch properties panel tabs only when clip selection changes and current tab is not supported
   useEffect(() => {
-    if (!primarySelectedId) {
+    if (!primarySelectedId || !rawSelectedClip) {
+      // When no clip selected: if user is on a special tab ('text' or 'pip'), switch back to 'transform'
+      if (activePropertiesTab === 'text' || activePropertiesTab === 'pip') {
+        setActivePropertiesTab('transform');
+      }
       return;
     }
     if (lastAutoSwitchedClip.current === primarySelectedId) return; // don't override manual tab changes on same clip
@@ -1111,7 +1184,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     // Otherwise, fallback to the clip's default tab
     const fallbackTab = getDefaultTabForClip(selectedClip, selectedTrack);
     setActivePropertiesTab(fallbackTab);
-  }, [primarySelectedId, selectedClip, selectedTrack, activePropertiesTab, isTabSupportedForClip, getDefaultTabForClip, setActivePropertiesTab]);
+  }, [primarySelectedId, rawSelectedClip, selectedClip, selectedTrack, activePropertiesTab, isTabSupportedForClip, getDefaultTabForClip, setActivePropertiesTab]);
 
 
 
@@ -1311,18 +1384,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     return list;
   }, [selectedClipIds, selectedClipId, tracks, mediaLibrary]);
 
-  const selectedMediaItem = mediaLibrary.find((m) => m.id === selectedClip?.mediaId);
-  const clipDisplayName = selectedClip?.name || selectedMediaItem?.name || 'Project_01.mp4';
-  const clipDurationStr = formatDuration(selectedClip?.duration || selectedMediaItem?.duration || 0);
+  const selectedMediaItem = rawSelectedClip ? mediaLibrary.find((m) => m.id === selectedClip?.mediaId) : null;
+  const clipDisplayName = rawSelectedClip ? (selectedClip?.name || selectedMediaItem?.name || 'Clip') : 'No clip selected';
+  const clipDurationStr = formatDuration(rawSelectedClip ? (selectedClip?.duration || selectedMediaItem?.duration || 0) : 0);
   const clipResolutionStr = selectedMediaItem?.height ? `${selectedMediaItem.height}p` : '1080p';
   const clipAspectStr = selectedMediaItem?.width && selectedMediaItem?.height
     ? (Math.abs(selectedMediaItem.width / selectedMediaItem.height - 16 / 9) < 0.1 ? '16:9' : Math.abs(selectedMediaItem.width / selectedMediaItem.height - 9 / 16) < 0.1 ? '9:16' : '1:1')
     : '16:9';
-  const clipMetaSubtitle = `${clipResolutionStr} · ${clipAspectStr} · ${clipDurationStr}`;
+  const clipMetaSubtitle = rawSelectedClip ? `${clipResolutionStr} · ${clipAspectStr} · ${clipDurationStr}` : 'Controls Inactive';
 
   const handleReplaceMediaFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedClip) return;
+    if (!file || !rawSelectedClip) return;
     try {
       const url = URL.createObjectURL(file);
       const newMedia = {
@@ -1349,22 +1422,22 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const baseTabs: { id: PropertiesTab; label: string; icon: any }[] = [];
 
   // Always show Text tab first if the clip has textSettings
-  if (selectedClip?.textSettings) {
+  if (rawSelectedClip?.textSettings) {
     baseTabs.push({ id: 'text', label: 'Text', icon: Type });
   }
 
-  if (selectedTrack?.type === 'text') {
+  if (rawSelectedClip && selectedTrack?.type === 'text') {
     if (!baseTabs.some(t => t.id === 'text')) {
       baseTabs.push({ id: 'text', label: 'Text', icon: Type });
     }
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
-  } else if (selectedTrack?.type === 'fx') {
+  } else if (rawSelectedClip && selectedTrack?.type === 'fx') {
     baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
   } else {
-    // Video / Audio / Image/Text clips on other tracks: full set of tabs
+    // Video / Audio / Image/Text clips on other tracks, or when no clip is selected: full set of tabs
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'mask', label: 'Mask', icon: Crop });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
@@ -1376,7 +1449,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   baseTabs.push({ id: 'thumbnail', label: 'Thumbnail', icon: ImageIcon });
 
   // Show PIP tab when the clip is a PIP parent (has pipWindowIds) or is inside a PIP window
-  if (selectedClip?.pipWindowIds?.length || isPipClip) {
+  if (rawSelectedClip?.pipWindowIds?.length || (rawSelectedClip && isPipClip)) {
     baseTabs.push({ id: 'pip', label: 'PIP', icon: Layers });
   }
 
@@ -2009,45 +2082,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     );
   }
 
-  if (!selectedClip) {
-    if (isMobileView) {
-      return (
-        <div className="h-full flex flex-col bg-[#121215] text-white">
-          <div className="flex items-center justify-between border-b border-[var(--theme-border)] px-4 py-3 shrink-0">
-            <h3 className="text-sm font-semibold capitalize text-white">
-              {mobileCategory || 'Properties'}
-            </h3>
-            {onMobileClose && (
-              <button
-                onClick={onMobileClose}
-                className="rounded-full bg-[var(--theme-bg-subpanel)] p-1.5 text-white/70 hover:bg-[var(--theme-bg-card)] hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <Move3D className="w-10 h-10 text-white/20 mb-3" />
-            <p className="text-sm font-medium text-[var(--theme-text-primary)]/80">No clip selected</p>
-            <p className="text-xs text-[var(--theme-text-primary)]/40 mt-1">Tap a clip on the timeline to edit its properties</p>
-          </div>
-        </div>
-      );
-    }
-    return (
-      <div className="h-full flex flex-col bg-[var(--theme-bg-subpanel)] border-l border-[var(--theme-border)] items-center justify-center p-4">
-        <div className="text-center">
-          <Move3D className="w-10 h-10 text-[#3e3e3e] mx-auto mb-3" />
-          <p className="text-sm text-[var(--theme-text-muted)]">No clip selected</p>
-          <p className="text-xs text-[var(--theme-text-muted)] mt-1 opacity-60">
-            Click a clip on the timeline to edit its properties
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const getClipAbsoluteStartTime = (clipId: string): number => {
+    if (!clipId || clipId === '__inactive_clip__') return 0;
     const state = useEditorStore.getState();
     const found = findClipDeep(state, clipId);
     if (found && found.isPip && found.pipId) {
@@ -2066,8 +2102,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     return found?.clip.startTime ?? 0;
   };
 
-  const absoluteStartTime = getClipAbsoluteStartTime(selectedClip.id);
-  const localTime = currentTime - absoluteStartTime;
+  const absoluteStartTime = rawSelectedClip ? getClipAbsoluteStartTime(selectedClip.id) : 0;
+  const localTime = rawSelectedClip ? currentTime - absoluteStartTime : 0;
   const animations: ClipAnimations = selectedClip.animations || {};
   const getMasterKeyframes = () => {
     const allTimes = new Set<number>();
@@ -2092,6 +2128,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   };
 
   const setPropVal = (propKey: string, value: number, baseUpdateObj: any) => {
+    if (!rawSelectedClip) return;
     if (hasMasterKeyframes) {
       const currentVals: any = {
         transform: {
@@ -2145,6 +2182,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   };
 
   const handleToggleMasterKeyframe = () => {
+    if (!rawSelectedClip) return;
     if (isOnKeyframe) {
         const closest = keyframeTimes.find((t: any) => Math.abs(t - localTime) < 0.05);
        if (closest !== undefined) {
@@ -2202,7 +2240,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const clipFilters = selectedClip.colorFilters || defaultColorFilters;
 
   const handleFilterChange = (key: keyof typeof defaultColorFilters, val: number) => {
-    if (!selectedClip) return;
+    if (!rawSelectedClip) return;
     const current = selectedClip.colorFilters || defaultColorFilters;
     setPropVal(`color.${key}`, val, {
       colorFilters: {
@@ -2213,7 +2251,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   };
 
   const handleFilterReset = (key: keyof typeof defaultColorFilters) => {
-    if (!selectedClip) return;
+    if (!rawSelectedClip) return;
     const current = selectedClip.colorFilters || defaultColorFilters;
     const defaultVal = defaultColorFilters[key];
     setPropVal(`color.${key}`, defaultVal, {
@@ -2249,7 +2287,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const clipAudio = selectedClip?.audioSettings || defaultAudioSettings;
 
   const handleResetClipSettings = () => {
-    if (!selectedClip) return;
+    if (!rawSelectedClip) return;
     const store = useEditorStore.getState();
     const updatePayload: any = {
       transform: { x: 0, y: 0, scale: 100, rotation: 0 },
@@ -3855,8 +3893,22 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             })}
           </div>
 
+          {!rawSelectedClip && (
+            <div className="border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)]/40 px-3.5 py-2.5 flex items-center justify-between select-none">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500/80 animate-pulse" />
+                <span className="text-[11px] font-medium text-[var(--theme-text-muted)]">
+                  No Clip Selected — Controls Inactive
+                </span>
+              </div>
+              <span className="text-[9px] px-2 py-0.5 rounded-full bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[var(--theme-text-muted)] font-mono">
+                Select a clip
+              </span>
+            </div>
+          )}
+
           {/* Clip Details Section matching reference image */}
-          {selectedClip && (
+          {rawSelectedClip && (
             <div className="border-b border-[var(--theme-border)] bg-[var(--theme-bg-card)] p-3 space-y-2.5">
               {/* Hidden file input for Replace */}
               <input
@@ -4093,7 +4145,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       <div 
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-3"
+        className={`flex-1 overflow-y-auto p-3 transition-opacity duration-150 ${
+          !rawSelectedClip ? 'opacity-40 pointer-events-none select-none filter grayscale-[0.25]' : ''
+        }`}
       >
         <SequenceProperties />
         {currentTab === 'transform' && (() => {

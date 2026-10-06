@@ -181,7 +181,7 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
               </button>
             </div>
             <p className="text-[9px] text-[var(--theme-text-muted)]">
-              Volume is automatically ducked during dialogue. Keyframe diamonds are visible and adjustable on the timeline.
+              4-Tier vocal spectrum de-amplification active (High 50%, Mid ~25%, Low ~5%, Silence 100%). Keyframe diamonds visible on timeline.
             </p>
           </div>
         ) : (
@@ -190,8 +190,8 @@ export function AutoDuckingSection({ selectedClip, handleAudioChange }: AutoDuck
               <Volume2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
               <span>
                 {overlappingVoiceClips.length > 0
-                  ? `${overlappingVoiceClips.length} dialogue/voice clip(s) detected across other tracks.`
-                  : 'Ready: Scans speech across other tracks and applies volume keyframes.'}
+                  ? `${overlappingVoiceClips.length} dialogue/voice clip(s) ready across vocal tracks.`
+                  : 'Ready: Combines vocal tracks into spectrum & applies 4-tier de-amplification.'}
               </span>
             </div>
 
