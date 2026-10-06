@@ -5,7 +5,7 @@
 // to both UIs. UI-only changes belong in the individual UI layer instead.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw, History, Trash2, Heart } from 'lucide-react';
+import { X, Settings, Keyboard, Monitor, HardDrive, RotateCcw, FolderOpen, Sliders, AlertTriangle, Search, RotateCw, History, Trash2, Heart, LayoutGrid, Check } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -17,9 +17,10 @@ import { clearImageBitmapPool, getImageBitmapPoolStats } from '@/utils/imageBitm
 import { clearAllMediaWindows } from '@/utils/ramWindowedBlobCache';
 import { DEFAULT_SHORTCUTS, getShortcutString, SHORTCUT_PROFILES } from '@/utils/keyboardShortcuts';
 import { toast } from 'sonner';
+import { WORKSPACE_PRESETS, PRESET_CATEGORIES, getPresetLayout, type WorkspacePreset } from '@/utils/workspacePresets';
 
 export function SettingsModal() {
-  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings, aspectRatio, reframeProject, showProgressBar, useProxies, setUseProxies, setShowProgressBar, progressBarColor, setProgressBarColor, progressBarHeight, setProgressBarHeight } = useEditorStore(useShallow(s => ({ showSettingsModal: s.showSettingsModal, setShowSettingsModal: s.setShowSettingsModal, resetProject: s.resetProject, addMedia: s.addMedia, settings: s.settings, updateSettings: s.updateSettings, aspectRatio: s.aspectRatio, reframeProject: s.reframeProject, showProgressBar: s.showProgressBar, useProxies: s.useProxies, setUseProxies: s.setUseProxies, setShowProgressBar: s.setShowProgressBar, progressBarColor: s.progressBarColor, setProgressBarColor: s.setProgressBarColor, progressBarHeight: s.progressBarHeight, setProgressBarHeight: s.setProgressBarHeight })));
+  const { showSettingsModal, setShowSettingsModal, resetProject, addMedia, settings, updateSettings, aspectRatio, reframeProject, showProgressBar, useProxies, setUseProxies, setShowProgressBar, progressBarColor, setProgressBarColor, progressBarHeight, setProgressBarHeight, workspaceLayout, setWorkspaceLayout } = useEditorStore(useShallow(s => ({ showSettingsModal: s.showSettingsModal, setShowSettingsModal: s.setShowSettingsModal, resetProject: s.resetProject, addMedia: s.addMedia, settings: s.settings, updateSettings: s.updateSettings, aspectRatio: s.aspectRatio, reframeProject: s.reframeProject, showProgressBar: s.showProgressBar, useProxies: s.useProxies, setUseProxies: s.setUseProxies, setShowProgressBar: s.setShowProgressBar, progressBarColor: s.progressBarColor, setProgressBarColor: s.setProgressBarColor, progressBarHeight: s.progressBarHeight, setProgressBarHeight: s.setProgressBarHeight, workspaceLayout: s.workspaceLayout, setWorkspaceLayout: s.setWorkspaceLayout })));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -37,7 +38,7 @@ export function SettingsModal() {
     setShowSettingsModal(false);
     e.target.value = '';
   }, [addMedia, setShowSettingsModal]);
-  const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'performance' | 'controls' | 'recovery' | 'engagement'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'workspace' | 'keyboard' | 'performance' | 'controls' | 'recovery' | 'engagement'>('general');
   const [searchQuery, setSearchQuery] = useState('');
   const [autosaves, setAutosaves] = useState<any[]>([]);
 
@@ -162,6 +163,7 @@ export function SettingsModal() {
 
   const tabs = [
     { id: 'general' as const, label: 'General', icon: Settings },
+    { id: 'workspace' as const, label: 'Workspace', icon: LayoutGrid },
     { id: 'controls' as const, label: 'Controls', icon: Sliders },
     { id: 'keyboard' as const, label: 'Shortcuts', icon: Keyboard },
     { id: 'performance' as const, label: 'Performance', icon: Monitor },
@@ -171,7 +173,7 @@ export function SettingsModal() {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center">
-      <div className="bg-[var(--theme-bg-panel)] rounded-2xl shadow-2xl w-[580px] max-h-[85vh] overflow-hidden border border-[var(--theme-border)] text-[var(--theme-text-primary)]">
+      <div className={`bg-[var(--theme-bg-panel)] rounded-2xl shadow-2xl max-h-[85vh] overflow-hidden border border-[var(--theme-border)] text-[var(--theme-text-primary)] transition-all duration-200 ${activeTab === 'workspace' ? 'w-[720px]' : 'w-[580px]'}`}>
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[var(--theme-border)]">
           <div className="flex items-center gap-2">
@@ -497,6 +499,117 @@ export function SettingsModal() {
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Workspace Layouts Tab ──────────────────────────────────── */}
+            {activeTab === 'workspace' && (
+              <div className="space-y-5">
+                <div>
+                  <h3 className="text-xs font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">Workspace Layouts</h3>
+                  <p className="text-[10px] text-[var(--theme-text-muted)] mt-1">Choose a layout optimized for your workflow. Panel sizes adjust instantly.</p>
+                </div>
+
+                {/* Current layout indicator */}
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/8 border border-blue-500/20">
+                  <LayoutGrid className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="text-[11px] text-[var(--theme-text-muted)]">Active:</span>
+                  <span className="text-[11px] font-semibold text-blue-500">
+                    {WORKSPACE_PRESETS.find(p => p.id === workspaceLayout?.preset)?.label || workspaceLayout?.preset || 'Classic Editing'}
+                  </span>
+                </div>
+
+                {PRESET_CATEGORIES.map((cat) => {
+                  const presets = WORKSPACE_PRESETS.filter(p => p.category === cat.id);
+                  if (presets.length === 0) return null;
+                  return (
+                    <div key={cat.id} className="space-y-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-[var(--theme-text-primary)] uppercase tracking-wider">{cat.label}</span>
+                        <span className="text-[9px] text-[var(--theme-text-muted)]">— {cat.description}</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {presets.map((preset) => {
+                          const isActive = workspaceLayout?.preset === preset.id;
+                          return (
+                            <button
+                              key={preset.id}
+                              onClick={() => setWorkspaceLayout(getPresetLayout(preset.id))}
+                              className={`group relative rounded-xl border p-3 text-left transition-all duration-150 ${
+                                isActive
+                                  ? 'border-blue-500 bg-blue-500/8 ring-1 ring-blue-500/30 shadow-sm shadow-blue-500/10'
+                                  : 'border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] hover:border-blue-500/40 hover:bg-[var(--theme-bg-card)]'
+                              }`}
+                            >
+                              {/* Active badge */}
+                              {isActive && (
+                                <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
+                                  <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                                </div>
+                              )}
+
+                              {/* Mini wireframe preview */}
+                              <div className="w-full h-[52px] rounded-md border border-[var(--theme-border)] bg-[var(--theme-bg-panel)] mb-2.5 overflow-hidden flex flex-col">
+                                {/* Top bar */}
+                                <div className="h-[4px] bg-[var(--theme-border)] shrink-0" />
+                                {/* Main area */}
+                                <div className="flex-1 flex min-h-0">
+                                  {/* Left panel */}
+                                  <div
+                                    className={`shrink-0 border-r transition-colors ${
+                                      isActive ? 'bg-blue-500/15 border-blue-500/30' : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)]'
+                                    }`}
+                                    style={{ width: `${preset.preview.left * 100}%` }}
+                                  />
+                                  {/* Center: preview + timeline */}
+                                  <div className="flex-1 flex flex-col min-w-0">
+                                    <div className={`flex-1 transition-colors ${
+                                      isActive ? 'bg-blue-500/5' : 'bg-[var(--theme-bg-app)]'
+                                    }`} />
+                                    <div
+                                      className={`shrink-0 border-t transition-colors ${
+                                        isActive ? 'bg-blue-500/12 border-blue-500/30' : 'bg-[var(--theme-bg-card)] border-[var(--theme-border)]'
+                                      }`}
+                                      style={{ height: `${preset.preview.timeline * 100}%` }}
+                                    />
+                                  </div>
+                                  {/* Right panel */}
+                                  {preset.preview.right > 0 && (
+                                    <div
+                                      className={`shrink-0 border-l transition-colors ${
+                                        isActive ? 'bg-blue-500/15 border-blue-500/30' : 'bg-[var(--theme-bg-subpanel)] border-[var(--theme-border)]'
+                                      }`}
+                                      style={{ width: `${preset.preview.right * 100}%` }}
+                                    />
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Label & description */}
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span className="text-sm leading-none">{preset.icon}</span>
+                                <span className={`text-[11px] font-semibold ${isActive ? 'text-blue-500' : 'text-[var(--theme-text-primary)]'}`}>
+                                  {preset.label}
+                                </span>
+                              </div>
+                              <p className="text-[9px] text-[var(--theme-text-muted)] leading-relaxed line-clamp-2">
+                                {preset.description}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Custom note */}
+                <div className="mt-2 px-3 py-2 rounded-lg bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)]">
+                  <p className="text-[10px] text-[var(--theme-text-muted)]">
+                    <span className="font-medium text-[var(--theme-text-primary)]">Tip:</span> Drag panel edges in the editor to fine-tune sizes. Manual resizing switches to "Custom" layout.
+                  </p>
                 </div>
               </div>
             )}

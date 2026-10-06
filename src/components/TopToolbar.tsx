@@ -36,6 +36,7 @@ import { setActiveProject } from '@/utils/projectPersistence';
 import { RecentProjectsModal } from './RecentProjectsModal';
 import { toast } from 'sonner';
 import { ProCutLogo } from './ProCutLogo';
+import { WORKSPACE_PRESETS, getPresetLayout } from '@/utils/workspacePresets';
 
 export function TopToolbar() {
   const {
@@ -287,37 +288,34 @@ export function TopToolbar() {
             }}
           >
             <span className="text-slate-400 dark:text-slate-400 font-normal">Workspace:</span>
-            <span className="font-semibold text-blue-500">{workspaceLayout?.preset || 'Editing'}</span>
+            <span className="font-semibold text-blue-500">{WORKSPACE_PRESETS.find(p => p.id === workspaceLayout?.preset)?.label || workspaceLayout?.preset || 'Classic Editing'}</span>
             <ChevronDown className="w-3 h-3 text-slate-400" />
           </button>
 
           {showLayoutMenu && (
             <div 
-              className="absolute top-full left-0 mt-1.5 w-44 rounded-lg shadow-xl z-50 py-1.5 border animate-in fade-in zoom-in-95 duration-100"
+              className="absolute top-full left-0 mt-1.5 w-52 rounded-lg shadow-xl z-50 py-1.5 border animate-in fade-in zoom-in-95 duration-100"
               style={{
                 backgroundColor: 'var(--theme-bg-card)',
                 borderColor: 'var(--theme-border)',
               }}
             >
-              {['Editing', 'Color', 'Audio', 'Generative'].map((preset) => (
+              {WORKSPACE_PRESETS.map((preset) => (
                 <button
-                  key={preset}
+                  key={preset.id}
                   onClick={() => {
-                    if (preset === 'Editing') setWorkspaceLayout({ preset: 'Editing', leftWidth: 250, rightWidth: 280, timelineHeight: 320 });
-                    if (preset === 'Color') setWorkspaceLayout({ preset: 'Color', leftWidth: 200, rightWidth: 400, timelineHeight: 320 });
-                    if (preset === 'Audio') setWorkspaceLayout({ preset: 'Audio', leftWidth: 200, rightWidth: 280, timelineHeight: 250 });
-                    if (preset === 'Generative') setWorkspaceLayout({ preset: 'Generative', leftWidth: 200, rightWidth: 0, timelineHeight: 250 });
+                    setWorkspaceLayout(getPresetLayout(preset.id));
                     setShowLayoutMenu(false);
                   }}
                   className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between transition-colors hover:bg-blue-500/10 ${
-                    workspaceLayout?.preset === preset ? 'text-blue-500 font-semibold' : 'text-slate-600 dark:text-slate-300'
+                    workspaceLayout?.preset === preset.id ? 'text-blue-500 font-semibold' : 'text-slate-600 dark:text-slate-300'
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    {preset === 'Generative' && <Sparkles className="w-3.5 h-3.5 text-purple-400" />}
-                    {preset}
+                    <span className="text-sm leading-none">{preset.icon}</span>
+                    {preset.label}
                   </div>
-                  {workspaceLayout?.preset === preset && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                  {workspaceLayout?.preset === preset.id && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
                 </button>
               ))}
             </div>
