@@ -945,13 +945,13 @@ export async function renderCanvasEngine({
       aScale = getAnimatedValue(clip.transform.scale, currentTime, clip.startTime, clip.animations?.['transform.scale'], clip.expressions?.['transform.scale']);
       aX = getAnimatedValue(clip.transform.x, currentTime, clip.startTime, clip.animations?.['transform.x'], clip.expressions?.['transform.x']);
       aY = getAnimatedValue(clip.transform.y, currentTime, clip.startTime, clip.animations?.['transform.y'], clip.expressions?.['transform.y']);
-      aRot = getAnimatedValue(clip.transform.rotation, currentTime, clip.startTime, clip.animations?.['transform.rotation'], clip.expressions?.['transform.rotation']);
+      aRot = getAnimatedValue(clip.transform.rotationZ ?? clip.transform.rotation ?? 0, currentTime, clip.startTime, clip.animations?.['transform.rotationZ'] || clip.animations?.['transform.rotation'], clip.expressions?.['transform.rotationZ'] || clip.expressions?.['transform.rotation']);
     } else {
       aOpacity = clip.opacity ?? 1;
       aScale = clip.transform.scale ?? 100;
       aX = clip.transform.x ?? 0;
       aY = clip.transform.y ?? 0;
-      aRot = clip.transform.rotation ?? 0;
+      aRot = clip.transform.rotationZ ?? clip.transform.rotation ?? 0;
     }
 
     // localTime = time elapsed since clip start, used by text animations and FX timing below.
@@ -1133,6 +1133,61 @@ export async function renderCanvasEngine({
     const cx = W / 2;
     const cy = H / 2;
 
+    let fxFlipH = false;
+    let fxFlipV = false;
+    let fxFlashBrightness = 0;
+    let fxActionScaleMultiplier = 1;
+    let fxShakeX = 0;
+    let fxShakeY = 0;
+
+    if (clip.fxSettings) {
+      const fxType = clip.fxSettings.type;
+      const fxRelTime = Math.max(0, currentTime - clip.startTime);
+
+      if (fxType === 'rhythmic_mirror') {
+        const interval = clip.fxSettings.flipInterval || 0.5;
+        const cycleIdx = Math.floor(fxRelTime / interval);
+        const axis = clip.fxSettings.flipAxis || 'horizontal';
+
+        if (axis === 'horizontal') {
+          fxFlipH = (cycleIdx % 2 === 1);
+        } else if (axis === 'vertical') {
+          fxFlipV = (cycleIdx % 2 === 1);
+        } else if (axis === 'alternate') {
+          fxFlipH = (cycleIdx % 2 === 1);
+          fxFlipV = (Math.floor(cycleIdx / 2) % 2 === 1);
+        }
+
+        // Impact Flash on the first 0.06s frame of each mirror flip cycle
+        if (clip.fxSettings.impactFlash !== false) {
+          const timeInCycle = fxRelTime - (cycleIdx * interval);
+          if (timeInCycle < 0.06) {
+            fxFlashBrightness = (1 - (timeInCycle / 0.06)) * 40; // +40% exposure burst
+          }
+        }
+      } else if (fxType === 'action_zoom_pulse') {
+        const speed = clip.fxSettings.pulseSpeed || 2; // Hz
+        const depth = (clip.fxSettings.pulseDepth || 20) / 100;
+        const wave = Math.max(0, Math.sin(fxRelTime * Math.PI * 2 * speed));
+        fxActionScaleMultiplier = 1 + (wave * depth);
+      } else if (fxType === 'action_strobe') {
+        const speed = clip.fxSettings.strobeSpeed || 8; // Hz
+        const wave = Math.sin(fxRelTime * Math.PI * 2 * speed);
+        if (wave > 0.4) {
+          fxFlashBrightness = 60; // bright strobe burst
+        }
+      } else if (fxType === 'action_shake') {
+        const intensity = (clip.fxSettings.intensity || 50) / 100;
+        const seed = Math.sin(fxRelTime * 12.9898) * 43758.5453;
+        const pseudoRand = seed - Math.floor(seed);
+        fxShakeX = (Math.sin(fxRelTime * 45) * 12 + (pseudoRand - 0.5) * 10) * intensity;
+        fxShakeY = (Math.cos(fxRelTime * 55) * 12 + (pseudoRand - 0.5) * 10) * intensity;
+      }
+    }
+
+    const isFlippedH = !!((clip.transform?.flipH ? 1 : 0) ^ (fxFlipH ? 1 : 0));
+    const isFlippedV = !!((clip.transform?.flipV ? 1 : 0) ^ (fxFlipV ? 1 : 0));
+
     let corners: LocalCornerPoints | null = null;
     if (hasPerspectiveWarp) {
       if (clip.transform.perspectivePin) {
@@ -1185,11 +1240,25 @@ export async function renderCanvasEngine({
             return { x: ccx + rx + aX, y: ccy + ry + aY };
           };
 
+          let c0 = transformCorner(corners.x0, corners.y0);
+          let c1 = transformCorner(corners.x1, corners.y1);
+          let c2 = transformCorner(corners.x2, corners.y2);
+          let c3 = transformCorner(corners.x3, corners.y3);
+
+          if (isFlippedH) {
+            const t0 = c0; c0 = c1; c1 = t0;
+            const t3 = c3; c3 = c2; c2 = t3;
+          }
+          if (isFlippedV) {
+            const t0 = c0; c0 = c3; c3 = t0;
+            const t1 = c1; c1 = c2; c2 = t1;
+          }
+
           corners = {
-            x0: transformCorner(corners.x0, corners.y0).x, y0: transformCorner(corners.x0, corners.y0).y,
-            x1: transformCorner(corners.x1, corners.y1).x, y1: transformCorner(corners.x1, corners.y1).y,
-            x2: transformCorner(corners.x2, corners.y2).x, y2: transformCorner(corners.x2, corners.y2).y,
-            x3: transformCorner(corners.x3, corners.y3).x, y3: transformCorner(corners.x3, corners.y3).y,
+            x0: c0.x, y0: c0.y,
+            x1: c1.x, y1: c1.y,
+            x2: c2.x, y2: c2.y,
+            x3: c3.x, y3: c3.y,
           };
         }
       } else {
@@ -1236,63 +1305,14 @@ export async function renderCanvasEngine({
 
         corners = getProjectedCorners(
           vw, vh,
-          (aScale / 100) * fitScale,
+          (aScale / 100) * fitScale * fxActionScaleMultiplier,
           aRotX, aRotY, aRot,
-          aX, aY,
-          cx, cy
+          aX + fxShakeX, aY + fxShakeY,
+          cx, cy,
+          800,
+          isFlippedH,
+          isFlippedV
         );
-      }
-    }
-
-    let fxFlipH = false;
-    let fxFlipV = false;
-    let fxFlashBrightness = 0;
-    let fxActionScaleMultiplier = 1;
-    let fxShakeX = 0;
-    let fxShakeY = 0;
-
-    if (clip.fxSettings) {
-      const fxType = clip.fxSettings.type;
-      const fxRelTime = Math.max(0, currentTime - clip.startTime);
-
-      if (fxType === 'rhythmic_mirror') {
-        const interval = clip.fxSettings.flipInterval || 0.5;
-        const cycleIdx = Math.floor(fxRelTime / interval);
-        const axis = clip.fxSettings.flipAxis || 'horizontal';
-
-        if (axis === 'horizontal') {
-          fxFlipH = (cycleIdx % 2 === 1);
-        } else if (axis === 'vertical') {
-          fxFlipV = (cycleIdx % 2 === 1);
-        } else if (axis === 'alternate') {
-          fxFlipH = (cycleIdx % 2 === 1);
-          fxFlipV = (Math.floor(cycleIdx / 2) % 2 === 1);
-        }
-
-        // Impact Flash on the first 0.06s frame of each mirror flip cycle
-        if (clip.fxSettings.impactFlash !== false) {
-          const timeInCycle = fxRelTime - (cycleIdx * interval);
-          if (timeInCycle < 0.06) {
-            fxFlashBrightness = (1 - (timeInCycle / 0.06)) * 40; // +40% exposure burst
-          }
-        }
-      } else if (fxType === 'action_zoom_pulse') {
-        const speed = clip.fxSettings.pulseSpeed || 2; // Hz
-        const depth = (clip.fxSettings.pulseDepth || 20) / 100;
-        const wave = Math.max(0, Math.sin(fxRelTime * Math.PI * 2 * speed));
-        fxActionScaleMultiplier = 1 + (wave * depth);
-      } else if (fxType === 'action_strobe') {
-        const speed = clip.fxSettings.strobeSpeed || 8; // Hz
-        const wave = Math.sin(fxRelTime * Math.PI * 2 * speed);
-        if (wave > 0.4) {
-          fxFlashBrightness = 60; // bright strobe burst
-        }
-      } else if (fxType === 'action_shake') {
-        const intensity = (clip.fxSettings.intensity || 50) / 100;
-        const seed = Math.sin(fxRelTime * 12.9898) * 43758.5453;
-        const pseudoRand = seed - Math.floor(seed);
-        fxShakeX = (Math.sin(fxRelTime * 45) * 12 + (pseudoRand - 0.5) * 10) * intensity;
-        fxShakeY = (Math.cos(fxRelTime * 55) * 12 + (pseudoRand - 0.5) * 10) * intensity;
       }
     }
 
@@ -1442,12 +1462,10 @@ export async function renderCanvasEngine({
       if (extraTransform?.scale !== undefined) {
         finalScale *= extraTransform.scale;
       }
-      const isFlippedH = (clip.transform?.flipH ? 1 : 0) ^ (fxFlipH ? 1 : 0);
-      const isFlippedV = (clip.transform?.flipV ? 1 : 0) ^ (fxFlipV ? 1 : 0);
       const scaleX = finalScale * (isFlippedH ? -1 : 1);
       const scaleY = finalScale * (isFlippedV ? -1 : 1);
-      ctx.scale(scaleX, scaleY);
       ctx.rotate((aRot * Math.PI) / 180 + eeMods.rotation);
+      ctx.scale(scaleX, scaleY);
     }
 
     const filters = {

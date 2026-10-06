@@ -486,6 +486,16 @@ export function PreviewCanvasOverlay({
           (animations[`transform.perspectiveCorners.x3`]?.length || 0) > 0 ||
           (animations[`transform.perspectiveCorners.y3`]?.length || 0) > 0;
 
+        let newTrackingData = liveClip.transform.perspectiveTrackingData;
+        if (newTrackingData && newTrackingData.length > 0) {
+          newTrackingData = newTrackingData.map((pt: any) => {
+            if (Math.abs(pt.time - localTime) < 0.1) {
+              return { ...pt, corners: { ...updatedCorners } };
+            }
+            return pt;
+          });
+        }
+
         if (hasKeyframes) {
           const newAnimations = { ...animations };
           for (let i = 0; i < 4; i++) {
@@ -500,7 +510,8 @@ export function PreviewCanvasOverlay({
           updateClip(gestureClipId, {
             transform: {
               ...liveClip.transform,
-              perspectiveCorners: updatedCorners
+              perspectiveCorners: updatedCorners,
+              ...(newTrackingData ? { perspectiveTrackingData: newTrackingData } : {})
             },
             animations: newAnimations
           });
@@ -508,7 +519,8 @@ export function PreviewCanvasOverlay({
           updateClip(gestureClipId, {
             transform: {
               ...liveClip.transform,
-              perspectiveCorners: updatedCorners
+              perspectiveCorners: updatedCorners,
+              ...(newTrackingData ? { perspectiveTrackingData: newTrackingData } : {})
             }
           });
         }
@@ -2124,11 +2136,28 @@ export function PreviewCanvasOverlay({
       return { x: ccx + rx + aX, y: ccy + ry + aY };
     };
 
+    let c0 = transformCorner(pc.x0, pc.y0);
+    let c1 = transformCorner(pc.x1, pc.y1);
+    let c2 = transformCorner(pc.x2, pc.y2);
+    let c3 = transformCorner(pc.x3, pc.y3);
+
+    const isFlippedH = !!activeClip.transform.flipH;
+    const isFlippedV = !!activeClip.transform.flipV;
+
+    if (isFlippedH) {
+      const t0 = c0; c0 = c1; c1 = t0;
+      const t3 = c3; c3 = c2; c2 = t3;
+    }
+    if (isFlippedV) {
+      const t0 = c0; c0 = c3; c3 = t0;
+      const t1 = c1; c1 = c2; c2 = t1;
+    }
+
     renderedPc = {
-      x0: transformCorner(pc.x0, pc.y0).x, y0: transformCorner(pc.x0, pc.y0).y,
-      x1: transformCorner(pc.x1, pc.y1).x, y1: transformCorner(pc.x1, pc.y1).y,
-      x2: transformCorner(pc.x2, pc.y2).x, y2: transformCorner(pc.x2, pc.y2).y,
-      x3: transformCorner(pc.x3, pc.y3).x, y3: transformCorner(pc.x3, pc.y3).y,
+      x0: c0.x, y0: c0.y,
+      x1: c1.x, y1: c1.y,
+      x2: c2.x, y2: c2.y,
+      x3: c3.x, y3: c3.y,
     };
   }
 
@@ -2158,10 +2187,22 @@ export function PreviewCanvasOverlay({
     else if (e.key === 'ArrowUp') newPc[keyY] -= step;
     else if (e.key === 'ArrowDown') newPc[keyY] += step;
 
+    const localTime = currentTime - activeClip.startTime;
+    let newTrackingData = activeClip.transform.perspectiveTrackingData;
+    if (newTrackingData && newTrackingData.length > 0) {
+      newTrackingData = newTrackingData.map((pt: any) => {
+        if (Math.abs(pt.time - localTime) < 0.1) {
+          return { ...pt, corners: { ...newPc } };
+        }
+        return pt;
+      });
+    }
+
     updateClip(activeClip.id, {
       transform: {
         ...activeClip.transform,
-        perspectiveCorners: newPc
+        perspectiveCorners: newPc,
+        ...(newTrackingData ? { perspectiveTrackingData: newTrackingData } : {})
       }
     });
     useEditorStore.getState().saveSnapshot();

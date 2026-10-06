@@ -39,12 +39,25 @@ export function RotationSection({
           <div
             onClick={(e) => {
               e.stopPropagation();
-              setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-              setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-              setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-              scheduleSaveSnapshot();
+              const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === selectedClip.id) || selectedClip;
+              const newAnims = { ...(currentClip.animations || {}) };
+              delete newAnims['transform.rotation'];
+              delete newAnims['transform.rotationX'];
+              delete newAnims['transform.rotationY'];
+              delete newAnims['transform.rotationZ'];
+              updateClip(selectedClip.id, {
+                transform: {
+                  ...currentClip.transform,
+                  rotation: 0,
+                  rotationX: 0,
+                  rotationY: 0,
+                  rotationZ: 0,
+                },
+                animations: newAnims,
+              });
+              scheduleSaveSnapshot('Reset Rotation');
             }}
-            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-all"
+            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-all cursor-pointer"
             title="Reset Rotation"
           >
             <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]" />
@@ -61,7 +74,29 @@ export function RotationSection({
           {/* Rotate X */}
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Rotate X (3D)</label>
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Rotate X (3D)</label>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === selectedClip.id) || selectedClip;
+                    const newAnims = { ...(currentClip.animations || {}) };
+                    if (newAnims['transform.rotationX']) {
+                      newAnims['transform.rotationX'] = newAnims['transform.rotationX'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                    }
+                    updateClip(selectedClip.id, {
+                      transform: { ...currentClip.transform, rotationX: 0 },
+                      animations: newAnims,
+                    });
+                    scheduleSaveSnapshot('Reset Rotate X');
+                  }}
+                  className="p-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-colors text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]"
+                  title="Reset Rotate X to 0°"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                </button>
+              </div>
               <KeyframeControl
                 propertyKey="transform.rotationX"
                 value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
@@ -114,8 +149,16 @@ export function RotationSection({
                 onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
                 onMouseUp={() => scheduleSaveSnapshot()}
                 onDoubleClick={() => {
-                  setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                  scheduleSaveSnapshot();
+                  const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === selectedClip.id) || selectedClip;
+                  const newAnims = { ...(currentClip.animations || {}) };
+                  if (newAnims['transform.rotationX']) {
+                    newAnims['transform.rotationX'] = newAnims['transform.rotationX'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                  }
+                  updateClip(selectedClip.id, {
+                    transform: { ...currentClip.transform, rotationX: 0 },
+                    animations: newAnims,
+                  });
+                  scheduleSaveSnapshot('Reset Rotate X');
                 }}
                 className="flex-1 h-1 bg-[var(--theme-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:rounded-full"
               />
@@ -138,7 +181,29 @@ export function RotationSection({
           {/* Rotate Y */}
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Rotate Y (3D)</label>
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Rotate Y (3D)</label>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === selectedClip.id) || selectedClip;
+                    const newAnims = { ...(currentClip.animations || {}) };
+                    if (newAnims['transform.rotationY']) {
+                      newAnims['transform.rotationY'] = newAnims['transform.rotationY'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                    }
+                    updateClip(selectedClip.id, {
+                      transform: { ...currentClip.transform, rotationY: 0 },
+                      animations: newAnims,
+                    });
+                    scheduleSaveSnapshot('Reset Rotate Y');
+                  }}
+                  className="p-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-colors text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]"
+                  title="Reset Rotate Y to 0°"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                </button>
+              </div>
               <KeyframeControl
                 propertyKey="transform.rotationY"
                 value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
@@ -191,8 +256,16 @@ export function RotationSection({
                 onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
                 onMouseUp={() => scheduleSaveSnapshot()}
                 onDoubleClick={() => {
-                  setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                  scheduleSaveSnapshot();
+                  const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === selectedClip.id) || selectedClip;
+                  const newAnims = { ...(currentClip.animations || {}) };
+                  if (newAnims['transform.rotationY']) {
+                    newAnims['transform.rotationY'] = newAnims['transform.rotationY'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                  }
+                  updateClip(selectedClip.id, {
+                    transform: { ...currentClip.transform, rotationY: 0 },
+                    animations: newAnims,
+                  });
+                  scheduleSaveSnapshot('Reset Rotate Y');
                 }}
                 className="flex-1 h-1 bg-[var(--theme-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:rounded-full"
               />
@@ -215,7 +288,28 @@ export function RotationSection({
           {/* Rotate Z */}
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Rotate Z</label>
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-[var(--theme-text-muted)] font-medium">Rotate Z</label>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === selectedClip.id) || selectedClip;
+                    const newAnims = { ...(currentClip.animations || {}) };
+                    delete newAnims['transform.rotation'];
+                    delete newAnims['transform.rotationZ'];
+                    updateClip(selectedClip.id, {
+                      transform: { ...currentClip.transform, rotation: 0, rotationZ: 0 },
+                      animations: newAnims,
+                    });
+                    scheduleSaveSnapshot('Reset Rotate Z');
+                  }}
+                  className="p-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-colors text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]"
+                  title="Reset Rotate Z to 0°"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                </button>
+              </div>
               <KeyframeControl
                 propertyKey="transform.rotation"
                 value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
@@ -268,8 +362,15 @@ export function RotationSection({
                 onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
                 onMouseUp={() => scheduleSaveSnapshot()}
                 onDoubleClick={() => {
-                  setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                  scheduleSaveSnapshot();
+                  const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === selectedClip.id) || selectedClip;
+                  const newAnims = { ...(currentClip.animations || {}) };
+                  delete newAnims['transform.rotation'];
+                  delete newAnims['transform.rotationZ'];
+                  updateClip(selectedClip.id, {
+                    transform: { ...currentClip.transform, rotation: 0, rotationZ: 0 },
+                    animations: newAnims,
+                  });
+                  scheduleSaveSnapshot('Reset Rotate Z');
                 }}
                 className="flex-1 h-1 bg-[var(--theme-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:rounded-full"
               />

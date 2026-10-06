@@ -108,7 +108,9 @@ export function getProjectedCorners(
   aY: number,
   cx: number,
   cy: number,
-  D: number = 800
+  D: number = 800,
+  flipH: boolean = false,
+  flipV: boolean = false
 ): LocalCornerPoints {
   const radX = (rx * Math.PI) / 180;
   const radY = (ry * Math.PI) / 180;
@@ -121,12 +123,14 @@ export function getProjectedCorners(
   const halfW = w / 2;
   const halfH = h / 2;
 
-  // 4 corners of standard flat rectangle
+  // 4 corners of standard flat rectangle (mirrored if flipH / flipV is active)
+  const mulX = flipH ? -1 : 1;
+  const mulY = flipV ? -1 : 1;
   const localPts = [
-    { x: -halfW, y: -halfH }, // TL
-    { x: halfW, y: -halfH },  // TR
-    { x: halfW, y: halfH },   // BR
-    { x: -halfW, y: halfH }    // BL
+    { x: -halfW * mulX, y: -halfH * mulY }, // TL
+    { x: halfW * mulX, y: -halfH * mulY },  // TR
+    { x: halfW * mulX, y: halfH * mulY },   // BR
+    { x: -halfW * mulX, y: halfH * mulY }    // BL
   ];
 
   const projected = localPts.map(pt => {
@@ -147,8 +151,9 @@ export function getProjectedCorners(
     const x3 = x2 * cosZ - y1 * sinZ;
     const y3 = x2 * sinZ + y1 * cosZ;
 
-    // 5. Perspective Projection
-    const scaleFactor = D / (D - z2);
+    // 5. Perspective Projection with safeguard against divide-by-zero or points behind camera
+    const safeD = Math.max(10, D - z2);
+    const scaleFactor = D / safeD;
     const xp = x3 * scaleFactor;
     const yp = y3 * scaleFactor;
 

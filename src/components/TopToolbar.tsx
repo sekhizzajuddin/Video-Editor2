@@ -25,6 +25,7 @@ import {
   Eraser,
   Volume2,
   Zap,
+  History,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -42,6 +43,7 @@ export function TopToolbar() {
     redo,
     historyIndex,
     history,
+    jumpToHistoryIndex,
     setShowExportModal,
     setShowSettingsModal,
     setShowTeleprompter,
@@ -68,6 +70,7 @@ export function TopToolbar() {
     redo: s.redo,
     historyIndex: s.historyIndex,
     history: s.history,
+    jumpToHistoryIndex: s.jumpToHistoryIndex,
     setShowExportModal: s.setShowExportModal,
     setShowSettingsModal: s.setShowSettingsModal,
     setShowTeleprompter: s.setShowTeleprompter,
@@ -97,6 +100,7 @@ export function TopToolbar() {
   const [showHelpMenuDropdown, setShowHelpMenuDropdown] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
   const [showRecentModal, setShowRecentModal] = useState(false);
+  const [showHistoryDropdown, setShowHistoryDropdown] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
@@ -220,7 +224,7 @@ export function TopToolbar() {
   };
 
   useEffect(() => {
-    if (!showFileMenu && !showEditMenu && !showViewMenu && !showLayoutMenu && !showHelpMenuDropdown) return;
+    if (!showFileMenu && !showEditMenu && !showViewMenu && !showLayoutMenu && !showHelpMenuDropdown && !showHistoryDropdown) return;
     const handleOutsideClick = (e: MouseEvent) => {
       if (!(e.target as Element).closest('.dropdown-container')) {
         setShowFileMenu(false);
@@ -228,11 +232,26 @@ export function TopToolbar() {
         setShowViewMenu(false);
         setShowLayoutMenu(false);
         setShowHelpMenuDropdown(false);
+        setShowHistoryDropdown(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowFileMenu(false);
+        setShowEditMenu(false);
+        setShowViewMenu(false);
+        setShowLayoutMenu(false);
+        setShowHelpMenuDropdown(false);
+        setShowHistoryDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [showFileMenu, showEditMenu, showViewMenu, showLayoutMenu, showHelpMenuDropdown]);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showFileMenu, showEditMenu, showViewMenu, showLayoutMenu, showHelpMenuDropdown, showHistoryDropdown]);
 
   return (
     <header 
@@ -677,6 +696,145 @@ export function TopToolbar() {
           <MonitorPlay className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Teleprompter</span>
         </button>
+
+        {/* History Dropdown Button */}
+        <div className="relative dropdown-container">
+          <button
+            onClick={() => setShowHistoryDropdown((prev) => !prev)}
+            title="Edit History (Undo/Redo Stack)"
+            className="px-2.5 py-1.5 text-xs rounded-md border flex items-center gap-1.5 font-medium transition-all hover:bg-black/5 dark:hover:bg-white/5"
+            style={{
+              borderColor: showHistoryDropdown ? 'var(--theme-accent, #3b82f6)' : 'var(--theme-border)',
+              backgroundColor: showHistoryDropdown ? 'rgba(59, 130, 246, 0.1)' : undefined,
+              color: showHistoryDropdown ? 'var(--theme-accent, #3b82f6)' : 'var(--theme-text-muted)',
+            }}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">History</span>
+          </button>
+
+          {showHistoryDropdown && (
+            <div
+              className="absolute right-0 top-full mt-2 w-80 max-h-[440px] rounded-xl border shadow-2xl z-50 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md"
+              style={{
+                backgroundColor: 'var(--theme-bg-panel)',
+                borderColor: 'var(--theme-border)',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3)',
+              }}
+            >
+              {/* Header */}
+              <div
+                className="p-3 border-b flex items-center justify-between shrink-0"
+                style={{
+                  borderColor: 'var(--theme-border)',
+                  backgroundColor: 'var(--theme-bg-subpanel)',
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <History className="w-4 h-4 text-blue-500" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--theme-text-primary)]">
+                    Edit History
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-full font-mono font-medium border"
+                    style={{
+                      backgroundColor: 'var(--theme-bg-card)',
+                      borderColor: 'var(--theme-border)',
+                      color: 'var(--theme-text-muted)',
+                    }}
+                  >
+                    {history.length} {history.length === 1 ? 'Action' : 'Actions'}
+                  </span>
+                  <div className="flex items-center ml-1 bg-black/5 dark:bg-white/5 rounded p-0.5 border border-[var(--theme-border)]">
+                    <button
+                      onClick={() => undo()}
+                      disabled={!canUndo}
+                      title="Undo (Ctrl+Z)"
+                      className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => redo()}
+                      disabled={!canRedo}
+                      title="Redo (Ctrl+Y)"
+                      className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Redo2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action List */}
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5 scrollbar-thin">
+                {history.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-[var(--theme-text-muted)]">
+                    No actions recorded yet
+                  </div>
+                ) : (
+                  history.map((snap, idx) => {
+                    const isActive = idx === historyIndex;
+                    const isFuture = idx > historyIndex;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          jumpToHistoryIndex(idx);
+                        }}
+                        className={`w-full flex items-center gap-3 p-2.5 rounded-lg text-left transition-all border ${
+                          isActive
+                            ? 'bg-blue-500/10 border-blue-500 text-blue-500 font-bold shadow-sm'
+                            : isFuture
+                            ? 'bg-transparent border-transparent text-[var(--theme-text-muted)] opacity-50 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5'
+                            : 'bg-[var(--theme-bg-card)] border-[var(--theme-border)] text-[var(--theme-text-primary)] hover:border-blue-500/40 hover:bg-black/5 dark:hover:bg-white/5'
+                        }`}
+                      >
+                        {/* Stepper node & line */}
+                        <div className="relative flex items-center justify-center shrink-0 w-4">
+                          {idx < history.length - 1 && (
+                            <div
+                              className={`absolute top-4 bottom-[-20px] w-[2px] ${
+                                isFuture ? 'bg-[var(--theme-border)]/40' : 'bg-blue-500/30'
+                              }`}
+                            />
+                          )}
+                          <div
+                            className={`w-2.5 h-2.5 rounded-full border-2 transition-transform ${
+                              isActive
+                                ? 'bg-blue-500 border-blue-500 ring-4 ring-blue-500/20 scale-110'
+                                : isFuture
+                                ? 'bg-transparent border-[var(--theme-border)]'
+                                : 'bg-blue-500/40 border-blue-500/80'
+                            }`}
+                          />
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs truncate block font-medium">
+                              {snap.label || 'Action'}
+                            </span>
+                            {isActive && (
+                              <span className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider ml-1 shrink-0">
+                                Current
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[9px] opacity-60 block mt-0.5 font-mono">
+                            {idx === 0 ? 'Base State' : `Step ${idx}`}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Export Button */}
         <button

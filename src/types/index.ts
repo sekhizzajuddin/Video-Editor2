@@ -950,7 +950,7 @@ export type EditorTool =
   | 'split'             // razor / split at playhead
   | 'slide';            // slide clip within gap
 export type MediaTab = 'project' | 'stock' | 'ai' | 'audio' | 'text' | 'fx' | 'templates' | 'lut' | 'transitions' | 'effects';
-export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'ai' | 'thumbnail' | 'history' | 'pip';
+export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'ai' | 'thumbnail' | 'pip';
 
 // ─── Editor Settings ──────────────────────────────────────────────────────
 export interface EditorSettings {

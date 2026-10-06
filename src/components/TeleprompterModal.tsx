@@ -13,6 +13,7 @@ import {
   parseScriptToDialogueSentences,
   DialogueSentence,
   TeleprompterSpeechTracker,
+  TrackingMode,
 } from '@/utils/teleprompterSpeechTracker';
 import {
   StudioMicProcessor,
@@ -78,6 +79,38 @@ This is not just an update. This is the future of digital storytelling.`,
   },
 ];
 
+export const SPEECH_LANGUAGES = [
+  { code: 'en-US', label: 'English (US)' },
+  { code: 'en-IN', label: 'English (India)' },
+  { code: 'en-GB', label: 'English (UK)' },
+  { code: 'hi-IN', label: 'Hindi (हिन्दी)' },
+  { code: 'ur-PK', label: 'Urdu (اردو)' },
+  { code: 'es-ES', label: 'Spanish (Español)' },
+  { code: 'fr-FR', label: 'French (Français)' },
+  { code: 'de-DE', label: 'German (Deutsch)' },
+];
+
+export const TRACKING_MODES_DEF: { id: TrackingMode; label: string; desc: string; icon: string }[] = [
+  {
+    id: 'voice-follow',
+    label: 'Voice Follow',
+    desc: 'Strictly advances words as you speak them. Zero auto-rushing.',
+    icon: '🎙️',
+  },
+  {
+    id: 'smart-hybrid',
+    label: 'Smart Hybrid',
+    desc: 'Voice tracking with smooth fallback pacing during prolonged pauses.',
+    icon: '✨',
+  },
+  {
+    id: 'auto-pacer',
+    label: 'Auto-Pacer',
+    desc: 'Steady continuous speed determined by the WPM reading slider.',
+    icon: '⚡',
+  },
+];
+
 export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
   // Navigation & View state
   const [activeView, setActiveView] = useState<ModalView>('setup');
@@ -108,12 +141,17 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
   const [countdownVal, setCountdownVal] = useState(3);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
+  // Speech Recognition & Tracking Mode state
+  const [trackingMode, setTrackingMode] = useState<TrackingMode>('voice-follow');
+  const [speechLanguage, setSpeechLanguage] = useState<string>('en-US');
+  const [noiseReductionMode, setNoiseReductionMode] = useState<'studio-dsp' | 'ai-webrtc' | 'both' | 'off'>('studio-dsp');
+
   // Studio Mic DSP state
-  const [micPresetId, setMicPresetId] = useState<StudioMicPresetId>('studio-podcast');
+  const [micPresetId, setMicPresetId] = useState<StudioMicPresetId>('natural-studio');
   const [studioMicEnabled, setStudioMicEnabled] = useState(true);
   const [micMonitoring, setMicMonitoring] = useState(false);
   const [showDspControls, setShowDspControls] = useState(false);
-  const [dspSettings, setDspSettings] = useState<StudioMicSettings>({ ...STUDIO_MIC_PRESETS['studio-podcast'].settings });
+  const [dspSettings, setDspSettings] = useState<StudioMicSettings>({ ...STUDIO_MIC_PRESETS['natural-studio'].settings });
   const [vuTelemetry, setVuTelemetry] = useState({ db: -100, peakDb: -100, gateOpen: true, rms: 0 });
 
   // Studio Camera Enhancer state (Auto Beautifier, Denoise, Lighting)
@@ -212,10 +250,11 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
         return null;
       }
 
+      const useWebRtc = noiseReductionMode === 'ai-webrtc' || noiseReductionMode === 'both';
       const audioConstraints: MediaTrackConstraints = {
         echoCancellation: true,
-        noiseSuppression: false, // Let our studio DSP handle high-fidelity gating & filtering
-        autoGainControl: false,  // Handled by our broadcast compressor & limiter
+        noiseSuppression: useWebRtc, // When using Studio DSP, false prevents browser WebRTC from muffling vocals
+        autoGainControl: false,      // Handled by our studio compressor & limiter
       };
       if (deviceId) {
         audioConstraints.deviceId = { exact: deviceId };
@@ -245,7 +284,7 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
       toast.error(`Microphone error: ${err.message || 'Check microphone permissions'}`);
       return null;
     }
-  }, [micPresetId, refreshDevices, rawAudioStream]);
+  }, [micPresetId, refreshDevices, rawAudioStream, noiseReductionMode]);
 
   // ── 4. Initialize Camera & Studio Video Enhancer ─────────────────────────
   const initCamera = useCallback(async (deviceId?: string) => {
@@ -309,6 +348,59 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
     setSelectedMicId(deviceId);
     await initMicrophone(deviceId);
     toast.success('Switched Microphone Source');
+  };
+
+  // Change Word-Tracking Mode
+  const handleTrackingModeChange = (mode: TrackingMode) => {
+    setTrackingMode(mode);
+    if (speechTrackerRef.current) {
+      speechTrackerRef.current.setOptions({ trackingMode: mode });
+    }
+    toast.info(`Tracking: ${
+      mode === 'voice-follow' ? '🎙️ Strict Voice Follow (Follows your voice)' :
+      mode === 'smart-hybrid' ? '✨ Smart Hybrid (Voice + Pacer)' :
+      '⚡ Auto-Pacer (Fixed Cadence)'
+    }`);
+  };
+
+  // Change Speech Recognition Language
+  const handleLanguageChange = (lang: string) => {
+    setSpeechLanguage(lang);
+    if (speechTrackerRef.current) {
+      speechTrackerRef.current.setOptions({ language: lang });
+    }
+    const found = SPEECH_LANGUAGES.find((l) => l.code === lang);
+    toast.info(`Speech Language: ${found?.label || lang}`);
+  };
+
+  // Change Noise Reduction Mode
+  const handleNoiseReductionModeChange = async (mode: 'studio-dsp' | 'ai-webrtc' | 'both' | 'off') => {
+    setNoiseReductionMode(mode);
+    const useWebRtc = mode === 'ai-webrtc' || mode === 'both';
+    if (rawAudioStream) {
+      const track = rawAudioStream.getAudioTracks()[0];
+      if (track && track.applyConstraints) {
+        try {
+          await track.applyConstraints({
+            noiseSuppression: useWebRtc,
+            echoCancellation: true,
+            autoGainControl: false,
+          });
+        } catch {
+          await initMicrophone(selectedMicId);
+        }
+      }
+    }
+    if (studioProcessorRef.current) {
+      const enableDsp = mode === 'studio-dsp' || mode === 'both';
+      studioProcessorRef.current.updateSettings({ enabled: enableDsp });
+      setStudioMicEnabled(enableDsp);
+    }
+    toast.success(`Noise Filter: ${
+      mode === 'studio-dsp' ? 'Studio Mic DSP (Zero Muffle, Natural)' :
+      mode === 'ai-webrtc' ? 'Browser WebRTC Suppression' :
+      mode === 'both' ? 'Hybrid DSP + WebRTC' : 'Bypass / Direct Raw'
+    }`);
   };
 
   // Update Studio Mic Preset
@@ -378,7 +470,8 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
       wpm,
       autoAdvance,
       fuzzyTolerance: 1,
-      language: 'en-US',
+      language: speechLanguage,
+      trackingMode,
     });
     speechTrackerRef.current = tracker;
 
@@ -398,7 +491,7 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
       tracker.dispose();
       speechTrackerRef.current = null;
     };
-  }, [sentences, wpm, autoAdvance]);
+  }, [sentences, wpm, autoAdvance, speechLanguage, trackingMode]);
 
   // ── 6. Start Teleprompter & Recording Session ────────────────────────────
   const handleStartSession = async () => {
@@ -458,12 +551,18 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
     try {
       recordedChunksRef.current = [];
       let recordStream: MediaStream | null = null;
-      let mimeType = 'video/webm;codecs=vp9,opus';
+      let mimeType = 'video/webm';
+      let recorderOptions: MediaRecorderOptions = {};
 
       const audioTrack = (studioProcessorRef.current as any)?.destinationNode?.stream?.getAudioTracks()[0]
         || rawAudioStream?.getAudioTracks()[0];
 
       if (recordMode === 'video-audio') {
+        // Ensure studio video enhancer is running on the live preview video
+        if (studioVideoEnhancerRef.current && liveVideoPreviewRef.current) {
+          studioVideoEnhancerRef.current.start(liveVideoPreviewRef.current);
+        }
+
         // Use enhanced studio canvas stream merged with studio mic audio
         const enhancedStream = studioVideoEnhancerRef.current?.getOutputStream(30) || rawVideoStream;
         if (enhancedStream) {
@@ -473,23 +572,53 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
           if (audioTrack) recordStream.addTrack(audioTrack);
         }
 
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm;codecs=vp8,opus';
-        }
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm';
-        }
+        // Prioritize hardware-accelerated VP8 and H.264 codecs over software-heavy VP9 to eliminate recording lag
+        const candidateVideoCodecs = [
+          'video/webm;codecs=vp8,opus',
+          'video/mp4;codecs=avc1,mp4a',
+          'video/mp4;codecs=h264,aac',
+          'video/webm;codecs=vp9,opus',
+          'video/webm',
+          'video/mp4',
+        ];
+        const supported = candidateVideoCodecs.find((t) => {
+          try {
+            return MediaRecorder.isTypeSupported(t);
+          } catch {
+            return false;
+          }
+        });
+        mimeType = supported || 'video/webm';
+        recorderOptions = {
+          mimeType,
+          videoBitsPerSecond: 4_500_000, // 4.5 Mbps ensures crystal-clear 1080p without encoder backpressure
+          audioBitsPerSecond: 128_000,
+        };
       } else {
         // Audio-only recording
         recordStream = (studioProcessorRef.current as any)?.destinationNode?.stream || rawAudioStream;
-        mimeType = 'audio/webm;codecs=opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'audio/webm';
-        }
+        const candidateAudioCodecs = [
+          'audio/webm;codecs=opus',
+          'audio/ogg;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+        ];
+        const supported = candidateAudioCodecs.find((t) => {
+          try {
+            return MediaRecorder.isTypeSupported(t);
+          } catch {
+            return false;
+          }
+        });
+        mimeType = supported || 'audio/webm';
+        recorderOptions = {
+          mimeType,
+          audioBitsPerSecond: 192_000,
+        };
       }
 
       if (recordStream) {
-        const recorder = new MediaRecorder(recordStream, { mimeType });
+        const recorder = new MediaRecorder(recordStream, recorderOptions);
         mediaRecorderRef.current = recorder;
 
         recorder.ondataavailable = (e) => {
@@ -513,7 +642,7 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
           // Safety First: Offload directly to SSD physical storage (IndexedDB + Disk Download)
           try {
             setIsSavingToSsd(true);
-            const ext = recordMode === 'video-audio' ? 'webm' : 'webm';
+            const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const filename = `teleprompter-take-${timestamp}.${ext}`;
             const recId = `ssd_take_${Date.now()}`;
@@ -530,7 +659,8 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
           }
         };
 
-        recorder.start(250);
+        // 1000ms timeslice eliminates main-thread GC stutter during high-framerate capture
+        recorder.start(1000);
       }
     } catch (e) {
       console.warn('Error starting MediaRecorder:', e);
@@ -1073,6 +1203,59 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
                 </div>
               </div>
 
+              {/* Speech Recognition & Word Tracking Mode Selector */}
+              <div className="mb-4 p-3.5 bg-[#121416] border border-[#262a2e] rounded-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Word Highlighting & Speech Tracking
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-[#9ca3af]">Speech Language:</span>
+                    <select
+                      value={speechLanguage}
+                      onChange={(e) => handleLanguageChange(e.target.value)}
+                      className="bg-[#1e2023] border border-[#343a40] text-emerald-400 text-xs font-semibold rounded-md px-2 py-1 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      {SPEECH_LANGUAGES.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {TRACKING_MODES_DEF.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => handleTrackingModeChange(m.id)}
+                      className={`p-2.5 rounded-lg border text-left transition-all ${
+                        trackingMode === m.id
+                          ? 'bg-emerald-500/15 border-emerald-500/60 shadow-sm'
+                          : 'bg-[#181a1d] border-[#2b2f33] hover:border-[#3c4248]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>{m.icon}</span>
+                          <span>{m.label}</span>
+                        </span>
+                        {trackingMode === m.id && (
+                          <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 font-mono text-[9px] rounded font-bold">
+                            ACTIVE
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-[#9ca3af] leading-tight">{m.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Script Header */}
               <div className="flex items-center justify-between pb-3 border-b border-[#2b2f33] mb-3">
                 <div className="flex items-center gap-2">
@@ -1316,6 +1499,62 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
                   />
                 </div>
 
+                {/* Noise Cancellation / Vocal Protection Selector */}
+                <div className="mb-3 p-2.5 bg-[#121416] border border-[#262a2e] rounded-lg">
+                  <div className="text-[11px] font-semibold text-[#9ca3af] mb-1.5 flex items-center justify-between">
+                    <span>Noise Cancellation Filter</span>
+                    <span className="text-[10px] text-emerald-400 font-mono">
+                      {noiseReductionMode === 'studio-dsp' ? 'Zero-Muffle DSP' : noiseReductionMode}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    <button
+                      onClick={() => handleNoiseReductionModeChange('studio-dsp')}
+                      className={`p-1.5 rounded border text-left transition-colors ${
+                        noiseReductionMode === 'studio-dsp'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-bold'
+                          : 'bg-[#181a1d] text-[#9ca3af] border-[#2b2f33] hover:text-white'
+                      }`}
+                      title="Pre-gate sidechain + high-pass filter + acoustic EQ (preserves 100% natural vocal body, zero muffling)"
+                    >
+                      🎙️ Studio DSP (Zero Muffle)
+                    </button>
+                    <button
+                      onClick={() => handleNoiseReductionModeChange('ai-webrtc')}
+                      className={`p-1.5 rounded border text-left transition-colors ${
+                        noiseReductionMode === 'ai-webrtc'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-bold'
+                          : 'bg-[#181a1d] text-[#9ca3af] border-[#2b2f33] hover:text-white'
+                      }`}
+                      title="Browser hardware noise cancellation"
+                    >
+                      🌐 WebRTC AI
+                    </button>
+                    <button
+                      onClick={() => handleNoiseReductionModeChange('both')}
+                      className={`p-1.5 rounded border text-left transition-colors ${
+                        noiseReductionMode === 'both'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-bold'
+                          : 'bg-[#181a1d] text-[#9ca3af] border-[#2b2f33] hover:text-white'
+                      }`}
+                      title="Both Studio DSP and WebRTC for very loud fans or air conditioners"
+                    >
+                      ⚡ Hybrid (Both)
+                    </button>
+                    <button
+                      onClick={() => handleNoiseReductionModeChange('off')}
+                      className={`p-1.5 rounded border text-left transition-colors ${
+                        noiseReductionMode === 'off'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-bold'
+                          : 'bg-[#181a1d] text-[#9ca3af] border-[#2b2f33] hover:text-white'
+                      }`}
+                      title="Raw direct mic without gating"
+                    >
+                      🔄 Direct / Bypass
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-1.5 mb-2">
                   {Object.values(STUDIO_MIC_PRESETS).slice(0, 3).map((preset) => (
                     <button
@@ -1439,6 +1678,45 @@ export function TeleprompterModal({ isOpen, onClose }: TeleprompterModalProps) {
                     />
                   </div>
                 )}
+
+                {/* Word Tracking Mode Switcher */}
+                <button
+                  onClick={() => {
+                    const modes: TrackingMode[] = ['voice-follow', 'smart-hybrid', 'auto-pacer'];
+                    const nextMode = modes[(modes.indexOf(trackingMode) + 1) % modes.length];
+                    handleTrackingModeChange(nextMode);
+                  }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-bold border flex items-center gap-1.5 transition-colors ${
+                    trackingMode === 'voice-follow'
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                      : trackingMode === 'smart-hybrid'
+                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  }`}
+                  title="Switch between Voice Follow (strict speech delivery), Smart Hybrid, or Auto-Pacer"
+                >
+                  <span>
+                    {trackingMode === 'voice-follow'
+                      ? '🎙️ Voice Follow'
+                      : trackingMode === 'smart-hybrid'
+                      ? '✨ Smart Hybrid'
+                      : '⚡ Auto-Pacer'}
+                  </span>
+                </button>
+
+                {/* Speech Language Selector */}
+                <select
+                  value={speechLanguage}
+                  onChange={(e) => handleLanguageChange(e.target.value)}
+                  className="bg-[#202326] border border-[#2e3338] text-[11px] text-emerald-400 font-semibold rounded px-1.5 py-1 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  title="Speech Recognition Language"
+                >
+                  {SPEECH_LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
 
                 <button
                   onClick={() => setShowEyeLine(!showEyeLine)}

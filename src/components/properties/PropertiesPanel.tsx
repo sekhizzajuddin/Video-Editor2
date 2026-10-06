@@ -18,7 +18,6 @@ import {
   ChevronDown,
   ChevronRight,
   X,
-  History,
   Volume2,
   VolumeX,
   Sparkles,
@@ -72,7 +71,7 @@ import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
 const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult } from '@/types';
-import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine } from '@/utils/speedRamp';
+import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine, getMediaTimeForClip } from '@/utils/speedRamp';
 import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
 import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
 import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } from '@/types';
@@ -355,9 +354,6 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
   thumbnail: [
     { id: 'thumbnail', label: 'Thumbnail' },
   ],
-  history: [
-    { id: 'history', label: 'History' },
-  ],
 };
 
 export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }: PropertiesPanelProps = {}) {
@@ -380,9 +376,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     removeTransition,
     addMasterKeyframe,
     deleteMasterKeyframe,
-    historyLength,
-    historyIndex,
-    jumpToHistoryIndex,
     addMedia,
     addTrack,
     addClip,
@@ -423,9 +416,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     removeTransition: s.removeTransition,
     addMasterKeyframe: s.addMasterKeyframe,
     deleteMasterKeyframe: s.deleteMasterKeyframe,
-    historyLength: s.history.length,
-    historyIndex: s.historyIndex,
-    jumpToHistoryIndex: s.jumpToHistoryIndex,
     addMedia: s.addMedia,
     addTrack: s.addTrack,
     addClip: s.addClip,
@@ -465,9 +455,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const currentTab = (isMobileView && mobileCategory)
     ? (mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : (mobileCategory as any))
     : activePropertiesTab;
-
-  const isHistoryTab = currentTab === 'history';
-  const history = useEditorStore(useShallow(s => isHistoryTab ? s.history : null)) || [];
 
   useEffect(() => {
     if (isMobileView && mobileCategory) {
@@ -1039,8 +1026,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   // Check if a given tab is supported by the clip & track
   const isTabSupportedForClip = useCallback((tab: PropertiesTab, clip: any, track: any): boolean => {
-    if (!clip) return tab === 'history' || tab === 'thumbnail';
-    if (tab === 'history' || tab === 'thumbnail') return true;
+    if (!clip) return tab === 'thumbnail';
+    if (tab === 'thumbnail') return true;
     // PIP tab available when clip is a PIP parent or inside a PIP window
     if (tab === 'pip') return !!(clip.pipWindowIds?.length || isPipClip);
     
@@ -1080,7 +1067,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   const scrollPositionsByTab = useRef<Partial<Record<PropertiesTab, number>>>({});
 
   useEffect(() => {
-    if (activePropertiesTab && activePropertiesTab !== 'history') {
+    if (activePropertiesTab) {
       lastActiveClipTab.current = activePropertiesTab;
     }
   }, [activePropertiesTab]);
@@ -1106,13 +1093,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   // Auto-switch properties panel tabs only when clip selection changes and current tab is not supported
   useEffect(() => {
     if (!primarySelectedId) {
-      setActivePropertiesTab('history');
       return;
     }
     if (lastAutoSwitchedClip.current === primarySelectedId) return; // don't override manual tab changes on same clip
     lastAutoSwitchedClip.current = primarySelectedId;
 
-    const targetTab = activePropertiesTab === 'history' ? lastActiveClipTab.current : activePropertiesTab;
+    const targetTab = activePropertiesTab || lastActiveClipTab.current || 'transform';
 
     // If the newly selected clip supports the current active tab (e.g. Color, Speed, Effects, Audio, etc.), preserve it!
     if (targetTab && isTabSupportedForClip(targetTab, selectedClip, selectedTrack)) {
@@ -1387,8 +1373,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
   }
 
-  // Always append History tab
-  baseTabs.push({ id: 'history', label: 'History', icon: History });
   baseTabs.push({ id: 'thumbnail', label: 'Thumbnail', icon: ImageIcon });
 
   // Show PIP tab when the clip is a PIP parent (has pipWindowIds) or is inside a PIP window
@@ -2031,7 +2015,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         <div className="h-full flex flex-col bg-[#121215] text-white">
           <div className="flex items-center justify-between border-b border-[var(--theme-border)] px-4 py-3 shrink-0">
             <h3 className="text-sm font-semibold capitalize text-white">
-              {tabs.find(t => t.id === currentTab)?.label || mobileCategory || 'Properties'}
+              {mobileCategory || 'Properties'}
             </h3>
             {onMobileClose && (
               <button
@@ -2042,131 +2026,23 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </button>
             )}
           </div>
-          {currentTab === 'history' ? (
-            <div className="flex-1 overflow-y-auto p-4 space-y-2 mobile-no-scrollbar">
-              {history.map((snap, idx) => {
-                const isActive = idx === historyIndex;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => jumpToHistoryIndex(idx)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all border ${
-                      isActive
-                        ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-medium'
-                        : 'bg-[var(--theme-bg-subpanel)] border-transparent text-white/70 hover:text-white hover:bg-[var(--theme-bg-card)]'
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xs truncate block text-white font-medium">{snap.label || 'Action'}</span>
-                      <span className="text-[10px] text-[var(--theme-text-primary)]/40 block mt-0.5 font-mono">
-                        {idx === 0 ? 'Base State' : `Step ${idx}`}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-              <Move3D className="w-10 h-10 text-white/20 mb-3" />
-              <p className="text-sm font-medium text-[var(--theme-text-primary)]/80">No clip selected</p>
-              <p className="text-xs text-[var(--theme-text-primary)]/40 mt-1">Tap a clip on the timeline to edit its properties</p>
-            </div>
-          )}
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+            <Move3D className="w-10 h-10 text-white/20 mb-3" />
+            <p className="text-sm font-medium text-[var(--theme-text-primary)]/80">No clip selected</p>
+            <p className="text-xs text-[var(--theme-text-primary)]/40 mt-1">Tap a clip on the timeline to edit its properties</p>
+          </div>
         </div>
       );
     }
     return (
-      <div className={`h-full flex flex-col ${isMobileView ? "bg-transparent text-white" : "bg-[var(--theme-bg-subpanel)] border-l border-[var(--theme-border)]"}`}>
-        {/* Tabs */}
-        <div className="flex overflow-x-auto border-b border-[var(--theme-border)] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-1 bg-[var(--theme-bg-subpanel)]/50">
-          {tabs.map((tab, idx) => {
-            const Icon = tab.icon;
-            const isActive = activePropertiesTab === tab.id;
-            return (
-              <Fragment key={tab.id}>
-                {idx > 0 && <div className="w-px h-5 bg-[var(--theme-bg-subpanel)] self-center shrink-0 mx-1" />}
-                <button
-                  onClick={() => setActivePropertiesTab(tab.id)}
-                  className={`flex-1 py-2.5 px-3 text-[10px] font-medium uppercase tracking-wider flex flex-col items-center gap-1 transition-colors ${
-                    isActive
-                      ? 'text-white border-b-2 border-amber-500 bg-[var(--theme-bg-card)]'
-                      : 'text-[var(--theme-text-muted)] hover:text-white hover:bg-[var(--theme-bg-card)]'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  {tab.label}
-                </button>
-              </Fragment>
-            );
-          })}
+      <div className="h-full flex flex-col bg-[var(--theme-bg-subpanel)] border-l border-[var(--theme-border)] items-center justify-center p-4">
+        <div className="text-center">
+          <Move3D className="w-10 h-10 text-[#3e3e3e] mx-auto mb-3" />
+          <p className="text-sm text-[var(--theme-text-muted)]">No clip selected</p>
+          <p className="text-xs text-[var(--theme-text-muted)] mt-1 opacity-60">
+            Click a clip on the timeline to edit its properties
+          </p>
         </div>
-
-        {currentTab === 'history' ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="p-3 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0 bg-[var(--theme-bg-subpanel)]/30">
-              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Undo/Redo History</span>
-              <span className="text-[9px] text-[#8a8a8a] bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded px-1.5 py-0.5 font-mono">
-                {historyLength} Actions
-              </span>
-            </div>
-
-            {/* List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scrollbar-thin">
-              {history.map((snap, idx) => {
-                const isActive = idx === historyIndex;
-                const isFuture = idx > historyIndex;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => jumpToHistoryIndex(idx)}
-                    className={`w-full flex items-center gap-3 p-2 rounded text-left transition-all border ${
-                      isActive
-                        ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-medium shadow-md shadow-amber-500/5'
-                        : isFuture
-                        ? 'bg-[var(--theme-bg-subpanel)]/40 border-transparent text-[var(--theme-text-muted)]/40 hover:text-white hover:bg-[var(--theme-bg-card)]'
-                        : 'bg-[var(--theme-bg-subpanel)]/60 border-transparent text-[var(--theme-text-muted)] hover:text-white hover:bg-[var(--theme-bg-card)]'
-                    }`}
-                  >
-                    {/* Visual Line Node */}
-                    <div className="relative flex items-center justify-center shrink-0 w-4">
-                      {idx < historyLength - 1 && (
-                        <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
-                          isFuture ? 'bg-[var(--theme-bg-subpanel)]/40' : 'bg-amber-500/30'
-                        }`} />
-                      )}
-                      <div className={`w-2.5 h-2.5 rounded-full border-2 ${
-                        isActive
-                          ? 'bg-amber-400 border-amber-400 ring-4 ring-amber-500/20 scale-110'
-                          : isFuture
-                          ? 'bg-transparent border-[var(--theme-border)]'
-                          : 'bg-amber-500/40 border-amber-500/80'
-                      }`} />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xs truncate block">{snap.label || 'Action'}</span>
-                      <span className="text-[9px] opacity-60 block mt-0.5 font-mono">
-                        {idx === 0 ? 'Base State' : `Step ${idx}`}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center p-4">
-            <div className="text-center">
-              <Move3D className="w-10 h-10 text-[#3e3e3e] mx-auto mb-3" />
-              <p className="text-sm text-[var(--theme-text-muted)]">No clip selected</p>
-              <p className="text-xs text-[var(--theme-text-muted)] mt-1 opacity-60">
-                Click a clip on the timeline to edit its properties
-              </p>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -2223,6 +2099,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           y: getPropVal(selectedClip.transform.y, 'transform.y'),
           scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
           rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation'),
+          rotationX: getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'),
+          rotationY: getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'),
+          rotationZ: getPropVal(selectedClip.transform.rotationZ ?? selectedClip.transform.rotation ?? 0, 'transform.rotationZ'),
           blendIntensity: getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity')
         },
         crop: {
@@ -2278,6 +2157,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             y: getPropVal(selectedClip.transform.y, 'transform.y'),
             scale: getPropVal(selectedClip.transform.scale, 'transform.scale'),
             rotation: getPropVal(selectedClip.transform.rotation, 'transform.rotation'),
+            rotationX: getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX'),
+            rotationY: getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY'),
+            rotationZ: getPropVal(selectedClip.transform.rotationZ ?? selectedClip.transform.rotation ?? 0, 'transform.rotationZ'),
             blendIntensity: getPropVal(selectedClip.transform.blendIntensity ?? 100, 'transform.blendIntensity')
           },
           crop: {
@@ -3974,7 +3856,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           </div>
 
           {/* Clip Details Section matching reference image */}
-          {currentTab !== 'history' && selectedClip && (
+          {selectedClip && (
             <div className="border-b border-[var(--theme-border)] bg-[var(--theme-bg-card)] p-3 space-y-2.5">
               {/* Hidden file input for Replace */}
               <input
@@ -4558,12 +4440,28 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     <div
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                        setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                        setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                        scheduleSaveSnapshot();
+                        const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                        targetClipIds.forEach(id => {
+                          const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                          const newAnims = { ...(currentClip.animations || {}) };
+                          delete newAnims['transform.rotation'];
+                          delete newAnims['transform.rotationX'];
+                          delete newAnims['transform.rotationY'];
+                          delete newAnims['transform.rotationZ'];
+                          updateClip(id, {
+                            transform: {
+                              ...currentClip.transform,
+                              rotation: 0,
+                              rotationX: 0,
+                              rotationY: 0,
+                              rotationZ: 0,
+                            },
+                            animations: newAnims,
+                          });
+                        });
+                        scheduleSaveSnapshot('Reset Rotation');
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all"
+                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#4a4a4a] rounded transition-all cursor-pointer"
                       title="Reset Rotation"
                     >
                       <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
@@ -4580,7 +4478,32 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Rotate X */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate X (3D)</label>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate X (3D)</label>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                              targetClipIds.forEach(id => {
+                                const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                                const newAnims = { ...(currentClip.animations || {}) };
+                                if (newAnims['transform.rotationX']) {
+                                  newAnims['transform.rotationX'] = newAnims['transform.rotationX'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                                }
+                                updateClip(id, {
+                                  transform: { ...currentClip.transform, rotationX: 0 },
+                                  animations: newAnims,
+                                });
+                              });
+                              scheduleSaveSnapshot('Reset Rotate X');
+                            }}
+                            className="p-0.5 hover:bg-white/10 rounded transition-colors text-[var(--theme-text-muted)] hover:text-white"
+                            title="Reset Rotate X to 0°"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
                         <KeyframeControl
                           propertyKey="transform.rotationX"
                           value={getPropVal(selectedClip.transform.rotationX ?? 0, 'transform.rotationX')}
@@ -4633,8 +4556,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           onChange={(e) => setPropVal('transform.rotationX', Number(e.target.value), { transform: { ...selectedClip.transform, rotationX: Number(e.target.value) } })}
                           onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
-                            setPropVal('transform.rotationX', 0, { transform: { ...selectedClip.transform, rotationX: 0 } });
-                            scheduleSaveSnapshot();
+                            const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                            targetClipIds.forEach(id => {
+                              const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                              const newAnims = { ...(currentClip.animations || {}) };
+                              if (newAnims['transform.rotationX']) {
+                                newAnims['transform.rotationX'] = newAnims['transform.rotationX'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                              }
+                              updateClip(id, {
+                                transform: { ...currentClip.transform, rotationX: 0 },
+                                animations: newAnims,
+                              });
+                            });
+                            scheduleSaveSnapshot('Reset Rotate X');
                           }}
                           className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -4657,7 +4591,32 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Rotate Y */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate Y (3D)</label>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate Y (3D)</label>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                              targetClipIds.forEach(id => {
+                                const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                                const newAnims = { ...(currentClip.animations || {}) };
+                                if (newAnims['transform.rotationY']) {
+                                  newAnims['transform.rotationY'] = newAnims['transform.rotationY'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                                }
+                                updateClip(id, {
+                                  transform: { ...currentClip.transform, rotationY: 0 },
+                                  animations: newAnims,
+                                });
+                              });
+                              scheduleSaveSnapshot('Reset Rotate Y');
+                            }}
+                            className="p-0.5 hover:bg-white/10 rounded transition-colors text-[var(--theme-text-muted)] hover:text-white"
+                            title="Reset Rotate Y to 0°"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
                         <KeyframeControl
                           propertyKey="transform.rotationY"
                           value={getPropVal(selectedClip.transform.rotationY ?? 0, 'transform.rotationY')}
@@ -4710,8 +4669,19 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           onChange={(e) => setPropVal('transform.rotationY', Number(e.target.value), { transform: { ...selectedClip.transform, rotationY: Number(e.target.value) } })}
                           onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
-                            setPropVal('transform.rotationY', 0, { transform: { ...selectedClip.transform, rotationY: 0 } });
-                            scheduleSaveSnapshot();
+                            const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                            targetClipIds.forEach(id => {
+                              const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                              const newAnims = { ...(currentClip.animations || {}) };
+                              if (newAnims['transform.rotationY']) {
+                                newAnims['transform.rotationY'] = newAnims['transform.rotationY'].filter((k: any) => Math.abs(k.time - localTime) > 0.05);
+                              }
+                              updateClip(id, {
+                                transform: { ...currentClip.transform, rotationY: 0 },
+                                animations: newAnims,
+                              });
+                            });
+                            scheduleSaveSnapshot('Reset Rotate Y');
                           }}
                           className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -4734,7 +4704,31 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {/* Rotate Z */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate Z (3D)</label>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[10px] text-[var(--theme-text-muted)]">Rotate Z (3D)</label>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                              targetClipIds.forEach(id => {
+                                const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                                const newAnims = { ...(currentClip.animations || {}) };
+                                delete newAnims['transform.rotation'];
+                                delete newAnims['transform.rotationZ'];
+                                updateClip(id, {
+                                  transform: { ...currentClip.transform, rotation: 0, rotationZ: 0 },
+                                  animations: newAnims,
+                                });
+                              });
+                              scheduleSaveSnapshot('Reset Rotate Z');
+                            }}
+                            className="p-0.5 hover:bg-white/10 rounded transition-colors text-[var(--theme-text-muted)] hover:text-white"
+                            title="Reset Rotate Z to 0°"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
                         <KeyframeControl
                           propertyKey="transform.rotation"
                           value={getPropVal(selectedClip.transform.rotation, 'transform.rotation')}
@@ -4787,8 +4781,18 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           onChange={(e) => setPropVal('transform.rotation', Number(e.target.value), { transform: { ...selectedClip.transform, rotation: Number(e.target.value) } })}
                           onMouseUp={() => scheduleSaveSnapshot()}
                           onDoubleClick={() => {
-                            setPropVal('transform.rotation', 0, { transform: { ...selectedClip.transform, rotation: 0 } });
-                            scheduleSaveSnapshot();
+                            const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                            targetClipIds.forEach(id => {
+                              const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                              const newAnims = { ...(currentClip.animations || {}) };
+                              delete newAnims['transform.rotation'];
+                              delete newAnims['transform.rotationZ'];
+                              updateClip(id, {
+                                transform: { ...currentClip.transform, rotation: 0, rotationZ: 0 },
+                                animations: newAnims,
+                              });
+                            });
+                            scheduleSaveSnapshot('Reset Rotate Z');
                           }}
                           className="flex-1 h-1 bg-[var(--theme-bg-subpanel)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-500 [&::-webkit-slider-thumb]:rounded-full"
                         />
@@ -4919,22 +4923,47 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('flip') ? 'hidden' : ''}`}>
               <button
                 onClick={() => toggleSection('flip')}
-                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-[var(--theme-text-primary)] font-semibold`}
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-[var(--theme-text-primary)] font-semibold group`}
               >
                 <span className="font-medium">Flip / Mirror</span>
-                {collapsedSections['flip'] ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
-                )}
+                <div className="flex items-center gap-2">
+                  {(selectedClip.transform.flipH || selectedClip.transform.flipV) && (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                        targetClipIds.forEach(id => {
+                          const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                          updateClip(id, {
+                            transform: { ...currentClip.transform, flipH: false, flipV: false }
+                          });
+                        });
+                        scheduleSaveSnapshot('Reset Flip');
+                      }}
+                      className="p-0.5 hover:bg-[#4a4a4a] rounded transition-all cursor-pointer"
+                      title="Reset Flip"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-[var(--theme-text-muted)] hover:text-white" />
+                    </div>
+                  )}
+                  {collapsedSections['flip'] ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
+                  )}
+                </div>
               </button>
               {isSectionOpen('flip') && (
                 <div className="px-2.5 pb-2.5 pt-1 flex items-center gap-2">
                   <button
                     onClick={() => {
                       const cur = selectedClip.transform.flipH ?? false;
-                      updateClip(selectedClip.id, {
-                        transform: { ...selectedClip.transform, flipH: !cur }
+                      const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                      targetClipIds.forEach(id => {
+                        const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                        updateClip(id, {
+                          transform: { ...currentClip.transform, flipH: !cur }
+                        });
                       });
                       scheduleSaveSnapshot('Flip Horizontal');
                     }}
@@ -4947,8 +4976,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                   <button
                     onClick={() => {
                       const cur = selectedClip.transform.flipV ?? false;
-                      updateClip(selectedClip.id, {
-                        transform: { ...selectedClip.transform, flipV: !cur }
+                      const targetClipIds = selectedClipIds.length > 0 ? selectedClipIds : [selectedClip.id];
+                      targetClipIds.forEach(id => {
+                        const currentClip = useEditorStore.getState().tracks.flatMap(t => t.clips).find(x => x.id === id) || selectedClip;
+                        updateClip(id, {
+                          transform: { ...currentClip.transform, flipV: !cur }
+                        });
                       });
                       scheduleSaveSnapshot('Flip Vertical');
                     }}
@@ -5054,7 +5087,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           updateClip(selectedClip.id, {
                             transform: {
                               ...selectedClip.transform,
-                              perspectiveCorners: defaultCorners
+                              perspectiveCorners: defaultCorners,
+                              perspectiveTrackingData: undefined
                             },
                             animations: newAnimations
                           });
@@ -5120,16 +5154,32 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           setTrackProgress(0);
 
                           try {
-                            const trackDuration = Math.min(selectedClip.duration, videoEl.duration - currentTime);
+                            const startMediaTime = getMediaTimeForClip(bgClip as any, currentTime);
+                            const remainingMediaDuration = Math.max(0, (videoEl.duration || bgClip.duration) - startMediaTime);
+                            const remainingClipDuration = Math.max(0, (selectedClip.startTime + selectedClip.duration) - currentTime);
+                            const trackDuration = Math.min(remainingClipDuration, remainingMediaDuration);
+                            const startLocalTime = Math.max(0, currentTime - selectedClip.startTime);
+
+                            if (trackDuration <= 0.05) {
+                              toast.warning("Not enough duration remaining to track.");
+                              return;
+                            }
+
                             const trackingResults = await trackMotion(
                               videoEl,
-                              currentTime,
+                              startMediaTime,
                               trackDuration,
                               initialCorners,
                               (progress) => {
                                 setTrackProgress(Math.round(progress * 100));
-                              }
+                              },
+                              bgClip.transform
                             );
+
+                            if (!trackingResults || trackingResults.length === 0) {
+                              toast.error("Motion tracking produced no frames.");
+                              return;
+                            }
 
                             const newAnimations = { ...(selectedClip.animations || {}) };
                             for (let i = 0; i < 4; i++) {
@@ -5137,22 +5187,31 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                               newAnimations[`transform.perspectiveCorners.y${i}`] = [];
                             }
 
+                            const newTrackingData: { time: number; corners: CornerPoints }[] = [];
+
                             trackingResults.forEach(res => {
+                              const keyframeLocalTime = Number((startLocalTime + res.time).toFixed(3));
+                              newTrackingData.push({
+                                time: keyframeLocalTime,
+                                corners: { ...res.corners }
+                              });
+
                               for (let i = 0; i < 4; i++) {
                                 const kx = `transform.perspectiveCorners.x${i}`;
                                 const ky = `transform.perspectiveCorners.y${i}`;
                                 const valX = res.corners[`x${i}` as keyof CornerPoints];
                                 const valY = res.corners[`y${i}` as keyof CornerPoints];
 
-                                newAnimations[kx].push({ time: res.time, value: valX, easing: 'linear' });
-                                newAnimations[ky].push({ time: res.time, value: valY, easing: 'linear' });
+                                newAnimations[kx].push({ time: keyframeLocalTime, value: valX, easing: 'linear' });
+                                newAnimations[ky].push({ time: keyframeLocalTime, value: valY, easing: 'linear' });
                               }
                             });
 
                             updateClip(selectedClip.id, {
                               transform: {
                                 ...selectedClip.transform,
-                                perspectiveCorners: trackingResults[0].corners
+                                perspectiveCorners: trackingResults[0].corners,
+                                perspectiveTrackingData: newTrackingData
                               },
                               animations: newAnimations
                             });
@@ -8646,62 +8705,6 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
           </div>
         )}
 
-        {/* ── History Tab ─────────────────────────────────────────────────── */}
-        {currentTab === 'history' && (
-          <div className="flex flex-col gap-3">
-            {/* Header */}
-            <div className="p-3 border border-[var(--theme-border)] rounded-xl bg-[var(--theme-bg-subpanel)] flex items-center justify-between shrink-0 shadow-sm">
-              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Undo/Redo History</span>
-              <span className="text-[9px] text-[var(--theme-text-muted)] bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-md px-2 py-0.5 font-mono font-medium">
-                {historyLength} Actions
-              </span>
-            </div>
-
-            {/* List */}
-            <div className="space-y-1.5">
-              {history.map((snap, idx) => {
-                const isActive = idx === historyIndex;
-                const isFuture = idx > historyIndex;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => jumpToHistoryIndex(idx)}
-                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition-all border shadow-sm ${
-                      isActive
-                        ? 'bg-blue-500/10 border-blue-500 text-blue-600 dark:text-blue-400 font-bold'
-                        : isFuture
-                        ? 'bg-[var(--theme-bg-subpanel)]/40 border-transparent text-[var(--theme-text-muted)]/40 hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-[var(--theme-bg-subpanel)]'
-                        : 'bg-[var(--theme-bg-card)] border-[var(--theme-border)] text-[var(--theme-text-primary)] hover:border-blue-500/40 hover:bg-black/5 dark:hover:bg-[var(--theme-bg-subpanel)]'
-                    }`}
-                  >
-                    {/* Visual Line Node */}
-                    <div className="relative flex items-center justify-center shrink-0 w-4">
-                      {idx < historyLength - 1 && (
-                        <div className={`absolute top-4 bottom-[-24px] w-[2px] ${
-                          isFuture ? 'bg-[var(--theme-border)]/40' : 'bg-blue-500/30'
-                        }`} />
-                      )}
-                      <div className={`w-2.5 h-2.5 rounded-full border-2 ${
-                        isActive
-                          ? 'bg-blue-500 border-blue-500 ring-4 ring-blue-500/20 scale-110'
-                          : isFuture
-                          ? 'bg-transparent border-[var(--theme-border)]'
-                          : 'bg-blue-500/40 border-blue-500/80'
-                      }`} />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xs truncate block font-medium">{snap.label || 'Action'}</span>
-                      <span className="text-[9px] opacity-60 block mt-0.5 font-mono">
-                        {idx === 0 ? 'Base State' : `Step ${idx}`}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {currentTab === 'pip' && selectedClip && (() => {
           // Find the relevant PIP window

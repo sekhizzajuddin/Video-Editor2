@@ -82,16 +82,62 @@ describe('Teleprompter Speech Tracker', () => {
 
     tracker.stop();
   });
+
+  it('strictly follows spoken speech in voice-follow mode without auto-pacing timer rushing', () => {
+    const sentences = parseScriptToDialogueSentences('Hello world and welcome to our show.');
+    const tracker = new TeleprompterSpeechTracker(sentences, {
+      trackingMode: 'voice-follow',
+      wpm: 130,
+    });
+
+    let wordAdvances: number[] = [];
+    tracker.onEvent((e) => {
+      if (e.type === 'word-advance') {
+        wordAdvances.push(e.wordIndex);
+      }
+    });
+
+    tracker.start();
+
+    // Verify initial word is index 0
+    expect(tracker.getCurrentState().currentWordIdx).toBe(0);
+
+    // Simulate speech recognition transcript coming from user
+    (tracker as any).processSpokenTranscript('hello world');
+
+    // Words "hello" (0) and "world" (1) should advance, pointing to next word index 2
+    expect(tracker.getCurrentState().currentWordIdx).toBe(2);
+
+    // Simulate continuing speech: "and welcome" (words 2 and 3)
+    (tracker as any).processSpokenTranscript('hello world and welcome');
+    expect(tracker.getCurrentState().currentWordIdx).toBe(4);
+
+    // Verify changing tracking mode to auto-pacer and back works dynamically
+    tracker.setOptions({ trackingMode: 'auto-pacer' });
+    expect((tracker as any).pacerTimer).not.toBeNull();
+
+    tracker.setOptions({ trackingMode: 'voice-follow' });
+    expect((tracker as any).pacerTimer).toBeNull();
+
+    tracker.stop();
+  });
 });
 
 describe('Studio Mic Presets', () => {
   it('defines valid studio mic presets with audio DSP parameters', () => {
     const presets = Object.keys(STUDIO_MIC_PRESETS);
     expect(presets).toContain('studio-podcast');
+    expect(presets).toContain('natural-studio');
     expect(presets).toContain('broadcast-radio');
     expect(presets).toContain('warm-voiceover');
     expect(presets).toContain('crisp-clarity');
     expect(presets).toContain('bypass');
+
+    const natural = STUDIO_MIC_PRESETS['natural-studio'];
+    expect(natural.settings.enabled).toBe(true);
+    expect(natural.settings.lowCutFreq).toBeLessThanOrEqual(70);
+    expect(natural.settings.gateReductionDb).toBeGreaterThanOrEqual(-14); // Gentle floor prevents cutoffs
+    expect(natural.settings.saturationAmount).toBe(0); // Clean, uncolored vocals
 
     const podcast = STUDIO_MIC_PRESETS['studio-podcast'];
     expect(podcast.settings.enabled).toBe(true);

@@ -20,6 +20,7 @@
  */
 
 export type StudioMicPresetId =
+  | 'natural-studio'
   | 'studio-podcast'
   | 'broadcast-radio'
   | 'warm-voiceover'
@@ -36,61 +37,82 @@ export interface StudioMicPreset {
 
 export interface StudioMicSettings {
   enabled: boolean;
-  lowCutFreq: number;           // Hz (e.g. 80)
-  gateThresholdDb: number;       // dB (-60 to -25, default -42)
-  gateReductionDb: number;       // dB (-30 to -12, default -24)
-  warmthGain: number;            // dB (-6 to +8, default +3.0)
-  mudCutGain: number;            // dB (-8 to 0, default -3.0)
-  clarityGain: number;           // dB (-3 to +8, default +2.8)
-  deEsserGain: number;           // dB (-8 to 0, default -2.5)
-  airGain: number;               // dB (-3 to +8, default +3.5)
-  compressorThreshold: number;   // dB (-35 to -10, default -22)
-  compressorRatio: number;       // ratio (1 to 10, default 3.5)
-  outputGainDb: number;          // dB (0 to +12, default +4.0)
+  lowCutFreq: number;           // Hz (e.g. 60)
+  gateThresholdDb: number;       // dB (-60 to -25, default -45)
+  gateReductionDb: number;       // dB (-30 to -8, default -14)
+  warmthGain: number;            // dB (-6 to +8, default +2.0)
+  mudCutGain: number;            // dB (-8 to 0, default -2.0)
+  clarityGain: number;           // dB (-3 to +8, default +2.2)
+  deEsserGain: number;           // dB (-8 to 0, default -1.5)
+  airGain: number;               // dB (-3 to +8, default +2.5)
+  compressorThreshold: number;   // dB (-35 to -10, default -18)
+  compressorRatio: number;       // ratio (1 to 10, default 2.4)
+  outputGainDb: number;          // dB (0 to +12, default +3.0)
   saturationAmount: number;      // 0 to 1 (subtle analog warmth)
   monitoring: boolean;           // Hear own voice in headphones
 }
 
 export const STUDIO_MIC_PRESETS: Record<StudioMicPresetId, StudioMicPreset> = {
-  'studio-podcast': {
-    id: 'studio-podcast',
-    name: '🎙️ Studio Podcast (Shure SM7B Style)',
-    description: 'Deep proximity warmth, rich low-end body, punchy dynamics, and tight fan/room noise isolation.',
+  'natural-studio': {
+    id: 'natural-studio',
+    name: '🎙️ Natural Studio Vocal (Crystal Clear, Full Dynamics)',
+    description: 'Preserves 100% of your natural vocal tone, warmth, and dynamics with gentle transparent de-noise and zero muffling.',
     settings: {
       enabled: true,
-      lowCutFreq: 80,
-      gateThresholdDb: -42,
-      gateReductionDb: -24,
-      warmthGain: 3.5,
-      mudCutGain: -3.5,
-      clarityGain: 2.8,
-      deEsserGain: -2.5,
-      airGain: 3.5,
-      compressorThreshold: -22,
-      compressorRatio: 3.8,
-      outputGainDb: 4.5,
-      saturationAmount: 0.25,
+      lowCutFreq: 60,
+      gateThresholdDb: -46,
+      gateReductionDb: -12,
+      warmthGain: 1.8,
+      mudCutGain: -1.8,
+      clarityGain: 2.2,
+      deEsserGain: -1.2,
+      airGain: 2.2,
+      compressorThreshold: -16,
+      compressorRatio: 2.0,
+      outputGainDb: 2.5,
+      saturationAmount: 0.0,
+      monitoring: false,
+    },
+  },
+  'studio-podcast': {
+    id: 'studio-podcast',
+    name: '📻 Studio Podcast (Shure SM7B Style)',
+    description: 'Proximity warmth, rich chest resonance, smooth broadcast leveling, and gentle background fan attenuation.',
+    settings: {
+      enabled: true,
+      lowCutFreq: 70,
+      gateThresholdDb: -44,
+      gateReductionDb: -14,
+      warmthGain: 2.5,
+      mudCutGain: -2.5,
+      clarityGain: 2.4,
+      deEsserGain: -1.5,
+      airGain: 2.8,
+      compressorThreshold: -18,
+      compressorRatio: 2.6,
+      outputGainDb: 3.2,
+      saturationAmount: 0.08,
       monitoring: false,
     },
   },
   'broadcast-radio': {
     id: 'broadcast-radio',
-    name: '📻 Broadcast Radio (Punchy & Clear)',
-    description: 'High intelligibility, aggressive leveling, forward vocal presence designed to cut through any background.',
+    name: '📢 Broadcast Radio (Punchy & Forward)',
+    description: 'High intelligibility, punchy leveling, and forward vocal presence designed to cut through background noise.',
     settings: {
       enabled: true,
-      lowCutFreq: 95,
-      gateThresholdDb: -38,
-      gateReductionDb: -26,
-      warmthGain: 2.5,
-      mudCutGain: -4.0,
-      clarityGain: 4.2,
-      deEsserGain: -3.5,
-      airGain: 4.0,
-      compressorThreshold: -25,
-      compressorRatio: 5.0,
-      outputGainDb: 5.5,
-      saturationAmount: 0.35,
+      lowCutFreq: 80,
+      gateThresholdDb: -40,
+      gateReductionDb: -18,
+      warmthGain: 2.0,
+      mudCutGain: -3.0,
+      clarityGain: 3.5,
+      deEsserGain: -2.5,
+      airGain: 3.2,
+      compressorThreshold: -22,
+      compressorRatio: 3.5,
+      outputGainDb: 4.2,
+      saturationAmount: 0.15,
       monitoring: false,
     },
   },
@@ -100,18 +122,18 @@ export const STUDIO_MIC_PRESETS: Record<StudioMicPresetId, StudioMicPreset> = {
     description: 'Silky smooth high frequencies, natural conversational dynamics, and intimate vocal tone.',
     settings: {
       enabled: true,
-      lowCutFreq: 75,
-      gateThresholdDb: -45,
-      gateReductionDb: -20,
-      warmthGain: 3.0,
-      mudCutGain: -2.5,
-      clarityGain: 1.8,
-      deEsserGain: -2.0,
-      airGain: 3.0,
-      compressorThreshold: -20,
-      compressorRatio: 2.8,
-      outputGainDb: 3.5,
-      saturationAmount: 0.15,
+      lowCutFreq: 65,
+      gateThresholdDb: -48,
+      gateReductionDb: -12,
+      warmthGain: 2.5,
+      mudCutGain: -2.0,
+      clarityGain: 1.6,
+      deEsserGain: -1.2,
+      airGain: 2.2,
+      compressorThreshold: -16,
+      compressorRatio: 2.2,
+      outputGainDb: 2.5,
+      saturationAmount: 0.05,
       monitoring: false,
     },
   },
@@ -121,37 +143,37 @@ export const STUDIO_MIC_PRESETS: Record<StudioMicPresetId, StudioMicPreset> = {
     description: 'Maximum articulation and clarity with de-mudded lows and sparkling highs for modern web video.',
     settings: {
       enabled: true,
-      lowCutFreq: 110,
-      gateThresholdDb: -40,
-      gateReductionDb: -22,
+      lowCutFreq: 85,
+      gateThresholdDb: -42,
+      gateReductionDb: -15,
       warmthGain: 1.0,
-      mudCutGain: -5.0,
-      clarityGain: 4.5,
-      deEsserGain: -3.0,
-      airGain: 4.5,
-      compressorThreshold: -22,
-      compressorRatio: 3.2,
-      outputGainDb: 4.0,
-      saturationAmount: 0.1,
+      mudCutGain: -3.5,
+      clarityGain: 3.5,
+      deEsserGain: -2.0,
+      airGain: 3.5,
+      compressorThreshold: -18,
+      compressorRatio: 2.6,
+      outputGainDb: 3.0,
+      saturationAmount: 0.05,
       monitoring: false,
     },
   },
   'clean-denoise': {
     id: 'clean-denoise',
     name: '🧼 Clean Denoise Only',
-    description: 'Subtle noise gate and low-cut filter to remove background hum while preserving raw natural voice tone.',
+    description: 'Subtle noise gate and low-cut filter to remove background hum while preserving 100% raw natural voice tone.',
     settings: {
       enabled: true,
-      lowCutFreq: 80,
-      gateThresholdDb: -44,
-      gateReductionDb: -20,
+      lowCutFreq: 60,
+      gateThresholdDb: -46,
+      gateReductionDb: -12,
       warmthGain: 0,
       mudCutGain: 0,
       clarityGain: 0,
       deEsserGain: 0,
       airGain: 0,
-      compressorThreshold: -15,
-      compressorRatio: 1.5,
+      compressorThreshold: -12,
+      compressorRatio: 1.2,
       outputGainDb: 1.0,
       saturationAmount: 0,
       monitoring: false,
@@ -220,6 +242,8 @@ export class StudioMicProcessor {
   private destinationNode: MediaStreamAudioDestinationNode | null = null;
   private monitorGainNode: GainNode | null = null;
   private analyserNode: AnalyserNode | null = null;
+  private preGateDetectorNode: AnalyserNode | null = null;
+  private lastSpeechTime = 0;
 
   // Bypass nodes
   private bypassGainNode: GainNode | null = null;
@@ -235,15 +259,15 @@ export class StudioMicProcessor {
   private peakDb = -100;
 
   // Current settings
-  public settings: StudioMicSettings = { ...STUDIO_MIC_PRESETS['studio-podcast'].settings };
-  public currentPresetId: StudioMicPresetId = 'studio-podcast';
+  public settings: StudioMicSettings = { ...STUDIO_MIC_PRESETS['natural-studio'].settings };
+  public currentPresetId: StudioMicPresetId = 'natural-studio';
 
   constructor() {}
 
   /**
    * Initializes the studio DSP rack with an active user microphone MediaStream.
    */
-  public async init(stream: MediaStream, initialPreset: StudioMicPresetId = 'studio-podcast'): Promise<MediaStream> {
+  public async init(stream: MediaStream, initialPreset: StudioMicPresetId = 'natural-studio'): Promise<MediaStream> {
     this.dispose();
 
     if (typeof window === 'undefined') {
@@ -262,6 +286,13 @@ export class StudioMicProcessor {
 
     this.inputStream = stream;
     this.sourceNode = this.audioCtx.createMediaStreamSource(stream);
+
+    // Dedicated Pre-Gate Detector: Analyzes TRUE acoustic incoming signal
+    // (Never reads post-gate, preventing positive-feedback cutoff or swallowed words)
+    this.preGateDetectorNode = this.audioCtx.createAnalyser();
+    this.preGateDetectorNode.fftSize = 512;
+    this.preGateDetectorNode.smoothingTimeConstant = 0.25;
+    this.sourceNode.connect(this.preGateDetectorNode);
 
     // 1. Cascaded High-pass filters (18-24dB/oct rumble cut)
     this.highpassFilter1 = this.audioCtx.createBiquadFilter();
@@ -476,12 +507,14 @@ export class StudioMicProcessor {
 
   /**
    * Real-time metering and adaptive noise gate loop.
+   * Reads from preGateDetectorNode to ensure speech dynamics are preserved without cutoffs.
    */
   private startMeteringLoop() {
     const loop = () => {
-      if (!this.analyserNode || !this.timeDataBuffer || !this.audioCtx) return;
+      if (!this.preGateDetectorNode || !this.timeDataBuffer || !this.audioCtx) return;
 
-      this.analyserNode.getFloatTimeDomainData(this.timeDataBuffer);
+      // Sample TRUE acoustic pre-gate incoming signal (immune to gate attenuation feedback)
+      this.preGateDetectorNode.getFloatTimeDomainData(this.timeDataBuffer);
 
       // Compute RMS and Peak
       let sumSquares = 0;
@@ -499,23 +532,30 @@ export class StudioMicProcessor {
       this.currentDb = Math.max(-100, Math.min(0, db));
       this.peakDb = peak > 0.00001 ? 20 * Math.log10(peak) : -100;
 
-      // Noise Gate logic (only if enabled)
+      // Noise Gate logic with Hysteresis & Hold Time
       if (this.settings.enabled && this.gateGainNode) {
-        const threshold = this.settings.gateThresholdDb;
-        const reductionDb = this.settings.gateReductionDb;
-        const floorGain = Math.pow(10, reductionDb / 20); // e.g. -24dB = 0.063
+        const openThreshold = this.settings.gateThresholdDb;
+        const closeThreshold = openThreshold - 6.0; // 6 dB hysteresis prevents chattering
+        const holdTimeSec = 0.18; // 180ms hold time keeps word endings and quiet phonemes intact
+        const floorGain = Math.pow(10, this.settings.gateReductionDb / 20); // e.g. -12dB = 0.25
 
-        const t = this.audioCtx.currentTime;
-        if (this.currentDb > threshold) {
-          // Open gate (Fast attack 5ms)
+        const now = this.audioCtx.currentTime;
+
+        if (this.currentDb > openThreshold) {
+          this.lastSpeechTime = now;
           this.isGateOpen = true;
           this.currentGateGain = 1.0;
-          this.gateGainNode.gain.setTargetAtTime(1.0, t, 0.008);
+          this.gateGainNode.gain.setTargetAtTime(1.0, now, 0.008);
+        } else if (now - this.lastSpeechTime < holdTimeSec || this.currentDb > closeThreshold) {
+          // Keep gate open during natural breath/syllable pauses
+          this.isGateOpen = true;
+          this.currentGateGain = 1.0;
+          this.gateGainNode.gain.setTargetAtTime(1.0, now, 0.008);
         } else {
-          // Close gate (Smooth release 140ms so speech tail isn't clipped)
+          // Close gate smoothly without clipping or popping
           this.isGateOpen = false;
           this.currentGateGain = floorGain;
-          this.gateGainNode.gain.setTargetAtTime(floorGain, t, 0.14);
+          this.gateGainNode.gain.setTargetAtTime(floorGain, now, 0.15);
         }
       }
 
@@ -656,6 +696,8 @@ export class StudioMicProcessor {
       this.bypassGainNode?.disconnect();
       this.monitorGainNode?.disconnect();
       this.analyserNode?.disconnect();
+      this.preGateDetectorNode?.disconnect();
+      this.preGateDetectorNode = null;
 
       if (this.audioCtx && this.audioCtx.state !== 'closed') {
         this.audioCtx.close().catch(() => {});
@@ -666,6 +708,7 @@ export class StudioMicProcessor {
 
     this.audioCtx = null;
     this.sourceNode = null;
+    this.preGateDetectorNode = null;
     this.inputStream = null;
   }
 }

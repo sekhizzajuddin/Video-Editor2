@@ -624,30 +624,18 @@ export class Compositor {
         // 5. Apply global translation + rotation
         const cx = W / 2;
         const cy = H / 2;
-        targetCtx.translate(cx + tx, cy + ty);
-        targetCtx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
         
-        // Perspective pin warp: use the preview's grid-based corner warping
-        // when perspectivePin is enabled and corners are defined.
-        const hasPerspectiveWarp = layer.perspectivePin && layer.perspectiveCorners;
-        
-        // 3D rotation (rotationX/Y): squash by cos(angle) to reproduce the
-        // preview's perspective flattening (full corner warp would need
-        // per-clip projection; this matches the preview's simulated-3D squash).
-        // Skip this if we're doing a full perspective warp.
+        // Perspective pin or 3D rotation: use grid-based corner perspective warping
+        const hasPerspectivePin = !!(layer.perspectivePin && layer.perspectiveCorners);
+        const has3dRotation = Math.abs(layer.rotationX || 0) > 0.01 || Math.abs(layer.rotationY || 0) > 0.01;
+        const hasPerspectiveWarp = hasPerspectivePin || has3dRotation;
+
         if (!hasPerspectiveWarp) {
-          const rotX3d = layer.rotationX || 0;
-          const rotY3d = layer.rotationY || 0;
-          if (Math.abs(rotX3d) > 0.01 || Math.abs(rotY3d) > 0.01) {
-            const sx3d = Math.cos((rotY3d * Math.PI) / 180);
-            const sy3d = Math.cos((rotX3d * Math.PI) / 180);
-            if (Math.abs(sx3d) > 0.001 && Math.abs(sy3d) > 0.001) {
-              targetCtx.scale(sx3d, sy3d);
-            }
+          targetCtx.translate(cx + tx, cy + ty);
+          targetCtx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
+          if (layer.flipH || layer.flipV) {
+            targetCtx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
           }
-        }
-        if (layer.flipH || layer.flipV) {
-          targetCtx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
         }
         
         targetCtx.globalAlpha = layer.opacity ?? 1;
@@ -751,35 +739,78 @@ export class Compositor {
           }
         }
 
-        // If perspective warp is enabled, draw using the corner-warp grid
-        // instead of the standard transform pipeline.
-        if (hasPerspectiveWarp && layer.perspectiveCorners) {
-          const corners = layer.perspectiveCorners;
-          // Map normalized corner offsets (0-100 range from UI) to canvas coordinates
-          const tl = { x: cx + tx + (corners.topLeft?.x || 0) * exportScaleX, y: cy + ty + (corners.topLeft?.y || 0) * exportScaleY };
-          const tr = { x: cx + tx + (corners.topRight?.x || 0) * exportScaleX, y: cy + ty + (corners.topRight?.y || 0) * exportScaleY };
-          const br = { x: cx + tx + (corners.bottomRight?.x || 0) * exportScaleX, y: cy + ty + (corners.bottomRight?.y || 0) * exportScaleY };
-          const bl = { x: cx + tx + (corners.bottomLeft?.x || 0) * exportScaleX, y: cy + ty + (corners.bottomLeft?.y || 0) * exportScaleY };
-          
-          targetCtx.restore(); // Exit the transform save before applying warp
-          targetCtx.save();
+        // If perspective warp (perspective pin or 3D rotation) is enabled,
+        // draw using the corner-warp grid matching preview.
+        if (hasPerspectiveWarp) {
+          let warpCorners: { x0: number; y0: number; x1: number; y1: number; x2: number; y2: number; x3: number; y3: number };
+          if (hasPerspectivePin && layer.perspectiveCorners) {
+            const corners = layer.perspectiveCorners as any;
+            const inX0 = corners.x0 ?? corners.topLeft?.x ?? 0;
+            const inY0 = corners.y0 ?? corners.topLeft?.y ?? 0;
+            const inX1 = corners.x1 ?? corners.topRight?.x ?? viewW;
+            const inY1 = corners.y1 ?? corners.topRight?.y ?? 0;
+            const inX2 = corners.x2 ?? corners.bottomRight?.x ?? viewW;
+            const inY2 = corners.y2 ?? corners.bottomRight?.y ?? viewH;
+            const inX3 = corners.x3 ?? corners.bottomLeft?.x ?? 0;
+            const inY3 = corners.y3 ?? corners.bottomLeft?.y ?? viewH;
+
+            const ccx = (inX0 + inX1 + inX2 + inX3) / 4;
+            const ccy = (inY0 + inY1 + inY2 + inY3) / 4;
+            const rotRad = ((layer.transform.rotation || 0) * Math.PI) / 180;
+            const cos = Math.cos(rotRad);
+            const sin = Math.sin(rotRad);
+            const aX = layer.transform.x || 0;
+            const aY = layer.transform.y || 0;
+
+            const transformCorner = (x: number, y: number) => {
+              let dx = (x - ccx) * finalScale;
+              let dy = (y - ccy) * finalScale;
+              const rx = dx * cos - dy * sin;
+              const ry = dx * sin + dy * cos;
+              return {
+                x: (ccx + rx + aX) * exportScaleX,
+                y: (ccy + ry + aY) * exportScaleY,
+              };
+            };
+
+            let c0 = transformCorner(inX0, inY0);
+            let c1 = transformCorner(inX1, inY1);
+            let c2 = transformCorner(inX2, inY2);
+            let c3 = transformCorner(inX3, inY3);
+
+            if (layer.flipH) {
+              const t0 = c0; c0 = c1; c1 = t0;
+              const t3 = c3; c3 = c2; c2 = t3;
+            }
+            if (layer.flipV) {
+              const t0 = c0; c0 = c3; c3 = t0;
+              const t1 = c1; c1 = c2; c2 = t1;
+            }
+            warpCorners = { x0: c0.x, y0: c0.y, x1: c1.x, y1: c1.y, x2: c2.x, y2: c2.y, x3: c3.x, y3: c3.y };
+          } else {
+            const D = 800 * (W / viewW);
+            warpCorners = getProjectedCorners(
+              vw, vh,
+              finalScale * scaleToFit,
+              layer.rotationX || 0,
+              layer.rotationY || 0,
+              layer.transform.rotation || 0,
+              tx, ty,
+              cx, cy,
+              D,
+              !!layer.flipH,
+              !!layer.flipV
+            );
+          }
 
           // Apply the perspective texture warp using the same 8×8 grid as preview
           drawPerspectiveTexture(
             targetCtx as unknown as CanvasRenderingContext2D,
             drawable,
-            { x0: tl.x, y0: tl.y, x1: tr.x, y1: tr.y, x2: br.x, y2: br.y, x3: bl.x, y3: bl.y }
+            warpCorners
           );
 
-          // finishLayer() pops BOTH remaining saves (the one just pushed and
-          // the layer-block save). Previously this `continue` skipped the two
-          // restores at the end of the block, leaking canvas state per warped
-          // layer per frame — and would also have skipped vector-mask isolation
-          // teardown. Keep save/restore balanced on every exit path.
           finishLayer();
-          // The try/finally below is never entered on this path, so release
-          // the drawable (e.g. converted ImageBitmap) explicitly — previously
-          // leaked per frame for every perspective-warped layer.
           if (resolved.cleanup) resolved.cleanup();
           continue;
         }
@@ -1495,7 +1526,20 @@ export class Compositor {
 
     ctx.translate(W / 2 + tx, H / 2 + ty);
     ctx.rotate(((layer.transform.rotation || 0) * Math.PI) / 180);
-    ctx.scale(finalScale, finalScale);
+
+    const rotX3d = layer.rotationX || 0;
+    const rotY3d = layer.rotationY || 0;
+    if (Math.abs(rotX3d) > 0.01 || Math.abs(rotY3d) > 0.01) {
+      const sx3d = Math.cos((rotY3d * Math.PI) / 180);
+      const sy3d = Math.cos((rotX3d * Math.PI) / 180);
+      if (Math.abs(sx3d) > 0.001 && Math.abs(sy3d) > 0.001) {
+        ctx.scale(sx3d, sy3d);
+      }
+    }
+
+    const scaleX = finalScale * (layer.flipH ? -1 : 1);
+    const scaleY = finalScale * (layer.flipV ? -1 : 1);
+    ctx.scale(scaleX, scaleY);
 
     // Entry/exit animation: offset + scale compose inside the already-scaled
     // context exactly like the preview's text branch, so the exported motion

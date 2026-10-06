@@ -4,6 +4,7 @@ import { findActiveTransition, buildTransitionPlan } from '../../utils/transitio
 import { resolveBlendPlan } from '../../utils/blendCompositor';
 import { FramePool } from './memory/FramePool';
 import { getMediaTimeForClip } from '../../utils/speedRamp';
+import type { CornerPoints } from '../../types';
 
 /**
  * Anything that can hand the compositor a frame for a clip: a real MediaBunny
@@ -168,7 +169,7 @@ export interface RenderLayer {
   rotationX?: number;
   rotationY?: number;
   perspectivePin?: boolean;
-  perspectiveCorners?: {
+  perspectiveCorners?: CornerPoints | {
     topLeft?: { x: number; y: number };
     topRight?: { x: number; y: number };
     bottomRight?: { x: number; y: number };
@@ -427,12 +428,12 @@ export class FrameScheduler {
           const xBase = clip.transform?.x ?? clip.position?.x ?? 0;
           const yBase = clip.transform?.y ?? clip.position?.y ?? 0;
           const scaleBase = clip.transform?.scale ?? clip.scale ?? 100;
-          const rotBase = clip.transform?.rotation ?? clip.rotation ?? 0;
+          const rotBase = clip.transform?.rotationZ ?? clip.transform?.rotation ?? clip.rotation ?? 0;
           const transform = {
             x: getAnimatedExportValue(xBase, t, st, clip.animations?.['transform.x']),
             y: getAnimatedExportValue(yBase, t, st, clip.animations?.['transform.y']),
             scale: getAnimatedExportValue(scaleBase, t, st, clip.animations?.['transform.scale']),
-            rotation: getAnimatedExportValue(rotBase, t, st, clip.animations?.['transform.rotation']),
+            rotation: getAnimatedExportValue(rotBase, t, st, clip.animations?.['transform.rotationZ'] || clip.animations?.['transform.rotation']),
           };
           const zIndex = clip.zIndex !== undefined ? clip.zIndex : trackIdx;
           const layerOrder = order++;
@@ -556,10 +557,41 @@ export class FrameScheduler {
           } : undefined;
           const curves = clip.colorFilters?.curves;
 
+          let resolvedPerspectiveCorners = clip.transform?.perspectiveCorners;
+          if (clip.transform?.perspectivePin) {
+            const trackingData = clip.transform?.perspectiveTrackingData;
+            if (trackingData && trackingData.length > 0) {
+              const localTime = t - st;
+              let closestDist = Infinity;
+              let trackedCorners = null;
+              for (const pt of trackingData) {
+                const dist = Math.abs(pt.time - localTime);
+                if (dist < closestDist) {
+                  closestDist = dist;
+                  trackedCorners = pt.corners;
+                }
+              }
+              if (trackedCorners) {
+                resolvedPerspectiveCorners = { ...trackedCorners };
+              }
+            } else if (resolvedPerspectiveCorners) {
+              resolvedPerspectiveCorners = {
+                x0: getAnimatedExportValue(resolvedPerspectiveCorners.x0, t, st, clip.animations?.['transform.perspectiveCorners.x0']),
+                y0: getAnimatedExportValue(resolvedPerspectiveCorners.y0, t, st, clip.animations?.['transform.perspectiveCorners.y0']),
+                x1: getAnimatedExportValue(resolvedPerspectiveCorners.x1, t, st, clip.animations?.['transform.perspectiveCorners.x1']),
+                y1: getAnimatedExportValue(resolvedPerspectiveCorners.y1, t, st, clip.animations?.['transform.perspectiveCorners.y1']),
+                x2: getAnimatedExportValue(resolvedPerspectiveCorners.x2, t, st, clip.animations?.['transform.perspectiveCorners.x2']),
+                y2: getAnimatedExportValue(resolvedPerspectiveCorners.y2, t, st, clip.animations?.['transform.perspectiveCorners.y2']),
+                x3: getAnimatedExportValue(resolvedPerspectiveCorners.x3, t, st, clip.animations?.['transform.perspectiveCorners.x3']),
+                y3: getAnimatedExportValue(resolvedPerspectiveCorners.y3, t, st, clip.animations?.['transform.perspectiveCorners.y3']),
+              };
+            }
+          }
+
           const visualSettings = {
             crop,
-            flipH: !!clip.transform?.flipH,
-            flipV: !!clip.transform?.flipV,
+            flipH: !!(clip.transform?.flipH ?? (clip as any).flipH),
+            flipV: !!(clip.transform?.flipV ?? (clip as any).flipV),
             colorFilters,
             chromaKey,
             lumaKey,
@@ -580,7 +612,7 @@ export class FrameScheduler {
             rotationX: getAnimatedExportValue(clip.transform?.rotationX ?? 0, t, st, clip.animations?.['transform.rotationX']),
             rotationY: getAnimatedExportValue(clip.transform?.rotationY ?? 0, t, st, clip.animations?.['transform.rotationY']),
             perspectivePin: !!clip.transform?.perspectivePin,
-            perspectiveCorners: clip.transform?.perspectiveCorners,
+            perspectiveCorners: resolvedPerspectiveCorners,
             effects: Array.isArray(clip.effects) ? clip.effects : undefined,
             aiBackground: clip.aiBackground?.enabled ? {
               enabled: true,

@@ -31,11 +31,14 @@ export interface DialogueSentence {
   isDelivered: boolean;
 }
 
+export type TrackingMode = 'voice-follow' | 'smart-hybrid' | 'auto-pacer';
+
 export interface SpeechTrackerOptions {
   wpm?: number;                    // Estimated reading speed (default: 130 WPM)
   autoAdvance?: boolean;           // Automatically advance to next sentence when finished
   fuzzyTolerance?: number;         // 0 (strict) to 2 (tolerant)
-  language?: string;               // e.g. 'en-US', 'hi-IN', 'es-ES'
+  language?: string;               // e.g. 'en-US', 'en-IN', 'hi-IN', 'es-ES'
+  trackingMode?: TrackingMode;     // 'voice-follow' (strictly follows user's speech), 'smart-hybrid', 'auto-pacer'
   useGeminiLive?: boolean;
 }
 
@@ -200,6 +203,7 @@ export class TeleprompterSpeechTracker {
   // Auto-pacer timer
   private pacerTimer: ReturnType<typeof setInterval> | null = null;
   private pacerWordIntervalMs = 450; // calculated from WPM
+  private consecutiveIdleTicks = 0;
 
   // Callbacks
   private listener: SpeechTrackerCallback | null = null;
@@ -211,6 +215,7 @@ export class TeleprompterSpeechTracker {
       autoAdvance: options.autoAdvance ?? true,
       fuzzyTolerance: options.fuzzyTolerance ?? 1,
       language: options.language ?? 'en-US',
+      trackingMode: options.trackingMode ?? 'voice-follow',
       useGeminiLive: options.useGeminiLive ?? false,
     };
     this.updatePacerInterval();
@@ -224,8 +229,24 @@ export class TeleprompterSpeechTracker {
   }
 
   public setOptions(options: Partial<SpeechTrackerOptions>) {
+    const prevMode = this.options.trackingMode;
+    const prevLang = this.options.language;
     this.options = { ...this.options, ...options };
     this.updatePacerInterval();
+
+    if (this.isRunning) {
+      if (options.trackingMode && options.trackingMode !== prevMode) {
+        if (this.options.trackingMode === 'voice-follow') {
+          this.stopAutoPacer();
+        } else if (this.options.trackingMode === 'auto-pacer' || this.options.trackingMode === 'smart-hybrid') {
+          this.startAutoPacer();
+        }
+      }
+      if (options.language && options.language !== prevLang) {
+        this.stopSpeechRecognition();
+        this.initSpeechRecognition();
+      }
+    }
   }
 
   private updatePacerInterval() {
@@ -249,7 +270,7 @@ export class TeleprompterSpeechTracker {
   }
 
   /**
-   * Starts real-time tracking (SpeechRecognition + auto-pacer assist).
+   * Starts real-time tracking (SpeechRecognition + tracking mode).
    */
   public start() {
     if (this.isRunning) return;
@@ -257,7 +278,14 @@ export class TeleprompterSpeechTracker {
 
     this.resetWordHighlights();
     this.initSpeechRecognition();
-    this.startAutoPacer();
+
+    // Only run auto-pacer if mode is explicitly 'auto-pacer' or 'smart-hybrid'
+    // In 'voice-follow' (default), highlighting STRICTLY advances as the user speaks!
+    if (this.options.trackingMode === 'auto-pacer' || this.options.trackingMode === 'smart-hybrid') {
+      this.startAutoPacer();
+    } else {
+      this.stopAutoPacer();
+    }
   }
 
   /**
@@ -289,7 +317,11 @@ export class TeleprompterSpeechTracker {
     if (this.isRunning) return;
     this.isRunning = true;
     this.initSpeechRecognition();
-    this.startAutoPacer();
+    if (this.options.trackingMode === 'auto-pacer' || this.options.trackingMode === 'smart-hybrid') {
+      this.startAutoPacer();
+    } else {
+      this.stopAutoPacer();
+    }
   }
 
   /**
@@ -444,6 +476,9 @@ export class TeleprompterSpeechTracker {
 
     this.notify('transcript', { transcript });
 
+    // Reset idle silence counter immediately because user is speaking!
+    this.consecutiveIdleTicks = 0;
+
     // Clean spoken tokens
     const spokenTokens = transcript
       .toLowerCase()
@@ -454,34 +489,30 @@ export class TeleprompterSpeechTracker {
     if (spokenTokens.length === 0) return;
 
     const words = currentSentence.words;
-    let matchIdx = this.currentWordIdx;
+    let targetIdx = this.currentWordIdx;
 
-    // Scan backwards through spoken tokens (most recently spoken words)
-    // and match against upcoming target words
+    // Forward window alignment: find the furthest spoken token match in the sentence
     for (const spokenToken of spokenTokens) {
-      if (matchIdx >= words.length) break;
+      if (targetIdx >= words.length) break;
 
-      // Check immediate target word
-      if (isWordMatch(words[matchIdx].clean, spokenToken, this.options.fuzzyTolerance)) {
-        matchIdx++;
-        continue;
-      }
-
-      // Check next word (user skipped or mumbled a filler word)
-      if (matchIdx + 1 < words.length && isWordMatch(words[matchIdx + 1].clean, spokenToken, this.options.fuzzyTolerance)) {
-        matchIdx += 2;
-        continue;
+      // Lookahead window: allow user to skip filler words or mumble up to 4 words ahead
+      const maxLook = Math.min(words.length, targetIdx + 5);
+      for (let i = targetIdx; i < maxLook; i++) {
+        if (isWordMatch(words[i].clean, spokenToken, this.options.fuzzyTolerance)) {
+          targetIdx = i + 1;
+          break;
+        }
       }
     }
 
     // If new words were matched, advance state!
-    if (matchIdx > this.currentWordIdx) {
-      this.currentWordIdx = matchIdx;
+    if (targetIdx > this.currentWordIdx) {
+      this.currentWordIdx = targetIdx;
       this.resetWordHighlights();
       this.notify('word-advance');
 
       // Check if sentence delivered completely!
-      // If user finished all words, or reached last word, or >= 85% done
+      // If user finished all words, or reached last word, or >= 80% done
       const isComplete =
         this.currentWordIdx >= words.length ||
         (words.length > 3 && this.currentWordIdx >= words.length - 1);
@@ -493,13 +524,16 @@ export class TeleprompterSpeechTracker {
   }
 
   /**
-   * Auto-pacer fallback: if the speaker pauses or speech recognition misses a word,
-   * gently nudges the highlight forward after 2x the standard word interval
-   * so the speaker is never stuck or left guessing what to say next!
+   * Auto-pacer fallback: only runs in 'auto-pacer' or 'smart-hybrid' mode.
+   * In 'voice-follow' (default), this timer is strictly DISABLED so the prompter
+   * exclusively follows the user's speech!
    */
   private startAutoPacer() {
     this.stopAutoPacer();
-    let consecutiveIdleTicks = 0;
+    // In strict voice tracking mode, auto-pacer is completely disabled!
+    if (this.options.trackingMode === 'voice-follow') return;
+
+    this.consecutiveIdleTicks = 0;
 
     this.pacerTimer = setInterval(() => {
       if (!this.isRunning) return;
@@ -507,11 +541,14 @@ export class TeleprompterSpeechTracker {
       const cur = this.sentences[this.currentSentenceIdx];
       if (!cur || !cur.words.length) return;
 
-      consecutiveIdleTicks++;
+      this.consecutiveIdleTicks++;
 
-      // After 3 intervals of silence (~1.3s), advance one word as a pacing guide
-      if (consecutiveIdleTicks >= 3) {
-        consecutiveIdleTicks = 0;
+      // In 'smart-hybrid' mode: only nudge if silent for > 4.5 seconds (10 intervals)
+      // In 'auto-pacer' mode: advance every single tick according to WPM
+      const thresholdTicks = this.options.trackingMode === 'smart-hybrid' ? 10 : 1;
+
+      if (this.consecutiveIdleTicks >= thresholdTicks) {
+        this.consecutiveIdleTicks = 0;
         if (this.currentWordIdx < cur.words.length) {
           this.currentWordIdx++;
           this.resetWordHighlights();

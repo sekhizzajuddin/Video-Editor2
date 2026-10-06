@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers, Palette, Type } from 'lucide-react';
+import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers, Palette, Type, RotateCw } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
@@ -132,6 +132,25 @@ export function ExportModal() {
       standaloneOutCount,
       types: Array.from(types),
     };
+  }, [tracks]);
+
+  const transformFxInfo = useMemo(() => {
+    let rotation3dCount = 0;
+    let flippedCount = 0;
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        if (clip.disabled) continue;
+        const rotX = Math.abs(clip.transform?.rotationX || 0);
+        const rotY = Math.abs(clip.transform?.rotationY || 0);
+        if (rotX > 0.01 || rotY > 0.01 || clip.transform?.perspectivePin) {
+          rotation3dCount++;
+        }
+        if (clip.transform?.flipH || clip.transform?.flipV || (clip as any).flipH || (clip as any).flipV) {
+          flippedCount++;
+        }
+      }
+    }
+    return { rotation3dCount, flippedCount };
   }, [tracks]);
 
   const initialResolution = useMemo(() => {
@@ -700,6 +719,44 @@ export function ExportModal() {
               </div>
               <p className="text-[10px] text-purple-300/80 bg-purple-950/30 p-1.5 rounded border border-purple-500/20">
                 Frame-accurate WebGL/Canvas blending confirmed: Standalone transitions composite directly over underlying tracks or transparent alpha without requiring adjacent clips.
+              </p>
+            </div>
+          )}
+
+          {/* 3D Perspective & Mirroring Active Status */}
+          {(transformFxInfo.rotation3dCount > 0 || transformFxInfo.flippedCount > 0) && (
+            <div className="bg-cyan-950/25 border border-cyan-500/30 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center bg-cyan-500/20 text-cyan-400">
+                    <RotateCw className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
+                      <span>3D Rotation &amp; Mirroring Active</span>
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                    </div>
+                    <div className="text-[10px] text-cyan-400/80 flex items-center gap-2 mt-0.5">
+                      {transformFxInfo.rotation3dCount > 0 && (
+                        <span>{transformFxInfo.rotation3dCount} {transformFxInfo.rotation3dCount === 1 ? 'clip' : 'clips'} with 3D Perspective</span>
+                      )}
+                      {transformFxInfo.rotation3dCount > 0 && transformFxInfo.flippedCount > 0 && (
+                        <span className="text-cyan-500/50">•</span>
+                      )}
+                      {transformFxInfo.flippedCount > 0 && (
+                        <span>{transformFxInfo.flippedCount} {transformFxInfo.flippedCount === 1 ? 'clip' : 'clips'} Mirrored</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-black/50 text-[9px] font-mono text-cyan-300 border border-cyan-500/30">
+                    Bilinear 8x8 Mesh
+                  </span>
+                </div>
+              </div>
+              <p className="text-[10px] text-cyan-300/80 bg-cyan-950/30 p-1.5 rounded border border-cyan-500/20">
+                Full 3D rotation and mirror flipping mapped frame-for-frame to the export compositor with perspective projection.
               </p>
             </div>
           )}
