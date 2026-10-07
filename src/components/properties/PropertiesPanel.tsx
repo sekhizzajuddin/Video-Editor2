@@ -20,6 +20,7 @@ import {
   X,
   Volume2,
   VolumeX,
+  Waves,
   Sparkles,
   Sliders,
   RotateCcw,
@@ -74,6 +75,7 @@ import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoin
 import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine, getMediaTimeForClip } from '@/utils/speedRamp';
 import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
 import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
+import { ReverbEnvironmentSection } from '@/components/properties/tabs/audio/ReverbEnvironmentSection';
 import type { SpeedRampKeyframe, EasingType, ClipAnimations, PropertyKeyframe } from '@/types';
 import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { calculateAutoColor } from '@/utils/autoColor';
@@ -150,6 +152,19 @@ const DEFAULT_INACTIVE_CLIP: TimelineClip = {
     compression: 0,
     deEsser: 0,
     warmth: 0,
+    reverb: {
+      enabled: false,
+      preset: 'none',
+      mix: 25,
+      decay: 1.5,
+      preDelay: 20,
+      damping: 40,
+      roomSize: 50,
+    },
+    environment: {
+      preset: 'none',
+      intensity: 0,
+    },
   },
 };
 
@@ -383,6 +398,7 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
   audio: [
     { id: 'audioVolume', label: 'Volume & Pan' },
     { id: 'audioEQ', label: 'Equalizer' },
+    { id: 'audioReverb', label: 'Reverb & Space' },
     { id: 'audioFades', label: 'Fades' },
     { id: 'audioSpeedPitch', label: 'Speed Pitch' },
   ],
@@ -7125,6 +7141,38 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       />
                     </div>
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* Reverb & Acoustic Environment */}
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('audioReverb') ? 'hidden' : ''}`}>
+              <button
+                onClick={() => toggleSection('audioReverb')}
+                className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-[var(--theme-text-primary)] font-semibold`}
+              >
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Waves className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Reverb &amp; Environment</span>
+                  {clipAudio.reverb?.enabled && (
+                    <span className="text-[9px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full font-semibold uppercase">
+                      {clipAudio.reverb?.preset && clipAudio.reverb.preset !== 'none' ? clipAudio.reverb.preset : 'ON'}
+                    </span>
+                  )}
+                </div>
+                {collapsedSections['audioReverb'] ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--theme-text-muted)]" />
+                )}
+              </button>
+              {isSectionOpen('audioReverb') && (
+                <div className="px-2.5 pb-3 border-t border-[var(--theme-border)]/30 pt-2.5">
+                  <ReverbEnvironmentSection
+                    clipAudio={clipAudio}
+                    handleAudioChange={handleAudioChange}
+                    handleAudioReset={handleAudioReset}
+                  />
                 </div>
               )}
             </div>

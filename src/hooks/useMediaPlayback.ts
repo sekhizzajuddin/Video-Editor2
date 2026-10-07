@@ -28,6 +28,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { getMediaTimeForClip, getSpeedForClipAtTime, getClipSourceEnd } from '@/utils/speedRamp';
 import { effectiveVocalFormant, effectiveVocalPitchSt } from '@/utils/vocalTone';
 import { getAnimatedValue } from '@/utils/keyframes';
+import { generateReverbImpulse } from '@/utils/reverbDsp';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
 import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime, setIsPlayingClock } from '@/utils/playbackClock';
@@ -152,6 +153,11 @@ interface MediaElement {
   delayGain?: GainNode;
   feedbackInputGain?: GainNode;
   feedbackNode?: GainNode;
+  reverbDryGain?: GainNode;
+  reverbWetGain?: GainNode;
+  convolverNode?: ConvolverNode;
+  reverbPreFilter?: BiquadFilterNode;
+  _lastReverbKey?: string;
   separationGraph?: SeparationGraph;
   _fxConnected?: boolean;
   _isGraphConnected?: boolean;
@@ -841,14 +847,37 @@ function initAudioGraph(entry: MediaElement) {
     delayNode.connect(feedbackNode);
     feedbackNode.connect(delayNode);
 
+    // Reverb & Acoustic Environment DSP Path
+    const reverbDryGain = audioCtx.createGain();
+    reverbDryGain.gain.value = 1.0;
+
+    const reverbWetGain = audioCtx.createGain();
+    reverbWetGain.gain.value = 0.0;
+
+    const convolverNode = audioCtx.createConvolver();
+    const reverbPreFilter = audioCtx.createBiquadFilter();
+    reverbPreFilter.type = 'allpass';
+
+    warmthFilter.connect(reverbDryGain);
+    warmthFilter.connect(reverbPreFilter);
+    reverbPreFilter.connect(convolverNode);
+    convolverNode.connect(reverbWetGain);
+
     if (pannerNode) {
-      warmthFilter.connect(pannerNode);
+      reverbDryGain.connect(pannerNode);
+      reverbWetGain.connect(pannerNode);
       delayGain.connect(pannerNode);
       pannerNode.connect(gainNode);
     } else {
-      warmthFilter.connect(gainNode);
+      reverbDryGain.connect(gainNode);
+      reverbWetGain.connect(gainNode);
       delayGain.connect(gainNode);
     }
+
+    entry.reverbDryGain = reverbDryGain;
+    entry.reverbWetGain = reverbWetGain;
+    entry.convolverNode = convolverNode;
+    entry.reverbPreFilter = reverbPreFilter;
 
     entry.audioCtx = audioCtx;
     entry.sourceNode = sourceNode;
@@ -2565,6 +2594,46 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       if (entry.delayGain) {
         const targetDelay = audioSettings.humanize ? 0.20 : 0.0;
         setAudioParam(entry.delayGain.gain, targetDelay, ctxTime, rampTime, 0.01);
+      }
+
+      // Reverb & Acoustic Environment DSP Control
+      const reverb = audioSettings.reverb;
+      const isReverbActive = Boolean(reverb?.enabled && (reverb.mix ?? 0) > 0);
+      if (entry.reverbDryGain && entry.reverbWetGain) {
+        const wetFrac = isReverbActive ? Math.max(0, Math.min(1, (reverb?.mix ?? 0) / 100)) : 0;
+        // Equal-power crossfade curve: cos(w * pi/2) for dry, sin(w * pi/2) for wet
+        const targetDry = isReverbActive ? Math.cos(wetFrac * Math.PI * 0.5) : 1.0;
+        const targetWet = isReverbActive ? Math.sin(wetFrac * Math.PI * 0.5) : 0.0;
+        setAudioParam(entry.reverbDryGain.gain, targetDry, ctxTime, rampTime, 0.01);
+        setAudioParam(entry.reverbWetGain.gain, targetWet, ctxTime, rampTime, 0.01);
+
+        if (isReverbActive && entry.convolverNode && entry.audioCtx) {
+          const decay = reverb?.decay ?? 1.5;
+          const damping = reverb?.damping ?? 40;
+          const preDelay = reverb?.preDelay ?? 20;
+          const roomSize = reverb?.roomSize ?? 50;
+          const qKey = `${Math.round(decay * 10)}_${Math.round(damping / 5)}_${Math.round(preDelay / 5)}_${Math.round(roomSize / 10)}`;
+
+          if (entry._lastReverbKey !== qKey) {
+            entry._lastReverbKey = qKey;
+            try {
+              const impulseBuf = generateReverbImpulse(entry.audioCtx, decay, damping, preDelay, roomSize);
+              entry.convolverNode.buffer = impulseBuf;
+            } catch (err) {
+              console.warn('[useMediaPlayback] Failed to set reverb buffer:', err);
+            }
+          }
+        }
+
+        if (entry.reverbPreFilter) {
+          if (reverb?.preset === 'telephone') {
+            entry.reverbPreFilter.type = 'bandpass';
+            entry.reverbPreFilter.frequency.value = 1500;
+            entry.reverbPreFilter.Q.value = 1.0;
+          } else {
+            entry.reverbPreFilter.type = 'allpass';
+          }
+        }
       }
 
       // Volume & Mute & Fades & Transitions

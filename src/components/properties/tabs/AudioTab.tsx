@@ -6,6 +6,7 @@ import {
   EQSection,
   AutoVoiceTuneSection,
   AutoDuckingSection,
+  ReverbEnvironmentSection,
 } from './audio';
 
 interface AudioTabProps {
@@ -80,6 +81,12 @@ export function AudioTab({
         onBassChange={(val) => handleAudioChange('bass', val)}
         onMidChange={(val) => handleAudioChange('mid', val)}
         onTrebleChange={(val) => handleAudioChange('treble', val)}
+      />
+
+      <ReverbEnvironmentSection
+        clipAudio={TimelineClipAudio}
+        handleAudioChange={handleAudioChange}
+        handleAudioReset={handleAudioReset}
       />
 
       <AutoVoiceTuneSection

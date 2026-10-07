@@ -1,5 +1,6 @@
 import { useEditorStore } from '../store/editorStore';
 import { getMediaTimeForClip, getSpeedFrameSegments } from '../utils/speedRamp';
+import { generateReverbImpulse } from '../utils/reverbDsp';
 
 export interface AudioExportOptions {
   startAt: number;
@@ -48,15 +49,38 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
         const arrayBuffer = await response.arrayBuffer();
         const decodedBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
 
-        const source = offlineCtx.createBufferSource();
-        source.buffer = decodedBuffer;
-        
         // Calculate volume scaling
         const gainNode = offlineCtx.createGain();
         const linearGain = Math.pow(10, volumeDb / 20);
         const storeLinearGain = store.volume ?? 1;
         // Clamp just like in preview player to prevent clipping
         gainNode.gain.value = Math.max(0, Math.min(1, linearGain * storeLinearGain));
+
+        const reverb = clip.audioSettings?.reverb;
+        if (reverb?.enabled && (reverb.mix ?? 0) > 0) {
+          const wetFrac = Math.max(0, Math.min(1, reverb.mix / 100));
+          const dryGain = offlineCtx.createGain();
+          const wetGain = offlineCtx.createGain();
+          dryGain.gain.value = Math.cos(wetFrac * Math.PI * 0.5);
+          wetGain.gain.value = Math.sin(wetFrac * Math.PI * 0.5);
+
+          const convolver = offlineCtx.createConvolver();
+          convolver.buffer = generateReverbImpulse(
+            offlineCtx,
+            reverb.decay ?? 1.5,
+            reverb.damping ?? 40,
+            reverb.preDelay ?? 20,
+            reverb.roomSize ?? 50
+          );
+
+          gainNode.connect(dryGain);
+          gainNode.connect(convolver);
+          convolver.connect(wetGain);
+          dryGain.connect(offlineCtx.destination);
+          wetGain.connect(offlineCtx.destination);
+        } else {
+          gainNode.connect(offlineCtx.destination);
+        }
         
         const speedSegments = (clip.speedFrames && clip.speedFrames.length > 0)
           ? getSpeedFrameSegments(clip, decodedBuffer.duration)

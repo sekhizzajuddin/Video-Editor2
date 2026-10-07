@@ -180,6 +180,36 @@ export interface ClipAudioSettings {
       high: number;
     };
   };
+  // Reverb & Acoustic Environment Simulation
+  reverb?: ClipReverbSettings;
+  environment?: {
+    preset: AudioEnvironmentPreset;
+    intensity: number;
+  };
+}
+
+export type AudioEnvironmentPreset =
+  | 'none'
+  | 'studio'
+  | 'room'
+  | 'hall'
+  | 'cathedral'
+  | 'bathroom'
+  | 'canyon'
+  | 'arena'
+  | 'office'
+  | 'telephone'
+  | 'tunnel'
+  | 'custom';
+
+export interface ClipReverbSettings {
+  enabled: boolean;
+  preset: AudioEnvironmentPreset;
+  mix: number;        // 0 to 100%
+  decay: number;      // 0.1 to 5.0 s
+  preDelay: number;   // 0 to 100 ms
+  damping: number;    // 0 to 100%
+  roomSize: number;   // 0 to 100%
 }
 
 // Per-clip result from AI Auto Voice Tune

@@ -6,3 +6,4 @@ export { EQSection } from './EQSection';
 export { AutoVoiceTuneSection } from './AutoVoiceTuneSection';
 export { VocalToneSection, type VocalMatchRow } from './VocalToneSection';
 export { AutoDuckingSection } from './AutoDuckingSection';
+export { ReverbEnvironmentSection } from './ReverbEnvironmentSection';

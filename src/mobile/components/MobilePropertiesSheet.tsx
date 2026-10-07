@@ -142,6 +142,7 @@ export function MobilePropertiesSheet({ category, onClose }: MobilePropertiesShe
     curves: clip.colorFilters?.curves || {},
     selectedClipIds: [clip.id],
     // Audio
+    clipAudio: clip.audioSettings || {},
     volume: clip.audioSettings?.volume ?? 0,
     pan: clip.audioSettings?.pan ?? 0,
     bass: clip.audioSettings?.bass ?? 0,

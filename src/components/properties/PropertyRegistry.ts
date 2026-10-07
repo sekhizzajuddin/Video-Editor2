@@ -31,6 +31,7 @@ import {
   AutoVoiceTuneSection,
   AutoDuckingSection,
   AISoundDesignerSection,
+  ReverbEnvironmentSection,
 } from './tabs/audio';
 
 import {
@@ -91,6 +92,7 @@ export const PROPERTY_REGISTRY: Record<string, any[]> = {
   audio: [
     { id: 'volume', label: 'Volume', component: VolumeSection },
     { id: 'pan', label: 'Pan', component: PanSection },
+    { id: 'reverb', label: 'Reverb & Space', component: ReverbEnvironmentSection },
     { id: 'ducking', label: 'Auto Ducking', component: AutoDuckingSection },
     { id: 'eq', label: 'EQ', component: EQSection },
     { id: 'voicetune', label: 'Voice Tune', component: AutoVoiceTuneSection },
