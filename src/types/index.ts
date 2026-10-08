@@ -400,7 +400,17 @@ export type ElementAnimationIn =
   | 'slide_left'
   | 'slide_right'
   | 'spin_in'
-  | 'elastic';
+  | 'elastic'
+  | 'flip_3d'
+  | 'elastic_snap'
+  | 'glitch_in'
+  | 'spiral_zoom'
+  | 'origami_unfold'
+  | 'blur_fade_in'
+  | 'light_beam'
+  | 'bounce_squash'
+  | 'stamp_slam'
+  | 'expand';
 
 export type ElementAnimationLoop =
   | 'none'
@@ -411,7 +421,16 @@ export type ElementAnimationLoop =
   | 'spin_slow'
   | 'spin'
   | 'swing'
-  | 'breathe';
+  | 'breathe'
+  | 'glow_pulse'
+  | 'rainbow_cycle'
+  | 'orbit_tilt'
+  | 'shiver'
+  | 'bounce_hop'
+  | 'glitch_jitter'
+  | 'neon_flicker'
+  | 'orbit'
+  | 'rubber_band';
 
 export type ElementAnimationOut =
   | 'none'
@@ -422,7 +441,41 @@ export type ElementAnimationOut =
   | 'slide_left'
   | 'slide_right'
   | 'spin_out'
-  | 'shrink';
+  | 'shrink'
+  | 'flip_3d_out'
+  | 'spiral_zoom_out'
+  | 'origami_fold'
+  | 'glitch_out'
+  | 'blur_fade_out'
+  | 'disintegrate';
+
+export type EmojiEmotionType =
+  | 'auto'
+  | 'laugh_tears'
+  | 'heart_eyes'
+  | 'fire_flames'
+  | 'mind_blown'
+  | 'skull_ghost'
+  | 'rocket_launch'
+  | 'screaming_shock'
+  | 'hundred_stamp'
+  | 'puppy_eyes'
+  | 'party_blower'
+  | 'money_wings'
+  | 'crown_glint';
+
+export type SocialBadgePlatform = 'youtube' | 'instagram' | 'tiktok' | 'twitter' | 'custom';
+
+export type SocialBadgeType =
+  | 'yt_subscribe_bell_like'
+  | 'yt_subscribe_click'
+  | 'yt_bell_ring'
+  | 'yt_like_click'
+  | 'insta_heart_double_tap'
+  | 'insta_follow_button'
+  | 'insta_profile_card'
+  | 'insta_comment_bubble'
+  | 'tiktok_follow_burst';
 
 export interface ClipElementSettings {
   elementType: ElementType;
@@ -432,7 +485,8 @@ export interface ClipElementSettings {
   svgContent?: string;
   label?: string;
   fontSize?: number;
-  // Geometry & Styling:
+
+  // Geometry & Advanced Shape Variations:
   width?: number;
   height?: number;
   fillColor?: string;
@@ -447,6 +501,46 @@ export interface ClipElementSettings {
   shadowBlur?: number;
   shadowOffsetX?: number;
   shadowOffsetY?: number;
+
+  // Parametric Shape Controls:
+  starPoints?: number;              // 4, 5, 6, 8, 12 point star
+  starInnerRadiusRatio?: number;    // 0.15 (sharp needle) to 0.75 (soft blunt)
+  polygonSides?: number;            // 3 (triangle), 4 (diamond), 5, 6, 8 (octagon)
+  shapeVariant?: string;            // 'sharp_star', 'cut_corners', 'pill', 'chevron', etc.
+  arrowHeadSize?: number;           // Head width ratio
+  arrowTailWidth?: number;          // Tail thickness
+  calloutPointerPosition?: 'bottom' | 'top' | 'left' | 'right';
+  calloutPointerOffset?: number;    // Pointer offset along edge
+
+  // Inner Picture / Image inside Shape (Masked fill):
+  innerImageUrl?: string;           // Image or media URL/Blob to clip inside the shape
+  innerImageFit?: 'cover' | 'contain' | 'fill';
+  innerImageOpacity?: number;       // 0 to 1
+
+  // Inner Text inside Shape:
+  innerText?: string;               // Text nested inside any shape
+  innerTextColor?: string;          // Hex color
+  innerTextSize?: number;           // Font size in px
+  innerTextFont?: string;           // Font family
+  innerTextWeight?: 'normal' | 'bold' | 'black';
+  innerTextAlign?: 'center' | 'left' | 'right';
+
+  // Animated Standalone Emotion Emojis:
+  emojiEmotionAnimation?: boolean;  // Active micro-motion when standalone
+  emojiEmotionType?: EmojiEmotionType;
+  emojiParticleEffects?: boolean;   // Floating hearts, laughing haha, tears, embers
+
+  // Interactive Social Media Badges:
+  socialPlatform?: SocialBadgePlatform;
+  socialBadgeType?: SocialBadgeType;
+  socialChannelName?: string;       // e.g. "@procreator", "TechReview"
+  socialSubCount?: string;          // e.g. "1.2M", "500K"
+  socialAvatarUrl?: string;         // Channel / user avatar
+  socialVerified?: boolean;         // Blue / gray verified checkmark
+  socialActionTiming?: number;      // Seconds when click/tap happens (e.g. 1.0s)
+  socialShowCursor?: boolean;       // Animated mouse pointer / finger tap
+  socialCompletedState?: boolean;   // Initial preview completed toggle
+
   // Professional Animations:
   animationIn?: ElementAnimationIn;
   animationInDuration?: number;

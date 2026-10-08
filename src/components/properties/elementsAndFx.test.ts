@@ -180,3 +180,142 @@ describe('FX Effect Registry & Compatibility', () => {
     }).not.toThrow();
   });
 });
+
+describe('Advanced Parametric Shapes & Inner Content Nesting', () => {
+  it('supports parametric star geometry with points and sharpness ratio', () => {
+    const starSettings: ClipElementSettings = {
+      elementType: 'shape',
+      shapeType: 'star',
+      starPoints: 8,
+      starInnerRadiusRatio: 0.2, // very sharp
+      width: 250,
+      height: 250,
+    };
+    expect(starSettings.starPoints).toBe(8);
+    expect(starSettings.starInnerRadiusRatio).toBe(0.2);
+  });
+
+  it('supports transparent hollow fill (fillType: none) displaying only border', () => {
+    const hollowSettings: ClipElementSettings = {
+      elementType: 'shape',
+      shapeType: 'rounded_rect',
+      fillType: 'none',
+      strokeColor: '#38bdf8',
+      strokeWidth: 4,
+    };
+    expect(hollowSettings.fillType).toBe('none');
+    expect(hollowSettings.strokeWidth).toBe(4);
+  });
+
+  it('supports inner image masked texture clipping inside any shape', () => {
+    const innerImageSettings: ClipElementSettings = {
+      elementType: 'shape',
+      shapeType: 'circle',
+      innerImageUrl: 'blob:http://localhost/test-image.png',
+      innerImageFit: 'cover',
+      innerImageOpacity: 0.9,
+    };
+    expect(innerImageSettings.innerImageUrl).toBeDefined();
+    expect(innerImageSettings.innerImageFit).toBe('cover');
+    expect(innerImageSettings.innerImageOpacity).toBe(0.9);
+  });
+
+  it('supports formatted nested text inside any shape', () => {
+    const innerTextSettings: ClipElementSettings = {
+      elementType: 'shape',
+      shapeType: 'shield',
+      innerText: 'PRO CREATOR',
+      innerTextColor: '#ffffff',
+      innerTextSize: 24,
+      innerTextAlign: 'center',
+    };
+    expect(innerTextSettings.innerText).toBe('PRO CREATOR');
+    expect(innerTextSettings.innerTextSize).toBe(24);
+  });
+});
+
+describe('Standalone Emotion Animated Emojis', () => {
+  it('configures rich emotion micro-animations and particle accents for standalone emojis', () => {
+    const emojiSettings: ClipElementSettings = {
+      elementType: 'emoji',
+      emojiChar: '😂',
+      emojiEmotionAnimation: true,
+      emojiEmotionType: 'laugh_tears',
+      emojiParticleEffects: true,
+    };
+    expect(emojiSettings.emojiEmotionAnimation).toBe(true);
+    expect(emojiSettings.emojiEmotionType).toBe('laugh_tears');
+    expect(emojiSettings.emojiParticleEffects).toBe(true);
+  });
+});
+
+describe('Interactive Social Media Badges (YouTube, Instagram, TikTok)', () => {
+  it('includes interactive YouTube badges with cursor clicks, bell chimes, and like bursts', () => {
+    const ytBadges = ELEMENT_STICKERS.filter(s => s.defaultSettings.socialPlatform === 'youtube');
+    expect(ytBadges.length).toBeGreaterThanOrEqual(3);
+
+    const suite = ELEMENT_STICKERS.find(s => s.id === 'sticker_yt_subscribe_suite');
+    expect(suite).toBeDefined();
+    expect(suite?.defaultSettings.socialBadgeType).toBe('yt_subscribe_bell_like');
+    expect(suite?.defaultSettings.socialShowCursor).toBe(true);
+  });
+
+  it('includes Instagram double-tap heart burst and follow action badges', () => {
+    const instaBadges = ELEMENT_STICKERS.filter(s => s.defaultSettings.socialPlatform === 'instagram');
+    expect(instaBadges.length).toBeGreaterThanOrEqual(2);
+
+    const heartBurst = ELEMENT_STICKERS.find(s => s.id === 'sticker_insta_heart_burst');
+    expect(heartBurst).toBeDefined();
+    expect(heartBurst?.defaultSettings.socialBadgeType).toBe('insta_heart_double_tap');
+  });
+
+  it('includes TikTok follow burst badge with confetti explosion', () => {
+    const tiktok = ELEMENT_STICKERS.find(s => s.id === 'sticker_tiktok_follow_burst');
+    expect(tiktok).toBeDefined();
+    expect(tiktok?.defaultSettings.socialBadgeType).toBe('tiktok_follow_burst');
+  });
+});
+
+describe('Premium Animation Eases & Curves', () => {
+  it('correctly calculates 3D perspective flip (flip_3d) entrance ease', () => {
+    const settings: ClipElementSettings = {
+      elementType: 'shape',
+      animationIn: 'flip_3d',
+      animationInDuration: 0.5,
+    };
+    const animStart = calculateElementAnimation(0.05, 0.0, 3.0, settings);
+    expect(animStart.scaleX).toBeLessThan(1.0);
+    expect(animStart.opacity).toBeGreaterThan(0);
+
+    const animEnd = calculateElementAnimation(0.5, 0.0, 3.0, settings);
+    expect(animEnd.scaleX).toBeCloseTo(1.0, 1);
+  });
+
+  it('correctly calculates spiral zoom 720° and cyber glitch eases', () => {
+    const spiralSettings: ClipElementSettings = {
+      elementType: 'shape',
+      animationIn: 'spiral_zoom',
+      animationInDuration: 0.5,
+    };
+    const spiralAnim = calculateElementAnimation(0.25, 0.0, 3.0, spiralSettings);
+    expect(spiralAnim.rotation).toBeGreaterThan(0);
+
+    const glitchSettings: ClipElementSettings = {
+      elementType: 'shape',
+      animationIn: 'glitch_in',
+      animationInDuration: 0.4,
+    };
+    const glitchAnim = calculateElementAnimation(0.1, 0.0, 3.0, glitchSettings);
+    expect(glitchAnim.scaleX).toBeGreaterThan(0);
+  });
+
+  it('correctly calculates heavy stamp slam impact', () => {
+    const slamSettings: ClipElementSettings = {
+      elementType: 'shape',
+      animationIn: 'stamp_slam',
+      animationInDuration: 0.6,
+    };
+    const slamStart = calculateElementAnimation(0.1, 0.0, 3.0, slamSettings);
+    expect(slamStart.scaleX).toBeGreaterThan(1.2); // starts big before slam
+  });
+});

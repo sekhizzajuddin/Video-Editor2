@@ -1016,6 +1016,7 @@ export function MediaPanel() {
   const [elementSubTab, setElementSubTab] = useState<'shapes' | 'emojis' | 'stickers'>('shapes');
   const [elementShapeCategory, setElementShapeCategory] = useState<string>('all');
   const [elementEmojiCategory, setElementEmojiCategory] = useState<string>('all');
+  const [elementStickerBadge, setElementStickerBadge] = useState<string>('all');
   const [elementSearchQuery, setElementSearchQuery] = useState<string>('');
 
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
@@ -3647,6 +3648,9 @@ export function MediaPanel() {
                     defaultSettings: {
                       elementType: 'emoji',
                       emojiChar: emoji,
+                      emojiEmotionAnimation: true,
+                      emojiEmotionType: 'auto',
+                      emojiParticleEffects: true,
                       width: 140,
                       height: 140,
                       fontSize: 100,
@@ -3708,6 +3712,9 @@ export function MediaPanel() {
                                 const defaultSettings: import('@/types').ClipElementSettings = {
                                   elementType: 'emoji',
                                   emojiChar: emoji,
+                                  emojiEmotionAnimation: true,
+                                  emojiEmotionType: 'auto',
+                                  emojiParticleEffects: true,
                                   width: 140,
                                   height: 140,
                                   fontSize: 100,
@@ -3733,7 +3740,7 @@ export function MediaPanel() {
                                     }}
                                     onClick={() => handleEmojiClick(emoji)}
                                     className="h-11 rounded-xl bg-[var(--theme-bg-card)] border border-[var(--theme-border)] hover:bg-[var(--theme-bg-subpanel)] hover:border-blue-500 hover:scale-110 flex items-center justify-center text-2xl transition-all shadow-sm active:scale-95"
-                                    title={`Add ${emoji} to timeline`}
+                                    title={`Add animated ${emoji} to timeline`}
                                   >
                                     {emoji}
                                   </button>
@@ -3750,7 +3757,16 @@ export function MediaPanel() {
 
               {/* Sub-tab Content: Stickers & Badges */}
               {elementSubTab === 'stickers' && (() => {
+                const stickerFilterCategories = [
+                  { id: 'all', label: 'All' },
+                  { id: 'YouTube', label: 'YouTube' },
+                  { id: 'Instagram', label: 'Instagram' },
+                  { id: 'TikTok', label: 'TikTok' },
+                  { id: 'Badge', label: 'Badges' },
+                  { id: 'Trending', label: 'Trending' },
+                ];
                 const filteredStickers = ELEMENT_STICKERS.filter((s) => {
+                  if (elementStickerBadge !== 'all' && s.badge !== elementStickerBadge) return false;
                   if (elementSearchQuery) {
                     const q = elementSearchQuery.toLowerCase();
                     return s.name.toLowerCase().includes(q) || s.badge.toLowerCase().includes(q) || s.desc.toLowerCase().includes(q);
@@ -3759,56 +3775,75 @@ export function MediaPanel() {
                 });
 
                 return (
-                  <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 min-h-0">
-                    <div className="text-[10px] text-[var(--theme-text-muted)] px-1">
-                      High-impact creator badges and social overlay callouts with built-in spring animations.
+                  <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+                    {/* Sticker Category Filter Pills */}
+                    <div className="flex gap-1.5 p-2 flex-wrap border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] shrink-0">
+                      {stickerFilterCategories.map((cat) => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setElementStickerBadge(cat.id)}
+                          className={`px-2.5 py-1 text-[11px] rounded-full transition-colors font-medium ${
+                            elementStickerBadge === cat.id
+                              ? 'bg-blue-600 text-white font-bold shadow-sm'
+                              : 'bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]'
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
                     </div>
-                    <div className="grid grid-cols-1 gap-2">
-                      {filteredStickers.map((sticker) => {
-                        return (
-                          <div
-                            key={sticker.id}
-                            draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.setData('application/procut-element', JSON.stringify(sticker.defaultSettings));
-                              (window as any).__procutDraggingElement = {
-                                label: sticker.name,
-                                defaultSettings: sticker.defaultSettings,
-                              };
-                              e.dataTransfer.effectAllowed = 'copy';
-                            }}
-                            onClick={() => handleElementClick({ label: sticker.name, defaultSettings: sticker.defaultSettings })}
-                            className="group flex items-center justify-between p-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-subpanel)] hover:border-blue-500/50 cursor-pointer transition-all shadow-sm"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div
-                                className="px-3 py-1.5 rounded-full text-xs font-black text-white shadow-sm flex items-center gap-1.5"
-                                style={{ backgroundColor: sticker.color }}
-                              >
-                                {sticker.label}
-                              </div>
-                              <div>
-                                <span className="text-xs font-bold text-[var(--theme-text-primary)] block">
-                                  {sticker.name}
-                                </span>
-                                <span className="text-[10px] text-[var(--theme-text-muted)] line-clamp-1">
-                                  {sticker.desc}
-                                </span>
-                              </div>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleElementClick({ label: sticker.name, defaultSettings: sticker.defaultSettings });
+
+                    <div className="p-2.5 space-y-2.5">
+                      <div className="text-[10px] text-[var(--theme-text-muted)] px-1">
+                        High-impact creator badges and social action overlays with animated cursor clicks and particle effects.
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                        {filteredStickers.map((sticker) => {
+                          return (
+                            <div
+                              key={sticker.id}
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData('application/procut-element', JSON.stringify(sticker.defaultSettings));
+                                (window as any).__procutDraggingElement = {
+                                  label: sticker.name,
+                                  defaultSettings: sticker.defaultSettings,
+                                };
+                                e.dataTransfer.effectAllowed = 'copy';
                               }}
-                              className="px-2.5 py-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100"
+                              onClick={() => handleElementClick({ label: sticker.name, defaultSettings: sticker.defaultSettings })}
+                              className="group flex items-center justify-between p-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-subpanel)] hover:border-blue-500/50 cursor-pointer transition-all shadow-sm"
                             >
-                              <Plus className="w-3 h-3" />
-                              Add
-                            </button>
-                          </div>
-                        );
-                      })}
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className="px-3 py-1.5 rounded-full text-xs font-black text-white shadow-sm flex items-center gap-1.5"
+                                  style={{ backgroundColor: sticker.color }}
+                                >
+                                  {sticker.label}
+                                </div>
+                                <div>
+                                  <span className="text-xs font-bold text-[var(--theme-text-primary)] block">
+                                    {sticker.name}
+                                  </span>
+                                  <span className="text-[10px] text-[var(--theme-text-muted)] line-clamp-1">
+                                    {sticker.desc}
+                                  </span>
+                                </div>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleElementClick({ label: sticker.name, defaultSettings: sticker.defaultSettings });
+                                }}
+                                className="px-2.5 py-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100"
+                              >
+                                <Plus className="w-3 h-3" />
+                                Add
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );

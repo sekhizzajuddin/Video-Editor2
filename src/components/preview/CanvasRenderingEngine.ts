@@ -2701,8 +2701,8 @@ export async function renderCanvasEngine({
       const elemW = es.width || 220;
       const elemH = es.height || 160;
       const anim = calculateElementAnimation(currentTime, clip.startTime, clip.duration, es);
-
-      renderElement(ctx, es, elemW, elemH, anim);
+      const relTime = Math.max(0, currentTime - clip.startTime);
+      renderElement(ctx, es, elemW, elemH, anim, relTime, clip.duration);
     }
 
     ctx.restore();

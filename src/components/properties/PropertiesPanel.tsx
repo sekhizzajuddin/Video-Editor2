@@ -72,7 +72,7 @@ import { aiVocalSeparator } from '@/utils/aiVocalSeparator';
 import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
 const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
-import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult, TimelineClip, ClipElementSettings, ElementShapeType, ElementAnimationIn, ElementAnimationLoop, ElementAnimationOut } from '@/types';
+import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult, TimelineClip, ClipElementSettings, ElementShapeType, ElementAnimationIn, ElementAnimationLoop, ElementAnimationOut, EmojiEmotionType, SocialBadgePlatform, SocialBadgeType } from '@/types';
 import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine, getMediaTimeForClip } from '@/utils/speedRamp';
 import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
 import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
@@ -8219,58 +8219,107 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             scheduleSaveSnapshot();
           };
 
+          const handleInnerImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            updateElem({ innerImageUrl: url });
+            toast.success('Inserted image inside shape!');
+          };
+
           return (
             <div className="flex flex-col gap-5">
               {!isMobileView && (
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-semibold text-[var(--theme-text-primary)] uppercase tracking-wider flex items-center gap-1.5">
                     <Shapes className="w-3.5 h-3.5 text-blue-500" />
-                    Element Configuration
+                    Element Studio Pro
                   </h3>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 capitalize">
-                    {elem.elementType}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 capitalize">
+                      {elem.elementType}
+                    </span>
+                    {elem.socialPlatform && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 uppercase">
+                        {elem.socialPlatform}
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
 
               {/* ── STYLE SUB-TAB ── */}
               {showStyle && (
                 <div className="flex flex-col gap-4">
-                  {/* Identity & Basic Content */}
+                  {/* 1. Identity & Core Content */}
                   <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
                     <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider block">
                       Element Identity
                     </label>
 
                     {elem.elementType === 'shape' && (
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs text-[var(--theme-text-muted)]">Shape Type</label>
-                        <select
-                          value={elem.shapeType || 'rectangle'}
-                          onChange={(e) => updateElem({ shapeType: e.target.value as ElementShapeType })}
-                          className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-blue-500 capitalize"
-                        >
-                          <option value="rectangle">Rectangle</option>
-                          <option value="rounded_rect">Rounded Box</option>
-                          <option value="circle">Circle</option>
-                          <option value="star">5-Point Star</option>
-                          <option value="heart">Heart</option>
-                          <option value="arrow_right">Arrow Right</option>
-                          <option value="arrow_left">Arrow Left</option>
-                          <option value="arrow_up">Arrow Up</option>
-                          <option value="arrow_down">Arrow Down</option>
-                          <option value="arrow_double">Double Arrow</option>
-                          <option value="speech_bubble">Speech Bubble</option>
-                          <option value="cloud">Cloud</option>
-                          <option value="hexagon">Hexagon</option>
-                          <option value="triangle">Triangle</option>
-                          <option value="shield">Shield</option>
-                          <option value="callout">Ribbon Banner</option>
-                          <option value="badge">Starburst Badge</option>
-                        </select>
+                      <div className="space-y-3">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs text-[var(--theme-text-muted)]">Shape Geometry</label>
+                          <select
+                            value={elem.shapeType || 'rectangle'}
+                            onChange={(e) => updateElem({ shapeType: e.target.value as ElementShapeType })}
+                            className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-blue-500 capitalize"
+                          >
+                            <option value="rectangle">Rectangle</option>
+                            <option value="rounded_rect">Rounded Box</option>
+                            <option value="circle">Circle</option>
+                            <option value="ellipse">Ellipse</option>
+                            <option value="star">Parametric Star</option>
+                            <option value="heart">Heart</option>
+                            <option value="hexagon">Polygon (Hexagon/Triangle/Octagon)</option>
+                            <option value="triangle">Triangle</option>
+                            <option value="arrow">Arrow (Directional)</option>
+                            <option value="arrow_double">Double-Headed Arrow</option>
+                            <option value="speech_bubble">Speech Bubble</option>
+                            <option value="thought_bubble">Thought Cloud</option>
+                            <option value="shield">Crest Shield</option>
+                            <option value="callout">Ribbon Banner</option>
+                            <option value="badge">Starburst Rosette Badge</option>
+                          </select>
+                        </div>
+
+                        {/* Shape Variant / Style */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs text-[var(--theme-text-muted)]">Shape Style Variant</label>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {[
+                              { id: undefined, label: 'Default Solid' },
+                              { id: 'cut_corners', label: 'Cyber Cut-Corners' },
+                              { id: 'sharp_star', label: 'Sharp Sparkle' },
+                              { id: 'hollow_border', label: 'Transparent Border' },
+                            ].map((variant) => (
+                              <button
+                                key={variant.label}
+                                onClick={() => {
+                                  if (variant.id === 'hollow_border') {
+                                    updateElem({ fillType: 'none', strokeWidth: Math.max(3, elem.strokeWidth || 3) });
+                                  } else if (variant.id === 'sharp_star') {
+                                    updateElem({ shapeType: 'star', starPoints: 4, starInnerRadiusRatio: 0.18 });
+                                  } else {
+                                    updateElem({ shapeVariant: variant.id });
+                                  }
+                                }}
+                                className={`px-2 py-1.5 text-[10px] font-semibold rounded-lg border transition-all text-left truncate ${
+                                  elem.shapeVariant === variant.id || (variant.id === 'hollow_border' && elem.fillType === 'none')
+                                    ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                                    : 'bg-[var(--theme-bg-card)] border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]'
+                                }`}
+                              >
+                                {variant.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     )}
 
+                    {/* Emoji Emotion Settings (Standalone Micro-Animations) */}
                     {elem.elementType === 'emoji' && (
                       <div className="space-y-3">
                         <div className="flex flex-col gap-1.5">
@@ -8287,6 +8336,58 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                               placeholder="Paste or type emoji..."
                             />
                           </div>
+                        </div>
+
+                        {/* Standalone Emotion Micro-Animation Controls */}
+                        <div className="p-2.5 rounded-lg bg-[var(--theme-bg-card)] border border-[var(--theme-border)] space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-[var(--theme-text-primary)] flex items-center gap-1.5">
+                              <span>✨</span> Emotion Micro-Animation
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={elem.emojiEmotionAnimation !== false}
+                              onChange={(e) => updateElem({ emojiEmotionAnimation: e.target.checked })}
+                              className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                            />
+                          </div>
+
+                          {elem.emojiEmotionAnimation !== false && (
+                            <>
+                              <div className="flex flex-col gap-1">
+                                <label className="text-[11px] text-[var(--theme-text-muted)]">Emotion Gesture Mode</label>
+                                <select
+                                  value={elem.emojiEmotionType || 'auto'}
+                                  onChange={(e) => updateElem({ emojiEmotionType: e.target.value as EmojiEmotionType })}
+                                  className="w-full bg-[var(--theme-bg-subpanel)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-1.5 focus:outline-none focus:border-blue-500"
+                                >
+                                  <option value="auto">✨ Auto (Detect from Emoji)</option>
+                                  <option value="laugh_tears">😂 Laughing Tears & Haha Bubbles</option>
+                                  <option value="heart_eyes">😍 Heartbeat Eyes & Floating Hearts</option>
+                                  <option value="fire_flames">🔥 Dynamic Flames & Rising Embers</option>
+                                  <option value="mind_blown">🤯 Mind Blown Smoke Shockwave</option>
+                                  <option value="skull_ghost">💀 Floating Skull & Ghost Soul</option>
+                                  <option value="rocket_launch">🚀 Rocket Thruster Vibration & Smoke</option>
+                                  <option value="screaming_shock">😱 Screaming Shockwave Waves</option>
+                                  <option value="hundred_stamp">💯 100 Stamp Slam Impact</option>
+                                  <option value="party_blower">🎉 Party Horn & Confetti</option>
+                                  <option value="crown_glint">👑 Crown Sparkle Glints</option>
+                                </select>
+                              </div>
+
+                              <div className="flex items-center justify-between pt-1">
+                                <span className="text-[11px] text-[var(--theme-text-muted)]">
+                                  Particle Accents (Tears, Sparks, Hearts)
+                                </span>
+                                <input
+                                  type="checkbox"
+                                  checked={elem.emojiParticleEffects !== false}
+                                  onChange={(e) => updateElem({ emojiParticleEffects: e.target.checked })}
+                                  className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                                />
+                              </div>
+                            </>
+                          )}
                         </div>
 
                         <div className="flex flex-col gap-1.5">
@@ -8306,7 +8407,108 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       </div>
                     )}
 
-                    {(elem.elementType === 'sticker' || elem.elementType === 'badge' || elem.shapeType === 'callout') && (
+                    {/* Interactive Social Media Badges */}
+                    {(elem.elementType === 'badge' || elem.socialBadgeType) && (
+                      <div className="space-y-3 pt-1">
+                        <div className="p-2.5 rounded-lg bg-[var(--theme-bg-card)] border border-[var(--theme-border)] space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-[var(--theme-text-primary)] flex items-center gap-1.5">
+                              <span>📱</span> Interactive Social Action
+                            </span>
+                            <span className="text-[10px] uppercase font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">
+                              {elem.socialPlatform || 'YouTube'}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] text-[var(--theme-text-muted)]">Action Badge Type</label>
+                            <select
+                              value={elem.socialBadgeType || 'yt_subscribe_bell_like'}
+                              onChange={(e) => updateElem({ socialBadgeType: e.target.value as SocialBadgeType })}
+                              className="w-full bg-[var(--theme-bg-subpanel)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-1.5 focus:outline-none focus:border-blue-500"
+                            >
+                              <optgroup label="YouTube">
+                                <option value="yt_subscribe_bell_like">Complete Suite (Subscribe + Bell + Like)</option>
+                                <option value="yt_subscribe_click">Subscribe Button Click (Red to Gray ✓)</option>
+                                <option value="yt_bell_ring">Bell Notification Ring (Chime Waves)</option>
+                                <option value="yt_like_click">Thumbs Up Like Click (Starburst Splash)</option>
+                              </optgroup>
+                              <optgroup label="Instagram">
+                                <option value="insta_heart_double_tap">Double-Tap Heart Burst (+1 Badge)</option>
+                                <option value="insta_follow_button">Follow Button Tap (Follow to Following ✓)</option>
+                                <option value="insta_comment_bubble">Comment Bubble Tap</option>
+                              </optgroup>
+                              <optgroup label="TikTok">
+                                <option value="tiktok_follow_burst">Follow Button + Confetti Burst</option>
+                              </optgroup>
+                            </select>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[11px] text-[var(--theme-text-muted)]">Channel / User</label>
+                              <input
+                                type="text"
+                                value={elem.socialChannelName || ''}
+                                onChange={(e) => updateElem({ socialChannelName: e.target.value })}
+                                className="w-full bg-[var(--theme-bg-subpanel)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded p-1.5"
+                                placeholder="@channel"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[11px] text-[var(--theme-text-muted)]">Subscribers / Followers</label>
+                              <input
+                                type="text"
+                                value={elem.socialSubCount || ''}
+                                onChange={(e) => updateElem({ socialSubCount: e.target.value })}
+                                className="w-full bg-[var(--theme-bg-subpanel)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded p-1.5"
+                                placeholder="1.2M"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 pt-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--theme-text-muted)]">Click / Tap Action Timing</span>
+                              <span className="text-[var(--theme-text-primary)] font-mono">{(elem.socialActionTiming ?? 0.8).toFixed(1)}s</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.2"
+                              max="4.0"
+                              step="0.1"
+                              value={elem.socialActionTiming ?? 0.8}
+                              onChange={(e) => updateElem({ socialActionTiming: Number(e.target.value) })}
+                              className="w-full accent-blue-500"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 text-xs">
+                            <label className="text-[var(--theme-text-muted)] flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={elem.socialShowCursor !== false}
+                                onChange={(e) => updateElem({ socialShowCursor: e.target.checked })}
+                                className="w-4 h-4 accent-blue-500 rounded"
+                              />
+                              Animated Mouse Pointer / Finger Tap
+                            </label>
+                            <label className="text-[var(--theme-text-muted)] flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={elem.socialVerified !== false}
+                                onChange={(e) => updateElem({ socialVerified: e.target.checked })}
+                                className="w-4 h-4 accent-blue-500 rounded"
+                              />
+                              Verified ✓
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Badge / Button Label */}
+                    {(elem.elementType === 'sticker' || elem.elementType === 'badge' || elem.shapeType === 'callout') && !elem.socialBadgeType && (
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs text-[var(--theme-text-muted)]">Badge / Button Label</label>
                         <input
@@ -8320,10 +8522,275 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     )}
                   </div>
 
-                  {/* Size & Dimensions */}
+                  {/* 2. Parametric Shape Geometry Controls */}
+                  {elem.elementType === 'shape' && (
+                    <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                      <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider block">
+                        Parametric Shape Geometry
+                      </label>
+
+                      {elem.shapeType === 'star' && (
+                        <div className="space-y-3">
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--theme-text-muted)]">Star Points</span>
+                              <span className="text-[var(--theme-text-primary)] font-mono">{elem.starPoints || 5} Points</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="3"
+                              max="16"
+                              value={elem.starPoints || 5}
+                              onChange={(e) => updateElem({ starPoints: Number(e.target.value) })}
+                              className="w-full accent-blue-500"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--theme-text-muted)]">Edge Sharpness</span>
+                              <span className="text-[var(--theme-text-primary)] font-mono">
+                                {Math.round((1 - (elem.starInnerRadiusRatio ?? 0.42)) * 100)}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.12"
+                              max="0.80"
+                              step="0.02"
+                              value={elem.starInnerRadiusRatio ?? 0.42}
+                              onChange={(e) => updateElem({ starInnerRadiusRatio: Number(e.target.value) })}
+                              className="w-full accent-blue-500"
+                            />
+                            <div className="flex justify-between text-[10px] text-[var(--theme-text-muted)]">
+                              <span>Sharp Needle</span>
+                              <span>Soft Star</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {elem.shapeType === 'hexagon' && (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--theme-text-muted)]">Polygon Sides</span>
+                            <span className="text-[var(--theme-text-primary)] font-mono">{elem.polygonSides || 6} Sides</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="3"
+                            max="12"
+                            value={elem.polygonSides || 6}
+                            onChange={(e) => updateElem({ polygonSides: Number(e.target.value) })}
+                            className="w-full accent-blue-500"
+                          />
+                          <div className="flex justify-between text-[10px] text-[var(--theme-text-muted)]">
+                            <span>Triangle (3)</span>
+                            <span>Hexagon (6)</span>
+                            <span>Dodecagon (12)</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {elem.shapeType === 'arrow' && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--theme-text-muted)]">Head Size</span>
+                              <span className="text-[var(--theme-text-primary)] font-mono">{elem.arrowHeadSize ?? 55}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="20"
+                              max="80"
+                              value={elem.arrowHeadSize ?? 55}
+                              onChange={(e) => updateElem({ arrowHeadSize: Number(e.target.value) })}
+                              className="w-full accent-blue-500"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--theme-text-muted)]">Tail Width</span>
+                              <span className="text-[var(--theme-text-primary)] font-mono">{elem.arrowTailWidth ?? 45}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="20"
+                              max="80"
+                              value={elem.arrowTailWidth ?? 45}
+                              onChange={(e) => updateElem({ arrowTailWidth: Number(e.target.value) })}
+                              className="w-full accent-blue-500"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 3. Insert Image / Texture Inside Shape (Masked Fill) */}
+                  {elem.elementType !== 'emoji' && (
+                    <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider flex items-center gap-1.5">
+                          <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                          Picture Inside Shape (Masked Fill)
+                        </label>
+                        {elem.innerImageUrl && (
+                          <button
+                            onClick={() => updateElem({ innerImageUrl: undefined })}
+                            className="text-[10px] text-red-400 hover:text-red-300 font-semibold"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2.5">
+                        <div className="flex items-center gap-2">
+                          <label className="flex-1 cursor-pointer">
+                            <div className="px-3 py-2 rounded-lg bg-[var(--theme-bg-card)] border border-dashed border-[var(--theme-border)] hover:border-blue-500 text-center text-xs text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] transition-colors flex items-center justify-center gap-2">
+                              <ImageIcon className="w-4 h-4 text-blue-500" />
+                              {elem.innerImageUrl ? 'Replace Picture...' : 'Choose Picture to Insert...'}
+                            </div>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleInnerImageUpload}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        {elem.innerImageUrl && (
+                          <div className="space-y-2.5 pt-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-[var(--theme-text-muted)]">Image Fit</span>
+                              <div className="flex gap-1 bg-[var(--theme-bg-card)] p-0.5 rounded-lg border border-[var(--theme-border)]">
+                                {(['cover', 'contain', 'fill'] as const).map((fit) => (
+                                  <button
+                                    key={fit}
+                                    onClick={() => updateElem({ innerImageFit: fit })}
+                                    className={`px-2 py-0.5 text-[10px] rounded capitalize transition-colors font-semibold ${
+                                      (elem.innerImageFit || 'cover') === fit
+                                        ? 'bg-blue-600 text-white shadow-sm'
+                                        : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                                    }`}
+                                  >
+                                    {fit}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-[var(--theme-text-muted)]">Picture Opacity</span>
+                                <span className="text-[var(--theme-text-primary)] font-mono">{Math.round((elem.innerImageOpacity ?? 1) * 100)}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0.1"
+                                max="1.0"
+                                step="0.05"
+                                value={elem.innerImageOpacity ?? 1}
+                                onChange={(e) => updateElem({ innerImageOpacity: Number(e.target.value) })}
+                                className="w-full accent-blue-500"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. Formatted Inner Text inside Shape */}
+                  {elem.elementType !== 'emoji' && (
+                    <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider flex items-center gap-1.5">
+                          <Type className="w-3.5 h-3.5 text-blue-400" />
+                          Nested Text Inside Shape
+                        </label>
+                        {elem.innerText && (
+                          <button
+                            onClick={() => updateElem({ innerText: undefined })}
+                            className="text-[10px] text-red-400 hover:text-red-300 font-semibold"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2.5">
+                        <input
+                          type="text"
+                          value={elem.innerText || ''}
+                          onChange={(e) => updateElem({ innerText: e.target.value })}
+                          className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-blue-500"
+                          placeholder="Type nested text inside shape..."
+                        />
+
+                        {elem.innerText && (
+                          <>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs text-[var(--theme-text-muted)]">Font Size</span>
+                                <input
+                                  type="number"
+                                  min="10"
+                                  max="80"
+                                  value={elem.innerTextSize || 22}
+                                  onChange={(e) => updateElem({ innerTextSize: Number(e.target.value) })}
+                                  className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded p-1.5 font-mono"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs text-[var(--theme-text-muted)]">Text Color</span>
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="color"
+                                    value={elem.innerTextColor || '#ffffff'}
+                                    onChange={(e) => updateElem({ innerTextColor: e.target.value })}
+                                    className="w-7 h-7 rounded bg-transparent cursor-pointer border border-[var(--theme-border)]"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={elem.innerTextColor || '#ffffff'}
+                                    onChange={(e) => updateElem({ innerTextColor: e.target.value })}
+                                    className="w-full text-xs font-mono bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded p-1 text-[var(--theme-text-primary)] uppercase"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              <span className="text-xs text-[var(--theme-text-muted)]">Alignment</span>
+                              <div className="flex gap-1 bg-[var(--theme-bg-card)] p-0.5 rounded-lg border border-[var(--theme-border)]">
+                                {(['left', 'center', 'right'] as const).map((align) => (
+                                  <button
+                                    key={align}
+                                    onClick={() => updateElem({ innerTextAlign: align })}
+                                    className={`px-2 py-0.5 text-[10px] rounded capitalize transition-colors font-semibold ${
+                                      (elem.innerTextAlign || 'center') === align
+                                        ? 'bg-blue-600 text-white shadow-sm'
+                                        : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                                    }`}
+                                  >
+                                    {align}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 5. Dimensions & Radius */}
                   <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
                     <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider block">
-                      Dimensions & Radius
+                      Dimensions & Bounds
                     </label>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -8375,29 +8842,44 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     )}
                   </div>
 
-                  {/* Fill & Color (non-emoji) */}
+                  {/* 6. Fill & Transparent Border-Only Mode */}
                   {elem.elementType !== 'emoji' && (
                     <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
                       <div className="flex items-center justify-between">
                         <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider">
-                          Fill & Background
+                          Fill & Transparency
                         </label>
                         <div className="flex gap-1 bg-[var(--theme-bg-card)] p-0.5 rounded-lg border border-[var(--theme-border)]">
-                          {(['solid', 'gradient', 'none'] as const).map((type) => (
+                          {[
+                            { type: 'solid', label: 'Solid' },
+                            { type: 'gradient', label: 'Gradient' },
+                            { type: 'none', label: 'Border Only (Hollow)' },
+                          ].map(({ type, label }) => (
                             <button
                               key={type}
-                              onClick={() => updateElem({ fillType: type })}
-                              className={`px-2 py-0.5 text-[10px] rounded capitalize transition-colors font-semibold ${
+                              onClick={() => {
+                                updateElem({
+                                  fillType: type as any,
+                                  strokeWidth: type === 'none' ? Math.max(3, elem.strokeWidth || 3) : elem.strokeWidth,
+                                });
+                              }}
+                              className={`px-2 py-0.5 text-[10px] rounded transition-colors font-semibold ${
                                 (elem.fillType || 'solid') === type
                                   ? 'bg-blue-600 text-white shadow-sm'
                                   : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                               }`}
                             >
-                              {type}
+                              {label}
                             </button>
                           ))}
                         </div>
                       </div>
+
+                      {elem.fillType === 'none' && (
+                        <p className="text-[11px] text-blue-400/90 bg-blue-500/10 p-2 rounded-lg border border-blue-500/20">
+                          Shape interior is 100% transparent. Only border, glow, and nested text/images will be shown.
+                        </p>
+                      )}
 
                       {elem.fillType !== 'none' && (
                         <div className="space-y-3 pt-1">
@@ -8462,7 +8944,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     </div>
                   )}
 
-                  {/* Stroke / Outline */}
+                  {/* 7. Stroke / Border */}
                   {elem.elementType !== 'emoji' && (
                     <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
                       <div className="flex items-center justify-between">
@@ -8513,7 +8995,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           <input
                             type="range"
                             min="0"
-                            max="24"
+                            max="30"
                             value={elem.strokeWidth ?? 0}
                             onChange={(e) => updateElem({ strokeWidth: Number(e.target.value) })}
                             className="w-full accent-blue-500"
@@ -8523,7 +9005,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     </div>
                   )}
 
-                  {/* Shadow & Glow */}
+                  {/* 8. Shadow & Glow */}
                   <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
                     <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider block">
                       Shadow & Glow
@@ -8550,7 +9032,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <input
                           type="range"
                           min="0"
-                          max="40"
+                          max="50"
                           value={elem.shadowBlur ?? 0}
                           onChange={(e) => updateElem({ shadowBlur: Number(e.target.value) })}
                           className="w-full accent-blue-500"
@@ -8571,7 +9053,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                       <span className="text-xs font-bold uppercase tracking-wider">Pro Motion Bundles</span>
                     </div>
                     <p className="text-[10px] text-[var(--theme-text-muted)] leading-tight">
-                      One-click cinematic entrance, continuous loop, and exit animation presets.
+                      One-click premium motion graphics choreography with matched in, loop, and exit ease curves.
                     </p>
 
                     <div className="grid grid-cols-2 gap-1.5 pt-1">
@@ -8587,52 +9069,72 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                           outDur: 0.3,
                         },
                         {
+                          name: '🚀 3D Flip & Snap',
+                          in: 'flip_3d' as ElementAnimationIn,
+                          inDur: 0.5,
+                          loop: 'rubber_band' as ElementAnimationLoop,
+                          speed: 1.2,
+                          intensity: 45,
+                          out: 'flip_3d_out' as ElementAnimationOut,
+                          outDur: 0.35,
+                        },
+                        {
+                          name: '🌀 Spiral Superzoom',
+                          in: 'spiral_zoom' as ElementAnimationIn,
+                          inDur: 0.55,
+                          loop: 'wiggle' as ElementAnimationLoop,
+                          speed: 1.5,
+                          intensity: 40,
+                          out: 'spiral_zoom_out' as ElementAnimationOut,
+                          outDur: 0.4,
+                        },
+                        {
+                          name: '⚡ Cyber Glitch',
+                          in: 'glitch_in' as ElementAnimationIn,
+                          inDur: 0.4,
+                          loop: 'glitch_jitter' as ElementAnimationLoop,
+                          speed: 1.6,
+                          intensity: 50,
+                          out: 'glitch_out' as ElementAnimationOut,
+                          outDur: 0.3,
+                        },
+                        {
+                          name: '🎴 Origami Unfold',
+                          in: 'origami_unfold' as ElementAnimationIn,
+                          inDur: 0.5,
+                          loop: 'float' as ElementAnimationLoop,
+                          speed: 1.0,
+                          intensity: 35,
+                          out: 'origami_fold' as ElementAnimationOut,
+                          outDur: 0.35,
+                        },
+                        {
+                          name: '🔨 Stamp Slam',
+                          in: 'stamp_slam' as ElementAnimationIn,
+                          inDur: 0.6,
+                          loop: 'pulse' as ElementAnimationLoop,
+                          speed: 1.1,
+                          intensity: 30,
+                          out: 'disintegrate' as ElementAnimationOut,
+                          outDur: 0.35,
+                        },
+                        {
+                          name: '✨ Neon Glow Flicker',
+                          in: 'blur_fade_in' as ElementAnimationIn,
+                          inDur: 0.45,
+                          loop: 'neon_flicker' as ElementAnimationLoop,
+                          speed: 1.2,
+                          intensity: 40,
+                          out: 'blur_fade_out' as ElementAnimationOut,
+                          outDur: 0.3,
+                        },
+                        {
                           name: '☁️ Smooth Float',
                           in: 'bounce_spring' as ElementAnimationIn,
                           inDur: 0.5,
                           loop: 'float' as ElementAnimationLoop,
                           speed: 1.0,
                           intensity: 40,
-                          out: 'fade_out' as ElementAnimationOut,
-                          outDur: 0.3,
-                        },
-                        {
-                          name: '⚡ Wiggle Alert',
-                          in: 'bounce_spring' as ElementAnimationIn,
-                          inDur: 0.45,
-                          loop: 'wiggle' as ElementAnimationLoop,
-                          speed: 1.8,
-                          intensity: 45,
-                          out: 'pop_out' as ElementAnimationOut,
-                          outDur: 0.3,
-                        },
-                        {
-                          name: '🔔 Pendulum Swing',
-                          in: 'slide_down' as ElementAnimationIn,
-                          inDur: 0.5,
-                          loop: 'swing' as ElementAnimationLoop,
-                          speed: 1.3,
-                          intensity: 40,
-                          out: 'slide_up' as ElementAnimationOut,
-                          outDur: 0.35,
-                        },
-                        {
-                          name: '🌀 Cosmic Spin',
-                          in: 'spin_in' as ElementAnimationIn,
-                          inDur: 0.6,
-                          loop: 'spin' as ElementAnimationLoop,
-                          speed: 1.0,
-                          intensity: 50,
-                          out: 'spin_out' as ElementAnimationOut,
-                          outDur: 0.4,
-                        },
-                        {
-                          name: '🫁 Breathing Glow',
-                          in: 'pop' as ElementAnimationIn,
-                          inDur: 0.4,
-                          loop: 'breathe' as ElementAnimationLoop,
-                          speed: 0.9,
-                          intensity: 30,
                           out: 'fade_out' as ElementAnimationOut,
                           outDur: 0.3,
                         },
@@ -8673,15 +9175,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         onChange={(e) => updateElem({ animationIn: e.target.value as ElementAnimationIn })}
                         className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-emerald-500 capitalize"
                       >
-                        <option value="none">None (Instant)</option>
-                        <option value="pop">💥 Pop / Scale In</option>
-                        <option value="bounce_spring">⚡ Bounce Spring</option>
+                        <option value="none">None (Instant Cut)</option>
+                        <option value="pop">💥 Pop / Elastic Spring</option>
+                        <option value="bounce_spring">⚡ Bounce Drop</option>
+                        <option value="flip_3d">🚀 3D Perspective Flip</option>
+                        <option value="elastic_snap">🎯 Elastic Snap Overshoot</option>
+                        <option value="glitch_in">⚡ Cyber Glitch Jitter</option>
+                        <option value="spiral_zoom">🌀 Spiral 720° Zoom</option>
+                        <option value="origami_unfold">🎴 Origami Unfold</option>
+                        <option value="blur_fade_in">🌫️ Blur Fade & Scale</option>
+                        <option value="light_beam">✨ Vertical Light Beam</option>
+                        <option value="bounce_squash">🎾 Squash & Stretch</option>
+                        <option value="stamp_slam">🔨 Heavy Stamp Slam</option>
                         <option value="slide_up">⬆️ Slide Up</option>
                         <option value="slide_down">⬇️ Slide Down</option>
                         <option value="slide_left">⬅️ Slide Left</option>
                         <option value="slide_right">➡️ Slide Right</option>
                         <option value="spin_in">🌀 Spin In</option>
-                        <option value="expand">↔️ Expand</option>
+                        <option value="fade_zoom">🔍 Fade Zoom</option>
                       </select>
 
                       {elem.animationIn && elem.animationIn !== 'none' && (
@@ -8722,7 +9233,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <option value="pulse">💓 Heartbeat / Pulse</option>
                         <option value="float">☁️ Float Hover</option>
                         <option value="wiggle">🎨 Wiggle Shake</option>
-                        <option value="spin">🔄 Continuous Spin</option>
+                        <option value="rubber_band">🎾 Rubber Band Stretch</option>
+                        <option value="glitch_jitter">⚡ Cyber Glitch Jitter</option>
+                        <option value="neon_flicker">✨ Neon Lamp Flicker</option>
+                        <option value="orbit">🪐 Orbit Ellipse Drift</option>
+                        <option value="spin_slow">🔄 Continuous Slow Spin</option>
                         <option value="swing">🔔 Swing Pendulum</option>
                         <option value="breathe">🫁 Subtle Breathe</option>
                       </select>
@@ -8782,8 +9297,16 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         <option value="none">None (Instant Cut)</option>
                         <option value="fade_out">🌫️ Fade Out</option>
                         <option value="pop_out">💥 Pop Out</option>
+                        <option value="flip_3d_out">🚀 3D Flip Out</option>
+                        <option value="spiral_zoom_out">🌀 Spiral 720° Zoom Out</option>
+                        <option value="origami_fold">🎴 Origami Fold Up</option>
+                        <option value="glitch_out">⚡ Glitch Slice Scatter</option>
+                        <option value="blur_fade_out">🌫️ Blur Dissolve</option>
+                        <option value="disintegrate">💨 Disintegrate Puff</option>
                         <option value="slide_up">⬆️ Slide Up</option>
                         <option value="slide_down">⬇️ Slide Down</option>
+                        <option value="slide_left">⬅️ Slide Left</option>
+                        <option value="slide_right">➡️ Slide Right</option>
                         <option value="spin_out">🌀 Spin Out</option>
                         <option value="shrink">↔️ Shrink Collapse</option>
                       </select>

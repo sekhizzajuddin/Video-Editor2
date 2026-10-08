@@ -1498,7 +1498,8 @@ export class Compositor {
     ctx.scale(scale, scale);
     ctx.globalAlpha = (layer.opacity ?? 1);
 
-    renderElement(ctx as any, es, w, h, anim);
+    const relTime = Math.max(0, (layer.timestampSeconds ?? 0) - clipStart);
+    renderElement(ctx as any, es, w, h, anim, relTime, clipDuration);
     ctx.restore();
   }
 
