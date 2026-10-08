@@ -13,21 +13,110 @@ export interface ElementTransform {
   opacity: number;
 }
 
-// Global in-memory image cache for shape inner pictures and badge avatars
-const imageCache = new Map<string, HTMLImageElement>();
+// Global in-memory image and video cache for shape inner media and badges
+const imageCache = new Map<string, HTMLImageElement | ImageBitmap>();
+const videoCache = new Map<string, HTMLVideoElement>();
+const pendingImageLoads = new Set<string>();
 
-function getLoadedImage(url?: string): HTMLImageElement | null {
+export function isVideoMedia(url?: string, explicitType?: 'image' | 'video'): boolean {
+  if (explicitType === 'video') return true;
+  if (explicitType === 'image') return false;
+  if (!url) return false;
+  return (
+    /\.(mp4|webm|mov|m4v|mkv|ogv)$/i.test(url) ||
+    url.startsWith('data:video/') ||
+    url.includes('type=video')
+  );
+}
+
+function getLoadedImage(url?: string): HTMLImageElement | ImageBitmap | null {
   if (!url) return null;
-  let img = imageCache.get(url);
-  if (!img) {
-    if (typeof Image !== 'undefined') {
-      img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = url;
+  const cached = imageCache.get(url);
+  if (cached) return cached;
+
+  if (typeof Image !== 'undefined') {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
       imageCache.set(url, img);
+    };
+    img.src = url;
+    if (img.complete && img.naturalWidth > 0) {
+      imageCache.set(url, img);
+      return img;
+    }
+  } else if (typeof fetch !== 'undefined' && typeof createImageBitmap !== 'undefined') {
+    if (!pendingImageLoads.has(url)) {
+      pendingImageLoads.add(url);
+      fetch(url)
+        .then((res) => res.blob())
+        .then((blob) => createImageBitmap(blob))
+        .then((bitmap) => {
+          imageCache.set(url, bitmap);
+        })
+        .catch((err) => {
+          console.warn('[elementRenderer] Worker image fetch failed:', err);
+        });
     }
   }
-  return img && img.complete && img.naturalWidth > 0 ? img : null;
+  return null;
+}
+
+function getLoadedVideo(
+  url?: string,
+  relTime: number = 0,
+  speed: number = 1,
+  startTime: number = 0,
+  loop: boolean = true,
+  isPlaying: boolean = false
+): HTMLVideoElement | null {
+  if (!url || typeof document === 'undefined') return null;
+  let video = videoCache.get(url);
+  if (!video) {
+    video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.src = url;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.loop = loop;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    videoCache.set(url, video);
+    video.load();
+  }
+
+  if (video.readyState >= 1) {
+    const dur = video.duration || 1;
+    let targetTime = (startTime || 0) + relTime * (speed || 1);
+    if (loop && dur > 0) {
+      targetTime = targetTime % dur;
+    } else if (dur > 0) {
+      targetTime = Math.min(dur, Math.max(0, targetTime));
+    }
+
+    if (isPlaying) {
+      if (video.paused) {
+        video.playbackRate = speed || 1;
+        video.play().catch(() => {});
+      }
+      if (Math.abs(video.currentTime - targetTime) > 0.25) {
+        video.currentTime = targetTime;
+      }
+    } else {
+      if (!video.paused) {
+        video.pause();
+      }
+      if (Math.abs(video.currentTime - targetTime) > 0.04) {
+        video.currentTime = targetTime;
+      }
+    }
+
+    if (video.readyState >= 2 && video.videoWidth > 0) {
+      return video;
+    }
+  }
+  return null;
 }
 
 /**
@@ -1677,7 +1766,9 @@ export function renderElement(
   h: number,
   anim: ElementTransform,
   relTime: number = 0,
-  _clipDuration: number = 5
+  _clipDuration: number = 5,
+  overrideMediaFrame?: CanvasImageSource | null,
+  isPlaying: boolean = false
 ) {
   ctx.save();
   ctx.globalAlpha = (ctx.globalAlpha ?? 1) * anim.opacity;
@@ -1744,48 +1835,95 @@ export function renderElement(
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
 
-  // ── Inner Picture / Media Masked Clipping ──
-  if (settings.innerImageUrl) {
-    const img = getLoadedImage(settings.innerImageUrl);
-    if (img) {
+  // ── Inner Media (Image / Video) Masked Clipping with Placement Controls ──
+  const mediaUrl = settings.innerMediaUrl || settings.innerImageUrl;
+  if (mediaUrl || overrideMediaFrame) {
+    let source: CanvasImageSource | null = overrideMediaFrame ?? null;
+    let sourceWidth = 0;
+    let sourceHeight = 0;
+
+    if (!source && mediaUrl) {
+      const isVideo = isVideoMedia(mediaUrl, settings.innerMediaType);
+      if (isVideo) {
+        const vid = getLoadedVideo(
+          mediaUrl,
+          relTime,
+          settings.innerMediaPlaybackSpeed ?? 1,
+          settings.innerMediaStartTime ?? 0,
+          settings.innerMediaLoop !== false,
+          isPlaying
+        );
+        if (vid) {
+          source = vid;
+          sourceWidth = vid.videoWidth;
+          sourceHeight = vid.videoHeight;
+        }
+      } else {
+        const img = getLoadedImage(mediaUrl);
+        if (img) {
+          source = img;
+          sourceWidth = (img as any).naturalWidth || (img as any).width || 0;
+          sourceHeight = (img as any).naturalHeight || (img as any).height || 0;
+        }
+      }
+    } else if (source) {
+      sourceWidth = (source as any).videoWidth || (source as any).naturalWidth || (source as any).width || (source as any).codedWidth || w;
+      sourceHeight = (source as any).videoHeight || (source as any).naturalHeight || (source as any).height || (source as any).codedHeight || h;
+    }
+
+    if (source) {
       ctx.save();
       traceShapePath(ctx, shapeType, w, h, settings.cornerRadius ?? 16, settings);
       ctx.clip();
 
-      const fit = settings.innerImageFit || 'cover';
-      const imgOpacity = settings.innerImageOpacity ?? 1;
-      ctx.globalAlpha *= imgOpacity;
+      const fit = settings.innerMediaFit || settings.innerImageFit || 'cover';
+      const mediaOpacity = settings.innerMediaOpacity ?? settings.innerImageOpacity ?? 1;
+      ctx.globalAlpha *= mediaOpacity;
 
       let dw = w;
       let dh = h;
-      let dx = -w / 2;
-      let dy = -h / 2;
-      const imgRatio = img.naturalWidth / img.naturalHeight;
+      const mediaRatio = (sourceWidth > 0 && sourceHeight > 0) ? (sourceWidth / sourceHeight) : (w / h);
       const boxRatio = w / h;
 
       if (fit === 'cover') {
-        if (imgRatio > boxRatio) {
+        if (mediaRatio > boxRatio) {
           dh = h;
-          dw = h * imgRatio;
-          dx = -dw / 2;
+          dw = h * mediaRatio;
         } else {
           dw = w;
-          dh = w / imgRatio;
-          dy = -dh / 2;
+          dh = w / mediaRatio;
         }
       } else if (fit === 'contain') {
-        if (imgRatio > boxRatio) {
+        if (mediaRatio > boxRatio) {
           dw = w;
-          dh = w / imgRatio;
-          dy = -dh / 2;
+          dh = w / mediaRatio;
         } else {
           dh = h;
-          dw = h * imgRatio;
-          dx = -dw / 2;
+          dw = h * mediaRatio;
         }
+      } else {
+        // 'fill' or 'custom'
+        dw = w;
+        dh = h;
       }
 
-      ctx.drawImage(img, dx, dy, dw, dh);
+      // Exact Placement Controls: Pan X & Y Offset, Zoom/Scale, and Rotation
+      const offsetX = settings.innerMediaOffsetX ?? 0;
+      const offsetY = settings.innerMediaOffsetY ?? 0;
+      const scale = settings.innerMediaScale ?? 1.0;
+      const rotation = settings.innerMediaRotation ?? 0;
+
+      ctx.translate(offsetX, offsetY);
+      if (rotation !== 0) {
+        ctx.rotate((rotation * Math.PI) / 180);
+      }
+      if (scale !== 1.0) {
+        ctx.scale(scale, scale);
+      }
+
+      const dx = -dw / 2;
+      const dy = -dh / 2;
+      ctx.drawImage(source, dx, dy, dw, dh);
       ctx.restore();
     }
   }

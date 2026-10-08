@@ -8220,12 +8220,48 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             scheduleSaveSnapshot();
           };
 
-          const handleInnerImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+          const handleInnerMediaUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
             const file = e.target.files?.[0];
             if (!file) return;
+            const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|mkv)$/i.test(file.name);
             const url = URL.createObjectURL(file);
-            updateElem({ innerImageUrl: url });
-            toast.success('Inserted image inside shape!');
+            updateElem({
+              innerMediaUrl: url,
+              innerImageUrl: url,
+              innerMediaName: file.name,
+              innerMediaType: isVideo ? 'video' : 'image',
+              innerMediaFit: elem.innerMediaFit || elem.innerImageFit || 'cover',
+              innerMediaOpacity: elem.innerMediaOpacity ?? elem.innerImageOpacity ?? 1,
+              innerMediaOffsetX: elem.innerMediaOffsetX ?? 0,
+              innerMediaOffsetY: elem.innerMediaOffsetY ?? 0,
+              innerMediaScale: elem.innerMediaScale ?? 1.0,
+              innerMediaRotation: elem.innerMediaRotation ?? 0,
+              innerMediaPlaybackSpeed: elem.innerMediaPlaybackSpeed ?? 1.0,
+              innerMediaStartTime: elem.innerMediaStartTime ?? 0,
+              innerMediaLoop: elem.innerMediaLoop ?? true,
+            });
+            toast.success(isVideo ? 'Inserted video inside shape!' : 'Inserted image inside shape!');
+          };
+
+          const handleSelectLibraryMedia = (mediaItem: any) => {
+            if (!mediaItem || !mediaItem.url) return;
+            const isVideo = mediaItem.type === 'video' || /\.(mp4|webm|mov|m4v|mkv)$/i.test(mediaItem.name || mediaItem.url);
+            updateElem({
+              innerMediaUrl: mediaItem.url,
+              innerImageUrl: mediaItem.url,
+              innerMediaName: mediaItem.name || 'Project Media',
+              innerMediaType: isVideo ? 'video' : 'image',
+              innerMediaFit: elem.innerMediaFit || elem.innerImageFit || 'cover',
+              innerMediaOpacity: elem.innerMediaOpacity ?? elem.innerImageOpacity ?? 1,
+              innerMediaOffsetX: elem.innerMediaOffsetX ?? 0,
+              innerMediaOffsetY: elem.innerMediaOffsetY ?? 0,
+              innerMediaScale: elem.innerMediaScale ?? 1.0,
+              innerMediaRotation: elem.innerMediaRotation ?? 0,
+              innerMediaPlaybackSpeed: elem.innerMediaPlaybackSpeed ?? 1.0,
+              innerMediaStartTime: elem.innerMediaStartTime ?? 0,
+              innerMediaLoop: elem.innerMediaLoop ?? true,
+            });
+            toast.success(`Inserted ${mediaItem.name || 'media'} inside shape!`);
           };
 
           return (
@@ -8645,17 +8681,24 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     </div>
                   )}
 
-                  {/* 3. Insert Image / Texture Inside Shape (Masked Fill) */}
+                  {/* 3. Media Inside Shape (Image & Video Mask) */}
                   {elem.elementType !== 'emoji' && (
                     <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
                       <div className="flex items-center justify-between">
                         <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider flex items-center gap-1.5">
-                          <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-                          Picture Inside Shape (Masked Fill)
+                          <Film className="w-3.5 h-3.5 text-blue-400" />
+                          Media Inside Shape (Image &amp; Video Mask)
                         </label>
-                        {elem.innerImageUrl && (
+                        {(elem.innerMediaUrl || elem.innerImageUrl) && (
                           <button
-                            onClick={() => updateElem({ innerImageUrl: undefined })}
+                            onClick={() =>
+                              updateElem({
+                                innerMediaUrl: undefined,
+                                innerImageUrl: undefined,
+                                innerMediaName: undefined,
+                                innerMediaType: undefined,
+                              })
+                            }
                             className="text-[10px] text-red-400 hover:text-red-300 font-semibold"
                           >
                             Remove
@@ -8663,33 +8706,86 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                         )}
                       </div>
 
-                      <div className="space-y-2.5">
+                      <div className="space-y-3">
+                        {/* Media Source Upload */}
                         <div className="flex items-center gap-2">
                           <label className="flex-1 cursor-pointer">
                             <div className="px-3 py-2 rounded-lg bg-[var(--theme-bg-card)] border border-dashed border-[var(--theme-border)] hover:border-blue-500 text-center text-xs text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] transition-colors flex items-center justify-center gap-2">
-                              <ImageIcon className="w-4 h-4 text-blue-500" />
-                              {elem.innerImageUrl ? 'Replace Picture...' : 'Choose Picture to Insert...'}
+                              <Film className="w-4 h-4 text-blue-500" />
+                              {(elem.innerMediaUrl || elem.innerImageUrl)
+                                ? 'Replace Media (Image/Video)...'
+                                : 'Choose Image or Video to Insert...'}
                             </div>
                             <input
                               type="file"
-                              accept="image/*"
-                              onChange={handleInnerImageUpload}
+                              accept="image/*,video/*"
+                              onChange={handleInnerMediaUpload}
                               className="hidden"
                             />
                           </label>
                         </div>
 
-                        {elem.innerImageUrl && (
-                          <div className="space-y-2.5 pt-1">
+                        {/* Project Media Library Quick Select */}
+                        {mediaLibrary && mediaLibrary.length > 0 && (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[10px] text-[var(--theme-text-muted)]">Or insert from project media:</span>
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                const m = mediaLibrary.find((item: any) => item.id === e.target.value);
+                                if (m) handleSelectLibraryMedia(m);
+                              }}
+                              className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-1.5 focus:outline-none focus:border-blue-500"
+                            >
+                              <option value="">Select project asset...</option>
+                              {mediaLibrary.map((item: any) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.type === 'video' ? '🎬' : '🖼️'} {item.name || item.id}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Active Media Controls */}
+                        {(elem.innerMediaUrl || elem.innerImageUrl) && (
+                          <div className="space-y-3 pt-1 border-t border-[var(--theme-border)]/60">
+                            {/* Media Status Pill */}
+                            <div className="flex items-center justify-between p-2 rounded-lg bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-xs">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                                  {elem.innerMediaType === 'video' || /\.(mp4|webm|mov|m4v|mkv)$/i.test(elem.innerMediaUrl || '') ? '🎬 VIDEO' : '🖼️ IMAGE'}
+                                </span>
+                                <span className="font-mono text-[11px] text-[var(--theme-text-primary)] truncate max-w-[140px]">
+                                  {elem.innerMediaName || 'Inserted Media'}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() =>
+                                  updateElem({
+                                    innerMediaOffsetX: 0,
+                                    innerMediaOffsetY: 0,
+                                    innerMediaScale: 1.0,
+                                    innerMediaRotation: 0,
+                                  })
+                                }
+                                className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold underline"
+                                title="Reset X, Y, Scale & Rotation to default"
+                              >
+                                Center Reset
+                              </button>
+                            </div>
+
+                            {/* Fit Mode */}
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-[var(--theme-text-muted)]">Image Fit</span>
+                              <span className="text-xs text-[var(--theme-text-muted)]">Media Fit</span>
                               <div className="flex gap-1 bg-[var(--theme-bg-card)] p-0.5 rounded-lg border border-[var(--theme-border)]">
-                                {(['cover', 'contain', 'fill'] as const).map((fit) => (
+                                {(['cover', 'contain', 'fill', 'custom'] as const).map((fit) => (
                                   <button
                                     key={fit}
-                                    onClick={() => updateElem({ innerImageFit: fit })}
+                                    onClick={() => updateElem({ innerMediaFit: fit, innerImageFit: fit as any })}
                                     className={`px-2 py-0.5 text-[10px] rounded capitalize transition-colors font-semibold ${
-                                      (elem.innerImageFit || 'cover') === fit
+                                      (elem.innerMediaFit || elem.innerImageFit || 'cover') === fit
                                         ? 'bg-blue-600 text-white shadow-sm'
                                         : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
                                     }`}
@@ -8700,21 +8796,168 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                               </div>
                             </div>
 
+                            {/* Precision Placement: Position X & Y Pan */}
+                            <div className="p-2.5 rounded-lg bg-[var(--theme-bg-card)] border border-[var(--theme-border)] space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider">
+                                  Position &amp; Placement Controls
+                                </span>
+                                <button
+                                  onClick={() => updateElem({ innerMediaOffsetX: 0, innerMediaOffsetY: 0 })}
+                                  className="text-[9px] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] font-mono"
+                                >
+                                  Reset Pan
+                                </button>
+                              </div>
+
+                              {/* Pan X Offset */}
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-[var(--theme-text-muted)]">Position X (Pan H)</span>
+                                  <span className="text-[var(--theme-text-primary)] font-mono">{Math.round(elem.innerMediaOffsetX ?? 0)}px</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="-250"
+                                  max="250"
+                                  step="1"
+                                  value={elem.innerMediaOffsetX ?? 0}
+                                  onChange={(e) => updateElem({ innerMediaOffsetX: Number(e.target.value) })}
+                                  className="w-full accent-blue-500"
+                                />
+                              </div>
+
+                              {/* Pan Y Offset */}
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-[var(--theme-text-muted)]">Position Y (Pan V)</span>
+                                  <span className="text-[var(--theme-text-primary)] font-mono">{Math.round(elem.innerMediaOffsetY ?? 0)}px</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="-250"
+                                  max="250"
+                                  step="1"
+                                  value={elem.innerMediaOffsetY ?? 0}
+                                  onChange={(e) => updateElem({ innerMediaOffsetY: Number(e.target.value) })}
+                                  className="w-full accent-blue-500"
+                                />
+                              </div>
+
+                              {/* Zoom Scale */}
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-[var(--theme-text-muted)]">Zoom / Scale</span>
+                                  <span className="text-[var(--theme-text-primary)] font-mono">{Math.round((elem.innerMediaScale ?? 1) * 100)}%</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="0.2"
+                                  max="3.5"
+                                  step="0.05"
+                                  value={elem.innerMediaScale ?? 1}
+                                  onChange={(e) => updateElem({ innerMediaScale: Number(e.target.value) })}
+                                  className="w-full accent-blue-500"
+                                />
+                              </div>
+
+                              {/* Rotation */}
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-[var(--theme-text-muted)]">Rotation Angle</span>
+                                  <span className="text-[var(--theme-text-primary)] font-mono">{Math.round(elem.innerMediaRotation ?? 0)}°</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="-180"
+                                  max="180"
+                                  step="1"
+                                  value={elem.innerMediaRotation ?? 0}
+                                  onChange={(e) => updateElem({ innerMediaRotation: Number(e.target.value) })}
+                                  className="w-full accent-blue-500"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Opacity Slider */}
                             <div className="flex flex-col gap-1.5">
                               <div className="flex items-center justify-between text-xs">
-                                <span className="text-[var(--theme-text-muted)]">Picture Opacity</span>
-                                <span className="text-[var(--theme-text-primary)] font-mono">{Math.round((elem.innerImageOpacity ?? 1) * 100)}%</span>
+                                <span className="text-[var(--theme-text-muted)]">Media Transparency</span>
+                                <span className="text-[var(--theme-text-primary)] font-mono">
+                                  {Math.round((elem.innerMediaOpacity ?? elem.innerImageOpacity ?? 1) * 100)}%
+                                </span>
                               </div>
                               <input
                                 type="range"
-                                min="0.1"
+                                min="0.05"
                                 max="1.0"
                                 step="0.05"
-                                value={elem.innerImageOpacity ?? 1}
-                                onChange={(e) => updateElem({ innerImageOpacity: Number(e.target.value) })}
+                                value={elem.innerMediaOpacity ?? elem.innerImageOpacity ?? 1}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  updateElem({ innerMediaOpacity: val, innerImageOpacity: val });
+                                }}
                                 className="w-full accent-blue-500"
                               />
                             </div>
+
+                            {/* Video-Specific Controls */}
+                            {(elem.innerMediaType === 'video' || /\.(mp4|webm|mov|m4v|mkv)$/i.test(elem.innerMediaUrl || '')) && (
+                              <div className="p-2.5 rounded-lg bg-[var(--theme-bg-card)] border border-blue-500/20 space-y-2.5">
+                                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                                  <Film className="w-3 h-3" />
+                                  Video Playback in Shape
+                                </span>
+
+                                {/* Video Speed */}
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-[var(--theme-text-muted)]">Speed</span>
+                                  <div className="flex gap-1">
+                                    {[0.5, 1.0, 1.5, 2.0].map((spd) => (
+                                      <button
+                                        key={spd}
+                                        onClick={() => updateElem({ innerMediaPlaybackSpeed: spd })}
+                                        className={`px-1.5 py-0.5 text-[10px] rounded font-mono font-semibold transition-colors ${
+                                          (elem.innerMediaPlaybackSpeed ?? 1.0) === spd
+                                            ? 'bg-blue-600 text-white'
+                                            : 'bg-[var(--theme-bg-subpanel)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                                        }`}
+                                      >
+                                        {spd}x
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* In-point Start Trim */}
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-[var(--theme-text-muted)]">Start Offset (In-point)</span>
+                                    <span className="text-[var(--theme-text-primary)] font-mono">{Number(elem.innerMediaStartTime ?? 0).toFixed(1)}s</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="30"
+                                    step="0.5"
+                                    value={elem.innerMediaStartTime ?? 0}
+                                    onChange={(e) => updateElem({ innerMediaStartTime: Number(e.target.value) })}
+                                    className="w-full accent-blue-500"
+                                  />
+                                </div>
+
+                                {/* Loop Video Checkbox */}
+                                <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--theme-text-primary)]">
+                                  <input
+                                    type="checkbox"
+                                    checked={elem.innerMediaLoop !== false}
+                                    onChange={(e) => updateElem({ innerMediaLoop: e.target.checked })}
+                                    className="rounded border-[var(--theme-border)] text-blue-600 focus:ring-0"
+                                  />
+                                  <span>Loop Video inside Shape</span>
+                                </label>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

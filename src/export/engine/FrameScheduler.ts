@@ -107,6 +107,7 @@ function getSpeedRampMediaTime(
 export interface RenderLayer {
   type: 'video' | 'text' | 'image' | 'adjustment' | 'fx' | 'element';
   frame?: CanvasImageSource | VideoFrame; // For video/image
+  innerMediaFrame?: CanvasImageSource | VideoFrame; // For element inner media
   textData?: any;     // For text
   elementSettings?: any; // For element
   clipData?: any;
@@ -351,6 +352,37 @@ export class FrameScheduler {
             }
           })
         );
+      }
+    }
+
+    // Prepare decoders for inner media inside element shapes (videos or images)
+    for (const track of (this.timeline.tracks || [])) {
+      for (const clip of (track.clips || [])) {
+        const es = clip.elementSettings;
+        const mediaUrl = es?.innerMediaUrl || es?.innerImageUrl;
+        if (mediaUrl && !this.mediaDecoders.has(mediaUrl)) {
+          const preBuffer = this.mediaBuffers[mediaUrl];
+          const isVideo = es.innerMediaType === 'video' || /\.(mp4|webm|mov|m4v|mkv)$/i.test(mediaUrl) || mediaUrl.startsWith('data:video/');
+          if (isVideo) {
+            const decoder = new AssetDecoder(mediaUrl);
+            this.mediaDecoders.set(mediaUrl, decoder);
+            loadPromises.push(
+              decoder.load(preBuffer).then(async () => {
+                if (decoder.ready) return;
+                const fallback = new StillImageSource(mediaUrl);
+                await fallback.load(preBuffer);
+                if (fallback.ready) {
+                  decoder.dispose();
+                  this.mediaDecoders.set(mediaUrl, fallback);
+                }
+              })
+            );
+          } else {
+            const source = new StillImageSource(mediaUrl);
+            this.mediaDecoders.set(mediaUrl, source);
+            loadPromises.push(source.load(preBuffer));
+          }
+        }
       }
     }
 
@@ -746,20 +778,62 @@ export class FrameScheduler {
               blendMode,
             });
           } else if (clip.elementSettings || track.type === 'element' || (clip as any).type === 'element') {
-            layers.push({
-              type: 'element',
-              elementSettings: clip.elementSettings,
-              clipData: clip,
-              timestampSeconds: t,
-              startTime: st,
-              opacity,
-              transform,
-              ...visualSettings,
-              zIndex,
-              order: layerOrder,
-              transitionGeometry,
-              blendMode,
-            });
+            const es = clip.elementSettings;
+            const mediaUrl = es?.innerMediaUrl || es?.innerImageUrl;
+            if (mediaUrl) {
+              pending.push(
+                (async () => {
+                  let innerMediaFrame: any = null;
+                  try {
+                    const decoder = this.mediaDecoders.get(mediaUrl);
+                    if (decoder) {
+                      const relTime = Math.max(0, t - st);
+                      const speed = es.innerMediaPlaybackSpeed || 1;
+                      const startTime = es.innerMediaStartTime || 0;
+                      let targetTime = startTime + relTime * speed;
+                      const dur = (decoder as any).duration || (decoder as any).durationSeconds || 0;
+                      if (es.innerMediaLoop !== false && dur > 0) {
+                        targetTime = targetTime % dur;
+                      }
+                      innerMediaFrame = await decoder.getFrameAt(targetTime * 1_000_000);
+                    }
+                  } catch {
+                    // Failing inner decoder should not drop element
+                  }
+
+                  layers.push({
+                    type: 'element',
+                    elementSettings: es,
+                    innerMediaFrame,
+                    clipData: clip,
+                    timestampSeconds: t,
+                    startTime: st,
+                    opacity,
+                    transform,
+                    ...visualSettings,
+                    zIndex,
+                    order: layerOrder,
+                    transitionGeometry,
+                    blendMode,
+                  });
+                })()
+              );
+            } else {
+              layers.push({
+                type: 'element',
+                elementSettings: clip.elementSettings,
+                clipData: clip,
+                timestampSeconds: t,
+                startTime: st,
+                opacity,
+                transform,
+                ...visualSettings,
+                zIndex,
+                order: layerOrder,
+                transitionGeometry,
+                blendMode,
+              });
+            }
           } else if (track.type === 'fx') {
             // FX-track clip — a full-frame timeline shader (fxSettings) and/or
             // particle overlay (particleSettings) applied over the composited

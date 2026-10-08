@@ -512,10 +512,24 @@ export interface ClipElementSettings {
   calloutPointerPosition?: 'bottom' | 'top' | 'left' | 'right';
   calloutPointerOffset?: number;    // Pointer offset along edge
 
-  // Inner Picture / Image inside Shape (Masked fill):
-  innerImageUrl?: string;           // Image or media URL/Blob to clip inside the shape
+  // Inner Media inside Shape (Masked Image / Video clipping with precision placement):
+  innerImageUrl?: string;           // Legacy backward compatibility alias for innerMediaUrl
   innerImageFit?: 'cover' | 'contain' | 'fill';
   innerImageOpacity?: number;       // 0 to 1
+
+  innerMediaType?: 'image' | 'video'; // Auto-detected or chosen media type
+  innerMediaUrl?: string;           // Media URL / Blob / Asset path (image or video)
+  innerMediaName?: string;          // Original file name
+  innerMediaFit?: 'cover' | 'contain' | 'fill' | 'custom'; // Scaling fit mode
+  innerMediaOpacity?: number;       // 0 to 1 transparency
+  innerMediaOffsetX?: number;       // Horizontal pan offset in px (-500 to +500)
+  innerMediaOffsetY?: number;       // Vertical pan offset in px (-500 to +500)
+  innerMediaScale?: number;         // Zoom scale multiplier (0.1 to 5.0, default 1.0)
+  innerMediaRotation?: number;      // Rotation degrees (-180 to 180)
+  innerMediaPlaybackSpeed?: number; // Video speed multiplier (0.25 to 4.0, default 1.0)
+  innerMediaStartTime?: number;     // Video in-point trim start time in seconds (default 0)
+  innerMediaLoop?: boolean;         // Loop video inside shape (default true)
+  innerMediaMuted?: boolean;        // Mute video audio in shape (default true)
 
   // Inner Text inside Shape:
   innerText?: string;               // Text nested inside any shape

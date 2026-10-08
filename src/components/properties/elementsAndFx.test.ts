@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ELEMENT_SHAPES, ELEMENT_EMOJI_CATEGORIES, ELEMENT_STICKERS, SHAPE_VARIANTS } from '@/constants/elements';
-import { calculateElementAnimation, traceShapePath } from '@/utils/elementRenderer';
+import { calculateElementAnimation, traceShapePath, renderElement, isVideoMedia } from '@/utils/elementRenderer';
 import { applyFxEffect } from '@/utils/canvasEffects';
 import { FX_EFFECTS } from '@/constants/mediaPanel';
 import { ClipElementSettings } from '@/types';
@@ -419,4 +419,98 @@ describe('Geometric Shape Variants Engine', () => {
     expect(ids).toContain('shape_crescent');
   });
 });
+
+describe('Media Inside Shape with Precision Placement Controls', () => {
+  it('correctly identifies video vs image media formats', () => {
+    expect(isVideoMedia('video.mp4')).toBe(true);
+    expect(isVideoMedia('clip.webm')).toBe(true);
+    expect(isVideoMedia('footage.mov')).toBe(true);
+    expect(isVideoMedia('data:video/mp4;base64,AAA')).toBe(true);
+    expect(isVideoMedia('photo.jpg')).toBe(false);
+    expect(isVideoMedia('graphic.png')).toBe(false);
+    expect(isVideoMedia('blob:http://localhost/test', 'video')).toBe(true);
+    expect(isVideoMedia('blob:http://localhost/test', 'image')).toBe(false);
+  });
+
+  it('supports media placement controls (offsetX, offsetY, scale, rotation, fit)', () => {
+    const settings: ClipElementSettings = {
+      elementType: 'shape',
+      shapeType: 'triangle',
+      shapeVariant: 'right',
+      innerMediaType: 'video',
+      innerMediaUrl: 'blob:http://localhost/sample.mp4',
+      innerMediaFit: 'custom',
+      innerMediaOffsetX: 45,
+      innerMediaOffsetY: -30,
+      innerMediaScale: 1.5,
+      innerMediaRotation: 15,
+      innerMediaPlaybackSpeed: 1.25,
+      innerMediaStartTime: 2.0,
+      innerMediaLoop: true,
+      innerMediaOpacity: 0.9,
+    };
+
+    expect(settings.innerMediaType).toBe('video');
+    expect(settings.innerMediaOffsetX).toBe(45);
+    expect(settings.innerMediaOffsetY).toBe(-30);
+    expect(settings.innerMediaScale).toBe(1.5);
+    expect(settings.innerMediaRotation).toBe(15);
+    expect(settings.innerMediaPlaybackSpeed).toBe(1.25);
+    expect(settings.innerMediaStartTime).toBe(2.0);
+    expect(settings.innerMediaLoop).toBe(true);
+  });
+
+  it('renders element with mock overrideMediaFrame and placement transforms without errors', () => {
+    const mockCtx: any = {
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      clip: () => {},
+      translate: () => {},
+      rotate: () => {},
+      scale: () => {},
+      drawImage: () => {},
+      fill: () => {},
+      stroke: () => {},
+      setLineDash: () => {},
+      globalAlpha: 1,
+    };
+
+    const mockFrame: any = {
+      width: 640,
+      height: 360,
+    };
+
+    const settings: ClipElementSettings = {
+      elementType: 'shape',
+      shapeType: 'rectangle',
+      shapeVariant: 'rhombus',
+      innerMediaUrl: 'test.mp4',
+      innerMediaFit: 'cover',
+      innerMediaOffsetX: 20,
+      innerMediaOffsetY: -15,
+      innerMediaScale: 1.2,
+      innerMediaRotation: 45,
+      innerMediaOpacity: 0.85,
+    };
+
+    expect(() => {
+      renderElement(
+        mockCtx,
+        settings,
+        300,
+        200,
+        { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0, rotation: 0, opacity: 1 },
+        1.5,
+        5.0,
+        mockFrame,
+        false
+      );
+    }).not.toThrow();
+  });
+});
+
 

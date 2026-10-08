@@ -786,6 +786,16 @@ async function handleExport(
             // Do NOT close ImageBitmap / OffscreenCanvas
           } catch {}
         }
+        if ((layer as any).innerMediaFrame) {
+          const inf: any = (layer as any).innerMediaFrame;
+          try {
+            if (typeof VideoFrame !== 'undefined' && inf instanceof VideoFrame) {
+              inf.close();
+            } else if (inf && typeof inf.close === 'function' && inf.constructor && inf.constructor.name === 'VideoFrame') {
+              inf.close();
+            }
+          } catch {}
+        }
       }
 
       const totalWork = hasAudio ? 70 : 90;

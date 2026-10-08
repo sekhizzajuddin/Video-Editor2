@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers, Palette, Type, RotateCw } from 'lucide-react';
+import { X, Download, AlertCircle, FolderOpen, Film, Bookmark, Sparkles, Layers, Palette, Type, RotateCw, Shapes } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useExportEngine, RESOLUTION_PRESETS, Resolution } from '@/export/useExportEngine';
@@ -75,6 +75,62 @@ export function ExportModal() {
       count,
       hasTransparentText: count > 0 && hasTransparent,
       usedFonts: Array.from(usedFonts),
+    };
+  }, [tracks]);
+
+  const elementOverlayInfo = useMemo(() => {
+    let count = 0;
+    let shapesCount = 0;
+    let mediaInShapeCount = 0;
+    let videoInShapeCount = 0;
+    let imageInShapeCount = 0;
+    let emojisCount = 0;
+    let badgesCount = 0;
+    const variants = new Set<string>();
+
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        if (clip.disabled) continue;
+        const isElement =
+          clip.elementSettings ||
+          (track.type as string) === 'element' ||
+          (clip as any).type === 'element' ||
+          clip.mediaId?.startsWith('elem_') ||
+          clip.id?.startsWith('clip_elem');
+
+        if (isElement && clip.elementSettings) {
+          count++;
+          const es = clip.elementSettings;
+          if (es.elementType === 'emoji') {
+            emojisCount++;
+          } else if (es.elementType === 'badge') {
+            badgesCount++;
+          } else {
+            shapesCount++;
+            if (es.shapeVariant) variants.add(es.shapeVariant);
+            const mediaUrl = es.innerMediaUrl || es.innerImageUrl;
+            if (mediaUrl) {
+              mediaInShapeCount++;
+              if (es.innerMediaType === 'video' || /\.(mp4|webm|mov|m4v|mkv)$/i.test(mediaUrl)) {
+                videoInShapeCount++;
+              } else {
+                imageInShapeCount++;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      count,
+      shapesCount,
+      mediaInShapeCount,
+      videoInShapeCount,
+      imageInShapeCount,
+      emojisCount,
+      badgesCount,
+      variants: Array.from(variants),
     };
   }, [tracks]);
 
@@ -757,6 +813,67 @@ export function ExportModal() {
               </div>
               <p className="text-[10px] text-cyan-300/80 bg-cyan-950/30 p-1.5 rounded border border-cyan-500/20">
                 Full 3D rotation and mirror flipping mapped frame-for-frame to the export compositor with perspective projection.
+              </p>
+            </div>
+          )}
+
+          {/* Elements & Motion Graphics Studio Status */}
+          {elementOverlayInfo.count > 0 && (
+            <div className="bg-blue-950/25 border border-blue-500/30 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center bg-blue-500/20 text-blue-400">
+                    <Shapes className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-blue-300 flex items-center gap-1.5">
+                      <span>Elements &amp; Motion Graphics Active ({elementOverlayInfo.count} {elementOverlayInfo.count === 1 ? 'clip' : 'clips'})</span>
+                      <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                    </div>
+                    <div className="text-[10px] text-blue-400/80 flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      {elementOverlayInfo.shapesCount > 0 && (
+                        <span>{elementOverlayInfo.shapesCount} {elementOverlayInfo.shapesCount === 1 ? 'Shape' : 'Shapes'}</span>
+                      )}
+                      {elementOverlayInfo.mediaInShapeCount > 0 && (
+                        <>
+                          <span className="text-blue-500/50">•</span>
+                          <span className="text-emerald-400 font-medium">
+                            {elementOverlayInfo.mediaInShapeCount} with Media Mask
+                            {elementOverlayInfo.videoInShapeCount > 0 && ` (${elementOverlayInfo.videoInShapeCount} Video)`}
+                            {elementOverlayInfo.imageInShapeCount > 0 && ` (${elementOverlayInfo.imageInShapeCount} Image)`}
+                          </span>
+                        </>
+                      )}
+                      {elementOverlayInfo.emojisCount > 0 && (
+                        <>
+                          <span className="text-blue-500/50">•</span>
+                          <span>{elementOverlayInfo.emojisCount} Emotion {elementOverlayInfo.emojisCount === 1 ? 'Emoji' : 'Emojis'}</span>
+                        </>
+                      )}
+                      {elementOverlayInfo.badgesCount > 0 && (
+                        <>
+                          <span className="text-blue-500/50">•</span>
+                          <span>{elementOverlayInfo.badgesCount} Social {elementOverlayInfo.badgesCount === 1 ? 'Badge' : 'Badges'}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {elementOverlayInfo.variants.length > 0 && (
+                  <div className="flex items-center gap-1 shrink-0 flex-wrap max-w-[200px] justify-end">
+                    {elementOverlayInfo.variants.slice(0, 3).map((v: string, i: number) => (
+                      <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-black/50 text-[9px] font-mono text-blue-300 border border-blue-500/30 capitalize">
+                        {v.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                    {elementOverlayInfo.variants.length > 3 && (
+                      <span className="text-[9px] text-blue-400/70">+{elementOverlayInfo.variants.length - 3}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-blue-300/80 bg-blue-950/30 p-1.5 rounded border border-blue-500/20">
+                All element vector paths, inner video/image clipping masks with custom pan/zoom placement, and motion physics are fully synchronized and rendered frame-for-frame into the export video.
               </p>
             </div>
           )}

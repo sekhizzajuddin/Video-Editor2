@@ -167,6 +167,24 @@ export class ExportWorkerManager {
       delete m._audioBlob;
     }
 
+    // Pre-buffer any element shape inner media (images & videos) for worker transfer
+    for (const track of (serializedTimeline.tracks || [])) {
+      for (const clip of (track.clips || [])) {
+        const es = clip.elementSettings;
+        const mediaUrl = es?.innerMediaUrl || es?.innerImageUrl;
+        if (mediaUrl && !mediaBuffers[mediaUrl] && (mediaUrl.startsWith('blob:') || mediaUrl.startsWith('http'))) {
+          try {
+            const res = await fetch(mediaUrl);
+            const buf = await res.arrayBuffer();
+            mediaBuffers[mediaUrl] = buf;
+            transferables.push(buf);
+          } catch (e) {
+            console.warn('[ExportWorkerManager] Pre-buffer element media warning:', e);
+          }
+        }
+      }
+    }
+
     // ── Automatic AI Cutout Pre-computation & Transfer ────────────────────────
     // Guarantees 100% background removal on export by preparing masks on the
     // main thread with MediaPipe GPU and transferring ImageBitmaps to the worker.

@@ -1499,7 +1499,7 @@ export class Compositor {
     ctx.globalAlpha = (layer.opacity ?? 1);
 
     const relTime = Math.max(0, (layer.timestampSeconds ?? 0) - clipStart);
-    renderElement(ctx as any, es, w, h, anim, relTime, clipDuration);
+    renderElement(ctx as any, es, w, h, anim, relTime, clipDuration, (layer as any).innerMediaFrame, false);
     ctx.restore();
   }
 
