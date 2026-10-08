@@ -19,6 +19,7 @@ import { applyTransitionPostEffect } from '@/utils/transitionEngine';
 import { drawTextBackground } from '@/utils/textBackgrounds';
 import { applyEasing, smoothNoise } from '@/utils/textAnimationEasing';
 import { createSceneStage, captureSceneFrame, destroySceneStage, type SceneStage, type SeekMode } from '@/utils/cssSceneRasterizer';
+import { calculateElementAnimation, renderElement } from '@/utils/elementRenderer';
 
 // ── Custom FX SceneStage cache for export ─────────────────────────────────────
 const _exportFxStageCache = new Map<string, { stage: SceneStage; seekMode: SeekMode; htmlHash: number }>();
@@ -353,6 +354,10 @@ export class Compositor {
     for (const layer of contentLayers) {
       if (layer.type === 'text') {
         this.renderTextLayer(layer, targetCtx);
+        continue;
+      }
+      if (layer.type === 'element') {
+        this.renderElementLayer(layer, targetCtx);
         continue;
       }
       if (layer.type === 'adjustment') {
@@ -1104,6 +1109,7 @@ export class Compositor {
       if (!layer.fxSettings) continue;
       if (layer.fxSettings.enabled === false) continue;
       if ((layer.fxSettings.intensity ?? 100) <= 0) continue;
+      if (layer.type === 'video' && layer.frame) continue;
       const localTime = Math.max(0, (layer.timestampSeconds ?? 0) - (layer.startTime ?? 0));
       // Custom HTML/CSS FX: render via SceneStage pipeline
       if (layer.fxSettings.type === 'custom_html' && layer.fxSettings.customHtmlCss) {
@@ -1462,6 +1468,38 @@ export class Compositor {
     }
 
     return out;
+  }
+
+  /**
+   * Draw an element clip (Shape, Emoji, Sticker, Badge) with entry, continuous,
+   * and exit animations matching Preview Canvas.
+   */
+  private renderElementLayer(layer: RenderLayer, renderCtx?: OffscreenCanvasRenderingContext2D) {
+    const ctx = renderCtx ?? this.ctx;
+    const es = (layer as any).elementSettings || (layer.clipData as any)?.elementSettings;
+    if (!es) return;
+    const w = es.width || 220;
+    const h = es.height || 160;
+    const clipStart = (layer as any).startTime ?? 0;
+    const clipDuration = (layer.clipData as any)?.duration ?? 5;
+    const anim = calculateElementAnimation(layer.timestampSeconds ?? 0, clipStart, clipDuration, es);
+
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const tr = layer.transform || { x: 0, y: 0, scale: 100, rotation: 0 };
+    const px = W / 2 + (tr.x ?? 0);
+    const py = H / 2 + (tr.y ?? 0);
+    const scale = (tr.scale ?? 100) / 100;
+    const rot = tr.rotation ?? 0;
+
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate((rot * Math.PI) / 180);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = (layer.opacity ?? 1);
+
+    renderElement(ctx as any, es, w, h, anim);
+    ctx.restore();
   }
 
   /**

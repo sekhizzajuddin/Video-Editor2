@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Media Types
-export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx' | 'lut' | 'compound' | 'adjustment';
+export type MediaType = 'video' | 'audio' | 'image' | 'text' | 'fx' | 'lut' | 'compound' | 'adjustment' | 'element';
 
 // LUT (Color Look-Up Table) data parsed from .cube files
 export interface LutData {
@@ -369,6 +369,94 @@ export interface ClipFxSettings {
   customFxName?: string;     // Display label
 }
 
+// ── Element Settings (Shapes, Emojis, Stickers & Professional Animations) ──
+export type ElementType = 'shape' | 'emoji' | 'sticker' | 'badge';
+
+export type ElementShapeType =
+  | 'rectangle'
+  | 'rounded_rect'
+  | 'circle'
+  | 'ellipse'
+  | 'star'
+  | 'heart'
+  | 'arrow'
+  | 'arrow_double'
+  | 'speech_bubble'
+  | 'thought_bubble'
+  | 'hexagon'
+  | 'triangle'
+  | 'shield'
+  | 'callout'
+  | 'badge'
+  | 'line';
+
+export type ElementAnimationIn =
+  | 'none'
+  | 'pop'
+  | 'bounce_spring'
+  | 'fade_zoom'
+  | 'slide_up'
+  | 'slide_down'
+  | 'slide_left'
+  | 'slide_right'
+  | 'spin_in'
+  | 'elastic';
+
+export type ElementAnimationLoop =
+  | 'none'
+  | 'pulse'
+  | 'heartbeat'
+  | 'float'
+  | 'wiggle'
+  | 'spin_slow'
+  | 'spin'
+  | 'swing'
+  | 'breathe';
+
+export type ElementAnimationOut =
+  | 'none'
+  | 'fade_out'
+  | 'pop_out'
+  | 'slide_up'
+  | 'slide_down'
+  | 'slide_left'
+  | 'slide_right'
+  | 'spin_out'
+  | 'shrink';
+
+export interface ClipElementSettings {
+  elementType: ElementType;
+  shapeType?: ElementShapeType;
+  // Content:
+  emojiChar?: string;
+  svgContent?: string;
+  label?: string;
+  fontSize?: number;
+  // Geometry & Styling:
+  width?: number;
+  height?: number;
+  fillColor?: string;
+  fillType?: 'solid' | 'gradient' | 'none';
+  gradientEndColor?: string;
+  gradientAngle?: number;
+  strokeColor?: string;
+  strokeWidth?: number;
+  strokeStyle?: 'solid' | 'dashed' | 'dotted';
+  cornerRadius?: number;
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+  // Professional Animations:
+  animationIn?: ElementAnimationIn;
+  animationInDuration?: number;
+  animationLoop?: ElementAnimationLoop;
+  animationLoopSpeed?: number;
+  animationLoopIntensity?: number;
+  animationOut?: ElementAnimationOut;
+  animationOutDuration?: number;
+}
+
 export type ParticleEffectType =
   | 'snow'
   | 'rain'
@@ -699,6 +787,7 @@ export interface TimelineClip {
   // Text and FX
   textSettings?: ClipTextSettings;
   fxSettings?: ClipFxSettings;
+  elementSettings?: ClipElementSettings;
   /**
    * Motion-tracked region effects: shake/jiggle/pulse applied to ONE tracked
    * area (a hand, a face) rather than the whole frame. See utils/motionEffects.
@@ -979,8 +1068,8 @@ export type EditorTool =
   | 'trackSelectBackward' // select all clips on track to the left
   | 'split'             // razor / split at playhead
   | 'slide';            // slide clip within gap
-export type MediaTab = 'project' | 'stock' | 'ai' | 'audio' | 'text' | 'fx' | 'templates' | 'lut' | 'transitions' | 'effects';
-export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'ai' | 'thumbnail' | 'pip';
+export type MediaTab = 'project' | 'stock' | 'ai' | 'audio' | 'text' | 'fx' | 'transitions' | 'effects' | 'elements' | 'templates' | 'lut';
+export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'ai' | 'thumbnail' | 'pip' | 'element';
 
 // ─── Editor Settings ──────────────────────────────────────────────────────
 export interface EditorSettings {

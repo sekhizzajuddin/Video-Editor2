@@ -40,7 +40,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
         }
       }
-      if (!track && !e.dataTransfer.types.includes('application/procut-media') && !e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/procut-media-sequence') && !e.dataTransfer.types.includes('application/procut-effect') && !e.dataTransfer.types.includes('application/procut-custom-fx')) {
+      if (!track && !e.dataTransfer.types.includes('application/procut-media') && !e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/procut-media-sequence') && !e.dataTransfer.types.includes('application/procut-effect') && !e.dataTransfer.types.includes('application/procut-custom-fx') && !e.dataTransfer.types.includes('application/procut-element')) {
         // Only return early if track is missing AND we are dropping something that strictly requires a track (like transitions)
         // Media items, files, templates, and FX can be dropped on empty space to auto-create tracks.
         const hasTemplate = e.dataTransfer.getData('application/procut-template');
@@ -358,21 +358,26 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
               }
             }
           } else {
-            const existingFx = state.tracks.find((t) => t.type === 'fx');
+            const existingFx = state.tracks.find((t) => t.type === 'fx' && !t.locked);
             if (existingFx) {
               targetTrackId = existingFx.id;
             } else {
-              const firstVideo = state.tracks.find((t) => t.type === 'video');
+              const firstVideo = state.tracks.find((t) => t.type === 'video' && !t.locked);
               targetTrackId = firstVideo
                 ? state.ensureFxTrackAbove(firstVideo.id)
                 : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
             }
           }
         } else {
-          const firstVideo = state.tracks.find((t) => t.type === 'video');
-          targetTrackId = firstVideo
-            ? state.ensureFxTrackAbove(firstVideo.id)
-            : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+          const existingFx = state.tracks.find((t) => t.type === 'fx' && !t.locked);
+          if (existingFx) {
+            targetTrackId = existingFx.id;
+          } else {
+            const firstVideo = state.tracks.find((t) => t.type === 'video' && !t.locked);
+            targetTrackId = firstVideo
+              ? state.ensureFxTrackAbove(firstVideo.id)
+              : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
+          }
         }
 
         const startTime = targetClip ? targetClip.startTime : dropTime;
@@ -423,6 +428,56 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         setDropPreview(null);
         toast.success(targetClip ? `Connected "${matchedFx?.name || effectName}" with clip` : `Added FX clip "${matchedFx?.name || effectName}" to FX track`);
         return;
+      }
+
+      // ── Element Drop (Shape, Emoji, Sticker, Badge) ──
+      const elementRaw = e.dataTransfer.getData('application/procut-element');
+      if (elementRaw) {
+        try {
+          const elementSettings = JSON.parse(elementRaw) as import('@/types').ClipElementSettings;
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const dropTime = Math.max(0, x / zoomLevel);
+          const duration = 4.0;
+
+          const targetTrack = track && !track.locked ? track : (state.tracks.find((t) => (t.type === 'video' || t.type === 'text') && !t.locked) || state.tracks[0]);
+          const elemMediaId = generateId();
+          const elemClipId = generateId();
+
+          state.addMedia({
+            id: elemMediaId,
+            name: elementSettings.label || elementSettings.shapeType || 'Element',
+            type: 'element' as any,
+            duration,
+            url: '',
+            createdAt: Date.now(),
+          });
+
+          const elemClip: TimelineClip = {
+            id: elemClipId,
+            mediaId: elemMediaId,
+            trackId: targetTrack.id,
+            startTime: dropTime,
+            duration,
+            trimStart: 0,
+            trimEnd: 0,
+            transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+            opacity: 1,
+            speed: 1,
+            effects: [],
+            elementSettings: { ...elementSettings },
+          };
+
+          state.addClip(elemClip);
+          state.selectClip(elemClipId);
+          state.saveSnapshot('Drop Element');
+          setHoveredTrackId(null);
+          setDropPreview(null);
+          toast.success(`Added "${elementSettings.label || elementSettings.shapeType || 'Element'}" to timeline`);
+          return;
+        } catch (err) {
+          console.error('Failed to parse element drop', err);
+        }
       }
 
       // ── NEW: Sequence Drop (Multi-Image) ──
@@ -597,13 +652,14 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const hasMedia = e.dataTransfer.types.includes('application/procut-media');
       const hasEffect = e.dataTransfer.types.includes('application/procut-effect');
       const hasCustomFx = e.dataTransfer.types.includes('application/procut-custom-fx');
+      const hasElement = e.dataTransfer.types.includes('application/procut-element');
       const hasColorPreset = e.dataTransfer.types.includes('application/procut-color-preset');
       const hasParticle = e.dataTransfer.types.includes('application/procut-particle');
       const hasTransition = e.dataTransfer.types.includes('application/procut-transition');
       const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
       const hasFiles = e.dataTransfer.types.includes('Files');
 
-      if ((hasMedia || hasEffect || hasCustomFx || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && (trackIdx >= 0 || hasMedia || hasFiles || hasTemplate || hasEffect || hasCustomFx)) {
+      if ((hasMedia || hasEffect || hasCustomFx || hasElement || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && (trackIdx >= 0 || hasMedia || hasFiles || hasTemplate || hasEffect || hasCustomFx || hasElement)) {
         const dropTime = Math.max(0, x / zoomLevel);
 
         let approxDuration = 5;
@@ -636,6 +692,10 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           mediaType = 'text';
           mediaName = 'Title Template';
           approxDuration = 5;
+        } else if (hasElement) {
+          mediaType = 'element';
+          mediaName = 'Element';
+          approxDuration = 4;
         } else if (hasColorPreset || hasParticle || hasTransition) {
           approxDuration = 0;
         }

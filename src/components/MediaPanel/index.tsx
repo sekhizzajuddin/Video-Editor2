@@ -57,6 +57,8 @@ import {
   Wand2,
   Wrench,
   Sliders,
+  Shapes,
+  Award,
 } from 'lucide-react';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
@@ -85,6 +87,7 @@ const AutoVideoModal = React.lazy(() => import('../AutoVideoModal').then(m => ({
 // Color Correction — dragged to a video/image clip to apply that preset
 // Particle Effects — dragged to a video/image/FX clip
 import { TRANSITIONS, FX_EFFECTS, COLOR_CORRECTION_EFFECTS, PARTICLE_EFFECTS } from "@/constants/mediaPanel";
+import { ELEMENT_SHAPES, ELEMENT_EMOJI_CATEGORIES, ELEMENT_STICKERS } from "@/constants/elements";
 import { TemplatePreviewCardProps, TransitionCardProps } from "@/types/mediaPanel";
 import { formatDuration, formatSimpleTime, formatSize, getMediaColor, getMediaIcon } from "@/utils/mediaHelpers";
 import { useMediaImport } from "@/hooks/media/useMediaImport";
@@ -552,6 +555,25 @@ export function MediaPanel() {
     if (selectedClipId) {
       for (const t of tracks) {
         const c = t.clips.find((clip) => clip.id === selectedClipId);
+        if (c && (t.type === 'fx' || c.fxSettings)) {
+          const matchedFx = FX_EFFECTS.find(
+            (fx) => fx.name.toLowerCase() === effect.name.toLowerCase() || fx.type === effect.type
+          );
+          const fxType = matchedFx?.type ?? effect.type ?? effect.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          state.updateClip(c.id, {
+            name: effect.name,
+            fxSettings: {
+              ...(c.fxSettings || {}),
+              type: fxType as any,
+              intensity: effect.defaultSettings?.intensity ?? matchedFx?.defaultSettings?.intensity ?? c.fxSettings?.intensity ?? 100,
+              ...(matchedFx?.defaultSettings || {}),
+              ...(effect.defaultSettings || {}),
+            },
+          });
+          state.saveSnapshot('Change FX Effect');
+          toast.success(`Updated FX to "${effect.name}"`);
+          return;
+        }
         if (c && (t.type === 'video' || t.type === 'text')) {
           targetClip = c;
           hostTrackId = t.id;
@@ -578,11 +600,11 @@ export function MediaPanel() {
     if (hostTrackId) {
       targetTrackId = state.ensureFxTrackAbove(hostTrackId);
     } else {
-      const existingFx = state.tracks.find((t) => t.type === 'fx');
+      const existingFx = state.tracks.find((t) => t.type === 'fx' && !t.locked);
       if (existingFx) {
         targetTrackId = existingFx.id;
       } else {
-        const firstVideo = state.tracks.find((t) => t.type === 'video');
+        const firstVideo = state.tracks.find((t) => t.type === 'video' && !t.locked);
         targetTrackId = firstVideo
           ? state.ensureFxTrackAbove(firstVideo.id)
           : (state.addTrack('fx'), useEditorStore.getState().tracks.find((t) => t.type === 'fx')!.id);
@@ -636,6 +658,64 @@ export function MediaPanel() {
     state.selectClip(fxClipId);
     state.saveSnapshot('Add FX Clip');
     toast.success(targetClip ? `Connected "${effect.name}" with clip` : `Added FX clip "${effect.name}" to FX track`);
+  };
+
+  const handleElementClick = (element: {
+    label: string;
+    defaultSettings: import('@/types').ClipElementSettings;
+  }) => {
+    const state = useEditorStore.getState();
+    const { currentTime, tracks } = state;
+
+    let targetTrackId: string;
+    const existingElemTrack = tracks.find((t) => (t.name === 'Elements' || (t.type as string) === 'element') && !t.locked);
+    if (existingElemTrack) {
+      targetTrackId = existingElemTrack.id;
+    } else {
+      const topVisual = tracks.find((t) => (t.type === 'video' || t.type === 'text') && !t.locked);
+      if (topVisual) {
+        targetTrackId = topVisual.id;
+      } else {
+        state.addTrack('video');
+        const created = useEditorStore.getState().tracks.find((t) => t.type === 'video') || useEditorStore.getState().tracks[0];
+        targetTrackId = created ? created.id : tracks[0].id;
+      }
+    }
+
+    const duration = 4.0;
+    const elemMediaId = `elem_media_${Math.random().toString(36).substr(2, 9)}`;
+    const elemClipId = `clip_elem_${Math.random().toString(36).substr(2, 9)}`;
+
+    state.addMedia({
+      id: elemMediaId,
+      name: element.label,
+      type: 'element' as any,
+      duration,
+      url: '',
+      createdAt: Date.now(),
+    });
+
+    const elemClip: any = {
+      id: elemClipId,
+      mediaId: elemMediaId,
+      trackId: targetTrackId,
+      startTime: currentTime,
+      duration,
+      trimStart: 0,
+      trimEnd: 0,
+      transform: { x: 0, y: 0, scale: 100, rotation: 0 },
+      opacity: 1,
+      speed: 1,
+      effects: [],
+      elementSettings: {
+        ...element.defaultSettings,
+      },
+    };
+
+    state.addClip(elemClip);
+    state.selectClip(elemClipId);
+    state.saveSnapshot('Add Element');
+    toast.success(`Added "${element.label}" to timeline`);
   };
 
   const handleColorPresetClick = (effect: any) => {
@@ -933,13 +1013,19 @@ export function MediaPanel() {
 
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'audio' | 'image'>('all');
 
+  const [elementSubTab, setElementSubTab] = useState<'shapes' | 'emojis' | 'stickers'>('shapes');
+  const [elementShapeCategory, setElementShapeCategory] = useState<string>('all');
+  const [elementEmojiCategory, setElementEmojiCategory] = useState<string>('all');
+  const [elementSearchQuery, setElementSearchQuery] = useState<string>('');
+
   const tabs: { id: MediaTab; label: string; icon: typeof Film }[] = [
     { id: 'project', label: 'Media', icon: Folder },
     { id: 'audio', label: 'Audio', icon: Music },
     { id: 'text', label: 'Text', icon: Type },
     { id: 'fx', label: 'FX', icon: Wand2 },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
-    { id: 'templates', label: 'Elements', icon: Clapperboard },
+    { id: 'templates', label: 'Effects', icon: Sparkles },
+    { id: 'elements', label: 'Elements', icon: Shapes },
   ];
 
   const filteredMedia = useMemo(() => mediaLibrary.filter((m) => {
@@ -1386,6 +1472,8 @@ export function MediaPanel() {
               {activeMediaTab === 'project'
                 ? 'Media Library'
                 : activeMediaTab === 'templates'
+                ? 'Effects'
+                : activeMediaTab === 'elements'
                 ? 'Elements'
                 : (activeMediaTab === 'fx' || activeMediaTab === 'effects')
                 ? 'FX Effects'
@@ -2740,7 +2828,7 @@ export function MediaPanel() {
                       : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
-                  Text Templates
+                  Text Effects
                 </button>
                 <button
                   onClick={() => { setTemplateSubTab('video'); setTemplateCategory('all'); }}
@@ -2750,7 +2838,7 @@ export function MediaPanel() {
                       : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
-                  Video Templates
+                  Video Effects
                 </button>
                 <button
                   onClick={() => setTemplateSubTab('project')}
@@ -3325,7 +3413,6 @@ export function MediaPanel() {
                           draggable
                           onDragStart={(e) => {
                             e.dataTransfer.setData('application/procut-color-preset', JSON.stringify(effect.preset));
-                            e.dataTransfer.setData('application/procut-effect', effect.name);
                             e.dataTransfer.effectAllowed = 'copy';
                           }}
                           onClick={() => handleColorPresetClick(effect)}
@@ -3386,6 +3473,346 @@ export function MediaPanel() {
                   </div>
                 </div>
               )}
+            </div>
+          );
+        })()}
+
+        {/* ── Elements Tab (Shapes, Emojis, Stickers & Badges) ── */}
+        {activeMediaTab === 'elements' && (() => {
+          return (
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Sub-Tab Selector */}
+              <div className="flex border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] shrink-0">
+                <button
+                  onClick={() => { setElementSubTab('shapes'); setElementShapeCategory('all'); }}
+                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+                    elementSubTab === 'shapes'
+                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-card)]'
+                      : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  <Square className="w-3.5 h-3.5" />
+                  Shapes
+                </button>
+                <button
+                  onClick={() => { setElementSubTab('emojis'); setElementEmojiCategory('all'); }}
+                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+                    elementSubTab === 'emojis'
+                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-card)]'
+                      : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  <span className="text-xs">😀</span>
+                  Emojis
+                </button>
+                <button
+                  onClick={() => { setElementSubTab('stickers'); }}
+                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+                    elementSubTab === 'stickers'
+                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-card)]'
+                      : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
+                >
+                  <Award className="w-3.5 h-3.5" />
+                  Stickers & Badges
+                </button>
+              </div>
+
+              {/* Search Bar */}
+              <div className="p-2 border-b border-[var(--theme-border)] bg-[var(--theme-bg-panel)] shrink-0">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--theme-text-muted)]" />
+                  <input
+                    type="text"
+                    value={elementSearchQuery}
+                    onChange={(e) => setElementSearchQuery(e.target.value)}
+                    placeholder={
+                      elementSubTab === 'shapes'
+                        ? 'Search 16+ vector shapes...'
+                        : elementSubTab === 'emojis'
+                        ? 'Search 100+ high-res emojis...'
+                        : 'Search badges & social stickers...'
+                    }
+                    className="w-full bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] rounded-lg pl-8 pr-7 py-1.5 text-xs text-[var(--theme-text-primary)] placeholder:text-[var(--theme-text-muted)] focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                  {elementSearchQuery && (
+                    <button
+                      onClick={() => setElementSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Sub-tab Content: Shapes */}
+              {elementSubTab === 'shapes' && (() => {
+                const shapeCategories = [
+                  { id: 'all', label: 'All' },
+                  { id: 'basic', label: 'Basic' },
+                  { id: 'symbols', label: 'Symbols' },
+                  { id: 'arrows', label: 'Arrows' },
+                  { id: 'callouts', label: 'Callouts' },
+                  { id: 'badges', label: 'Badges' },
+                ];
+                const filteredShapes = ELEMENT_SHAPES.filter((s) => {
+                  if (elementShapeCategory !== 'all' && s.category !== elementShapeCategory) return false;
+                  if (elementSearchQuery && !s.label.toLowerCase().includes(elementSearchQuery.toLowerCase())) return false;
+                  return true;
+                });
+
+                return (
+                  <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+                    {/* Category Filter Pills */}
+                    <div className="flex gap-1.5 p-2 flex-wrap border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] shrink-0">
+                      {shapeCategories.map((cat) => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setElementShapeCategory(cat.id)}
+                          className={`px-2.5 py-1 text-[11px] rounded-full transition-colors font-medium ${
+                            elementShapeCategory === cat.id
+                              ? 'bg-blue-600 text-white font-bold shadow-sm'
+                              : 'bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]'
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Shapes Grid */}
+                    <div className="p-2.5 grid grid-cols-2 gap-2">
+                      {filteredShapes.map((shape) => {
+                        const Icon = shape.icon;
+                        return (
+                          <div
+                            key={shape.id}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/procut-element', JSON.stringify(shape.defaultSettings));
+                              (window as any).__procutDraggingElement = {
+                                label: shape.label,
+                                defaultSettings: shape.defaultSettings,
+                              };
+                              e.dataTransfer.effectAllowed = 'copy';
+                            }}
+                            onClick={() => handleElementClick(shape)}
+                            className="group relative flex flex-col items-center justify-center p-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-subpanel)] hover:border-blue-500/50 cursor-pointer transition-all hover:shadow-md"
+                          >
+                            <div className="w-12 h-12 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-500 group-hover:scale-110 group-hover:bg-blue-500/20 transition-transform">
+                              <Icon className="w-6 h-6" />
+                            </div>
+                            <span className="mt-2 text-xs font-semibold text-[var(--theme-text-primary)] text-center line-clamp-1">
+                              {shape.label}
+                            </span>
+                            <span className="text-[9px] text-[var(--theme-text-muted)] capitalize">
+                              {shape.category}
+                            </span>
+
+                            {/* Quick Add Button on Hover */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleElementClick(shape);
+                              }}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                              title="Add to timeline"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {filteredShapes.length === 0 && (
+                        <div className="col-span-2 py-8 text-center text-xs text-[var(--theme-text-muted)]">
+                          No shapes matching "{elementSearchQuery}"
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Sub-tab Content: Emojis */}
+              {elementSubTab === 'emojis' && (() => {
+                const filteredCategories = ELEMENT_EMOJI_CATEGORIES.filter((cat) => {
+                  if (elementEmojiCategory !== 'all' && cat.category !== elementEmojiCategory) return false;
+                  return true;
+                });
+
+                const handleEmojiClick = (emoji: string) => {
+                  handleElementClick({
+                    label: emoji,
+                    defaultSettings: {
+                      elementType: 'emoji',
+                      emojiChar: emoji,
+                      width: 140,
+                      height: 140,
+                      fontSize: 100,
+                      animationIn: 'bounce_spring',
+                      animationInDuration: 0.5,
+                      animationLoop: 'pulse',
+                      animationLoopSpeed: 1,
+                      animationLoopIntensity: 30,
+                      animationOut: 'pop_out',
+                      animationOutDuration: 0.3,
+                    },
+                  });
+                };
+
+                return (
+                  <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+                    {/* Emoji Category Pills */}
+                    <div className="flex gap-1.5 p-2 flex-wrap border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)] shrink-0">
+                      <button
+                        onClick={() => setElementEmojiCategory('all')}
+                        className={`px-2.5 py-1 text-[11px] rounded-full transition-colors font-medium ${
+                          elementEmojiCategory === 'all'
+                            ? 'bg-blue-600 text-white font-bold shadow-sm'
+                            : 'bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]'
+                        }`}
+                      >
+                        All
+                      </button>
+                      {ELEMENT_EMOJI_CATEGORIES.map((cat) => (
+                        <button
+                          key={cat.category}
+                          onClick={() => setElementEmojiCategory(cat.category)}
+                          className={`px-2.5 py-1 text-[11px] rounded-full transition-colors font-medium ${
+                            elementEmojiCategory === cat.category
+                              ? 'bg-blue-600 text-white font-bold shadow-sm'
+                              : 'bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]'
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Emoji Grids by Category */}
+                    <div className="p-2.5 space-y-4">
+                      {filteredCategories.map((cat) => {
+                        const emojis = elementSearchQuery
+                          ? cat.emojis.filter((e) => e.includes(elementSearchQuery))
+                          : cat.emojis;
+                        if (emojis.length === 0) return null;
+
+                        return (
+                          <div key={cat.category} className="space-y-1.5">
+                            <h4 className="text-[11px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider px-1">
+                              {cat.label}
+                            </h4>
+                            <div className="grid grid-cols-5 sm:grid-cols-6 gap-2">
+                              {emojis.map((emoji, idx) => {
+                                const defaultSettings: import('@/types').ClipElementSettings = {
+                                  elementType: 'emoji',
+                                  emojiChar: emoji,
+                                  width: 140,
+                                  height: 140,
+                                  fontSize: 100,
+                                  animationIn: 'bounce_spring',
+                                  animationInDuration: 0.5,
+                                  animationLoop: 'pulse',
+                                  animationLoopSpeed: 1,
+                                  animationLoopIntensity: 30,
+                                  animationOut: 'pop_out',
+                                  animationOutDuration: 0.3,
+                                };
+                                return (
+                                  <button
+                                    key={`${cat.category}_${idx}`}
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.setData('application/procut-element', JSON.stringify(defaultSettings));
+                                      (window as any).__procutDraggingElement = {
+                                        label: emoji,
+                                        defaultSettings,
+                                      };
+                                      e.dataTransfer.effectAllowed = 'copy';
+                                    }}
+                                    onClick={() => handleEmojiClick(emoji)}
+                                    className="h-11 rounded-xl bg-[var(--theme-bg-card)] border border-[var(--theme-border)] hover:bg-[var(--theme-bg-subpanel)] hover:border-blue-500 hover:scale-110 flex items-center justify-center text-2xl transition-all shadow-sm active:scale-95"
+                                    title={`Add ${emoji} to timeline`}
+                                  >
+                                    {emoji}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Sub-tab Content: Stickers & Badges */}
+              {elementSubTab === 'stickers' && (() => {
+                const filteredStickers = ELEMENT_STICKERS.filter((s) => {
+                  if (elementSearchQuery) {
+                    const q = elementSearchQuery.toLowerCase();
+                    return s.name.toLowerCase().includes(q) || s.badge.toLowerCase().includes(q) || s.desc.toLowerCase().includes(q);
+                  }
+                  return true;
+                });
+
+                return (
+                  <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 min-h-0">
+                    <div className="text-[10px] text-[var(--theme-text-muted)] px-1">
+                      High-impact creator badges and social overlay callouts with built-in spring animations.
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
+                      {filteredStickers.map((sticker) => {
+                        return (
+                          <div
+                            key={sticker.id}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/procut-element', JSON.stringify(sticker.defaultSettings));
+                              (window as any).__procutDraggingElement = {
+                                label: sticker.name,
+                                defaultSettings: sticker.defaultSettings,
+                              };
+                              e.dataTransfer.effectAllowed = 'copy';
+                            }}
+                            onClick={() => handleElementClick({ label: sticker.name, defaultSettings: sticker.defaultSettings })}
+                            className="group flex items-center justify-between p-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-subpanel)] hover:border-blue-500/50 cursor-pointer transition-all shadow-sm"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="px-3 py-1.5 rounded-full text-xs font-black text-white shadow-sm flex items-center gap-1.5"
+                                style={{ backgroundColor: sticker.color }}
+                              >
+                                {sticker.label}
+                              </div>
+                              <div>
+                                <span className="text-xs font-bold text-[var(--theme-text-primary)] block">
+                                  {sticker.name}
+                                </span>
+                                <span className="text-[10px] text-[var(--theme-text-muted)] line-clamp-1">
+                                  {sticker.desc}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleElementClick({ label: sticker.name, defaultSettings: sticker.defaultSettings });
+                              }}
+                              className="px-2.5 py-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Add
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}

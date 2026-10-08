@@ -48,6 +48,7 @@ import { getClipDimensions } from './previewMath';
 import { resolveBlendPlan } from '@/utils/blendCompositor';
 import { applyMotionEffect } from '@/utils/motionEffects';
 import { drawTextBackground } from '@/utils/textBackgrounds';
+import { calculateElementAnimation, renderElement } from '@/utils/elementRenderer';
 import {
   findActiveTransition,
   buildTransitionPlan,
@@ -552,7 +553,7 @@ export async function renderCanvasEngine({
       });
     _cachedTextTracks = tracks.filter((t) => t.type === 'text' && !t.hidden);
     _cachedFxTracks = tracks.filter((t) => t.type === 'fx' && !t.hidden);
-    _cachedVisualTracks = [..._cachedVideoTracks, ..._cachedTextTracks];
+    _cachedVisualTracks = [..._cachedVideoTracks, ..._cachedTextTracks, ...tracks.filter((t) => ((t.type as string) === 'element' || (t as any).type === 'graphics') && !t.hidden)];
     _cachedTracksRef = tracks;
   }
   const videoTracks = _cachedVideoTracks;
@@ -787,6 +788,15 @@ export async function renderCanvasEngine({
           id: clip.mediaId,
           name: 'Text',
           type: 'text',
+          duration: clip.duration,
+          url: '',
+          createdAt: Date.now()
+        };
+      } else if (clip.elementSettings || clip.mediaId?.startsWith('elem_') || clip.id?.startsWith('clip_elem')) {
+        mediaItem = {
+          id: clip.mediaId,
+          name: clip.elementSettings?.label || clip.elementSettings?.shapeType || 'Element',
+          type: 'element' as any,
           duration: clip.duration,
           url: '',
           createdAt: Date.now()
@@ -1266,6 +1276,7 @@ export async function renderCanvasEngine({
         // projected a full-frame quad and the 3D rotate looked wrong (the glyphs
         // were warped as if they filled the canvas). Measure the text box instead,
         // mirroring previewMath.getClipDimensions.
+        const isElementClip = mediaItem.type === 'element' || !!clip.elementSettings;
         const isTextClip =
           mediaItem.type === 'text' || !!clip.textSettings || clip.mediaId === 'text-placeholder';
 
@@ -1273,7 +1284,11 @@ export async function renderCanvasEngine({
         let vh: number;
         let fitScale: number;
 
-        if (isTextClip) {
+        if (isElementClip) {
+          vw = clip.elementSettings?.width || 220;
+          vh = clip.elementSettings?.height || 160;
+          fitScale = 1;
+        } else if (isTextClip) {
           const tsm = clip.textSettings;
           const fontStyleM: string[] = [];
           if (tsm?.italic) fontStyleM.push('italic');
@@ -2674,6 +2689,20 @@ export async function renderCanvasEngine({
           ctx.restore();
         }
       }
+    } else if (mediaItem.type === 'element' || clip.elementSettings) {
+      anyClipDrawn = true;
+      const es = clip.elementSettings || {
+        elementType: 'shape',
+        shapeType: 'rounded_rect',
+        width: 220,
+        height: 160,
+        fillColor: '#3b82f6',
+      };
+      const elemW = es.width || 220;
+      const elemH = es.height || 160;
+      const anim = calculateElementAnimation(currentTime, clip.startTime, clip.duration, es);
+
+      renderElement(ctx, es, elemW, elemH, anim);
     }
 
     ctx.restore();

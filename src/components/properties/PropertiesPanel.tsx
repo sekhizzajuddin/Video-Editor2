@@ -40,6 +40,7 @@ import {
   Plus,
   RefreshCw,
   Download,
+  Shapes,
 } from 'lucide-react';
 import { formatDuration } from '@/utils/mediaHelpers';
 import { useEditorStore, findClipDeep } from '@/store/editorStore';
@@ -71,7 +72,7 @@ import { aiVocalSeparator } from '@/utils/aiVocalSeparator';
 import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
 const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
-import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult, TimelineClip } from '@/types';
+import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult, TimelineClip, ClipElementSettings, ElementShapeType, ElementAnimationIn, ElementAnimationLoop, ElementAnimationOut } from '@/types';
 import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine, getMediaTimeForClip } from '@/utils/speedRamp';
 import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
 import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
@@ -441,6 +442,11 @@ const PANEL_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
   ],
   thumbnail: [
     { id: 'thumbnail', label: 'Thumbnail' },
+  ],
+  element: [
+    { id: 'style', label: 'Style' },
+    { id: 'animation', label: 'Animation' },
+    { id: 'all', label: 'All' },
   ],
 };
 const MOBILE_SUB_TABS = PANEL_SUB_TABS;
@@ -1151,6 +1157,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     )
   );
 
+  const isElementClip = Boolean(
+    rawSelectedClip &&
+    ((selectedTrack?.type as string) === 'element' || selectedClip?.elementSettings || (selectedMediaItem as any)?.type === 'element')
+  );
+
   const isTextClip = Boolean(rawSelectedClip && (selectedTrack?.type === 'text' || selectedClip?.textSettings));
 
   const isFxClip = Boolean(rawSelectedClip && (selectedTrack?.type === 'fx' || selectedClip?.fxSettings || selectedClip?.particleSettings));
@@ -1160,6 +1171,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     !isAudioClip &&
     !isTextClip &&
     !isFxClip &&
+    !isElementClip &&
     (
       selectedMediaItem?.type === 'image' ||
       (selectedMediaItem as any)?.mimeType?.startsWith('image/') ||
@@ -1168,12 +1180,16 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     )
   );
 
-  const isVideoClip = Boolean(rawSelectedClip && !isAudioClip && !isTextClip && !isFxClip && !isImageClip);
+  const isVideoClip = Boolean(rawSelectedClip && !isAudioClip && !isTextClip && !isFxClip && !isImageClip && !isElementClip);
 
   // Check if a given tab is supported by the clip & track
   const isTabSupportedForClip = useCallback((tab: PropertiesTab, clip: any, track: any): boolean => {
     if (!rawSelectedClip || clip?.id === '__inactive_clip__') {
       return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects' || tab === 'thumbnail';
+    }
+
+    if (isElementClip || (track?.type as string) === 'element' || clip?.elementSettings) {
+      return tab === 'element' || tab === 'transform' || tab === 'effects';
     }
 
     if (isAudioClip) {
@@ -1200,9 +1216,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     
     // Standard video clip supports: transform, mask, color, speed, audio, effects
     return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects';
-  }, [rawSelectedClip, isAudioClip, isTextClip, isFxClip, isImageClip, isPipClip]);
+  }, [rawSelectedClip, isAudioClip, isTextClip, isFxClip, isImageClip, isElementClip, isPipClip]);
 
   const getDefaultTabForClip = useCallback((clip: any, track: any): PropertiesTab => {
+    if (isElementClip || (track?.type as string) === 'element' || clip?.elementSettings) {
+      return 'element';
+    }
     if (isAudioClip || track?.type === 'audio') {
       return 'audio';
     }
@@ -1213,7 +1232,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       return 'text';
     }
     return 'transform';
-  }, [isAudioClip, isFxClip, isTextClip]);
+  }, [isAudioClip, isFxClip, isTextClip, isElementClip]);
 
   // Remember user-selected tab and scroll positions so clicking similar clips does not reset view
   const lastActiveClipTab = useRef<PropertiesTab>('transform');
@@ -1248,8 +1267,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   // Auto-switch properties panel tabs only when clip selection changes and current tab is not supported
   useEffect(() => {
     if (!primarySelectedId || !rawSelectedClip) {
-      // When no clip selected: if user is on a special tab ('text' or 'pip'), switch back to 'transform'
-      if (activePropertiesTab === 'text' || activePropertiesTab === 'pip') {
+      // When no clip selected: if user is on a special tab ('text', 'element', or 'pip'), switch back to 'transform'
+      if (activePropertiesTab === 'text' || activePropertiesTab === 'pip' || activePropertiesTab === 'element') {
         setActivePropertiesTab('transform');
       }
       return;
@@ -1471,7 +1490,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   }, [selectedClipIds, selectedClipId, tracks, mediaLibrary]);
 
   const clipDisplayName = rawSelectedClip
-    ? (selectedClip?.name || selectedMediaItem?.name || (isAudioClip ? 'Audio Track' : 'Clip'))
+    ? (selectedClip?.name || selectedClip?.elementSettings?.label || selectedMediaItem?.name || (isAudioClip ? 'Audio Track' : isElementClip ? 'Element' : 'Clip'))
     : 'No clip selected';
   const clipDurationStr = formatDuration(rawSelectedClip ? (selectedClip?.duration || selectedMediaItem?.duration || 0) : 0);
   const clipResolutionStr = selectedMediaItem?.height ? `${selectedMediaItem.height}p` : '1080p';
@@ -1483,6 +1502,8 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
   if (rawSelectedClip) {
     if (isAudioClip) {
       clipMetaSubtitle = `Audio Track · ${clipDurationStr}`;
+    } else if (isElementClip) {
+      clipMetaSubtitle = `Element Layer · ${clipDurationStr}`;
     } else if (isTextClip) {
       clipMetaSubtitle = `Text Layer · ${clipDurationStr}`;
     } else if (isFxClip) {
@@ -1522,7 +1543,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   const baseTabs: { id: PropertiesTab; label: string; icon: any }[] = [];
 
-  if (rawSelectedClip && isAudioClip) {
+  if (rawSelectedClip && isElementClip) {
+    baseTabs.push({ id: 'element', label: 'Element', icon: Shapes });
+    baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+    baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
+  } else if (rawSelectedClip && isAudioClip) {
     // Audio Clips: Strictly audio-relevant features only (No visual transform, mask, color, thumbnail, pip)
     baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
     baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
@@ -8177,6 +8202,616 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             </div>
           </div>
         )}
+
+        {/* ── Element Tab (Shapes, Emojis, Stickers & Badges Configuration) ── */}
+        {currentTab === 'element' && selectedClip.elementSettings && (() => {
+          const elem = selectedClip.elementSettings;
+          const showStyle = effectiveSubTab === 'style' || effectiveSubTab === 'all' || !effectiveSubTab;
+          const showAnimation = effectiveSubTab === 'animation' || effectiveSubTab === 'all';
+
+          const updateElem = (patch: Partial<ClipElementSettings>) => {
+            updateClip(selectedClip.id, {
+              elementSettings: {
+                ...elem,
+                ...patch,
+              },
+            });
+            scheduleSaveSnapshot();
+          };
+
+          return (
+            <div className="flex flex-col gap-5">
+              {!isMobileView && (
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-[var(--theme-text-primary)] uppercase tracking-wider flex items-center gap-1.5">
+                    <Shapes className="w-3.5 h-3.5 text-blue-500" />
+                    Element Configuration
+                  </h3>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 capitalize">
+                    {elem.elementType}
+                  </span>
+                </div>
+              )}
+
+              {/* ── STYLE SUB-TAB ── */}
+              {showStyle && (
+                <div className="flex flex-col gap-4">
+                  {/* Identity & Basic Content */}
+                  <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                    <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider block">
+                      Element Identity
+                    </label>
+
+                    {elem.elementType === 'shape' && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-[var(--theme-text-muted)]">Shape Type</label>
+                        <select
+                          value={elem.shapeType || 'rectangle'}
+                          onChange={(e) => updateElem({ shapeType: e.target.value as ElementShapeType })}
+                          className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-blue-500 capitalize"
+                        >
+                          <option value="rectangle">Rectangle</option>
+                          <option value="rounded_rect">Rounded Box</option>
+                          <option value="circle">Circle</option>
+                          <option value="star">5-Point Star</option>
+                          <option value="heart">Heart</option>
+                          <option value="arrow_right">Arrow Right</option>
+                          <option value="arrow_left">Arrow Left</option>
+                          <option value="arrow_up">Arrow Up</option>
+                          <option value="arrow_down">Arrow Down</option>
+                          <option value="arrow_double">Double Arrow</option>
+                          <option value="speech_bubble">Speech Bubble</option>
+                          <option value="cloud">Cloud</option>
+                          <option value="hexagon">Hexagon</option>
+                          <option value="triangle">Triangle</option>
+                          <option value="shield">Shield</option>
+                          <option value="callout">Ribbon Banner</option>
+                          <option value="badge">Starburst Badge</option>
+                        </select>
+                      </div>
+                    )}
+
+                    {elem.elementType === 'emoji' && (
+                      <div className="space-y-3">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs text-[var(--theme-text-muted)]">Emoji Character</label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl p-1 bg-[var(--theme-bg-card)] rounded-lg border border-[var(--theme-border)] shrink-0 w-10 h-10 flex items-center justify-center">
+                              {elem.emojiChar || '😀'}
+                            </span>
+                            <input
+                              type="text"
+                              value={elem.emojiChar || ''}
+                              onChange={(e) => updateElem({ emojiChar: e.target.value, label: e.target.value })}
+                              className="flex-1 bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-blue-500"
+                              placeholder="Paste or type emoji..."
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--theme-text-muted)]">Font Size</span>
+                            <span className="text-[var(--theme-text-primary)] font-mono">{elem.fontSize || 100}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="32"
+                            max="240"
+                            value={elem.fontSize || 100}
+                            onChange={(e) => updateElem({ fontSize: Number(e.target.value) })}
+                            className="w-full accent-blue-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {(elem.elementType === 'sticker' || elem.elementType === 'badge' || elem.shapeType === 'callout') && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-[var(--theme-text-muted)]">Badge / Button Label</label>
+                        <input
+                          type="text"
+                          value={elem.label || ''}
+                          onChange={(e) => updateElem({ label: e.target.value })}
+                          className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-blue-500"
+                          placeholder="e.g. SUBSCRIBE, TURN ON, 50% OFF"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Size & Dimensions */}
+                  <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                    <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider block">
+                      Dimensions & Radius
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[var(--theme-text-muted)]">Width</span>
+                          <span className="text-[var(--theme-text-primary)] font-mono">{elem.width}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="30"
+                          max="800"
+                          value={elem.width}
+                          onChange={(e) => updateElem({ width: Number(e.target.value) })}
+                          className="w-full accent-blue-500"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[var(--theme-text-muted)]">Height</span>
+                          <span className="text-[var(--theme-text-primary)] font-mono">{elem.height}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="30"
+                          max="800"
+                          value={elem.height}
+                          onChange={(e) => updateElem({ height: Number(e.target.value) })}
+                          className="w-full accent-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    {(elem.shapeType === 'rounded_rect' || elem.shapeType === 'rectangle' || elem.elementType === 'sticker' || elem.elementType === 'badge') && (
+                      <div className="flex flex-col gap-1.5 pt-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[var(--theme-text-muted)]">Corner Radius</span>
+                          <span className="text-[var(--theme-text-primary)] font-mono">{elem.cornerRadius ?? 0}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={elem.cornerRadius ?? 0}
+                          onChange={(e) => updateElem({ cornerRadius: Number(e.target.value) })}
+                          className="w-full accent-blue-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Fill & Color (non-emoji) */}
+                  {elem.elementType !== 'emoji' && (
+                    <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider">
+                          Fill & Background
+                        </label>
+                        <div className="flex gap-1 bg-[var(--theme-bg-card)] p-0.5 rounded-lg border border-[var(--theme-border)]">
+                          {(['solid', 'gradient', 'none'] as const).map((type) => (
+                            <button
+                              key={type}
+                              onClick={() => updateElem({ fillType: type })}
+                              className={`px-2 py-0.5 text-[10px] rounded capitalize transition-colors font-semibold ${
+                                (elem.fillType || 'solid') === type
+                                  ? 'bg-blue-600 text-white shadow-sm'
+                                  : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                              }`}
+                            >
+                              {type}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {elem.fillType !== 'none' && (
+                        <div className="space-y-3 pt-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-[var(--theme-text-muted)]">
+                              {elem.fillType === 'gradient' ? 'Start Color' : 'Color'}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={elem.fillColor || '#3b82f6'}
+                                onChange={(e) => updateElem({ fillColor: e.target.value })}
+                                className="w-7 h-7 rounded-lg bg-transparent cursor-pointer border border-[var(--theme-border)]"
+                              />
+                              <input
+                                type="text"
+                                value={elem.fillColor || '#3b82f6'}
+                                onChange={(e) => updateElem({ fillColor: e.target.value })}
+                                className="w-20 px-2 py-1 text-xs font-mono bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-md text-[var(--theme-text-primary)] uppercase"
+                              />
+                            </div>
+                          </div>
+
+                          {elem.fillType === 'gradient' && (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-[var(--theme-text-muted)]">End Color</span>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="color"
+                                    value={elem.gradientEndColor || '#8b5cf6'}
+                                    onChange={(e) => updateElem({ gradientEndColor: e.target.value })}
+                                    className="w-7 h-7 rounded-lg bg-transparent cursor-pointer border border-[var(--theme-border)]"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={elem.gradientEndColor || '#8b5cf6'}
+                                    onChange={(e) => updateElem({ gradientEndColor: e.target.value })}
+                                    className="w-20 px-2 py-1 text-xs font-mono bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-md text-[var(--theme-text-primary)] uppercase"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col gap-1.5 pt-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-[var(--theme-text-muted)]">Gradient Angle</span>
+                                  <span className="text-[var(--theme-text-primary)] font-mono">{elem.gradientAngle ?? 135}°</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="360"
+                                  value={elem.gradientAngle ?? 135}
+                                  onChange={(e) => updateElem({ gradientAngle: Number(e.target.value) })}
+                                  className="w-full accent-blue-500"
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Stroke / Outline */}
+                  {elem.elementType !== 'emoji' && (
+                    <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider">
+                          Stroke / Border
+                        </label>
+                        <div className="flex gap-1 bg-[var(--theme-bg-card)] p-0.5 rounded-lg border border-[var(--theme-border)]">
+                          {(['solid', 'dashed', 'dotted'] as const).map((style) => (
+                            <button
+                              key={style}
+                              onClick={() => updateElem({ strokeStyle: style })}
+                              className={`px-2 py-0.5 text-[10px] rounded capitalize transition-colors font-semibold ${
+                                (elem.strokeStyle || 'solid') === style
+                                  ? 'bg-blue-600 text-white shadow-sm'
+                                  : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
+                              }`}
+                            >
+                              {style}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 pt-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-[var(--theme-text-muted)]">Border Color</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={elem.strokeColor || '#ffffff'}
+                              onChange={(e) => updateElem({ strokeColor: e.target.value })}
+                              className="w-7 h-7 rounded-lg bg-transparent cursor-pointer border border-[var(--theme-border)]"
+                            />
+                            <input
+                              type="text"
+                              value={elem.strokeColor || '#ffffff'}
+                              onChange={(e) => updateElem({ strokeColor: e.target.value })}
+                              className="w-20 px-2 py-1 text-xs font-mono bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-md text-[var(--theme-text-primary)] uppercase"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--theme-text-muted)]">Border Width</span>
+                            <span className="text-[var(--theme-text-primary)] font-mono">{elem.strokeWidth ?? 0}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="24"
+                            value={elem.strokeWidth ?? 0}
+                            onChange={(e) => updateElem({ strokeWidth: Number(e.target.value) })}
+                            className="w-full accent-blue-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shadow & Glow */}
+                  <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                    <label className="text-[10px] font-bold text-[var(--theme-text-muted)] uppercase tracking-wider block">
+                      Shadow & Glow
+                    </label>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[var(--theme-text-muted)]">Glow Color</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={elem.shadowColor ? (elem.shadowColor.startsWith('#') ? elem.shadowColor : '#000000') : '#000000'}
+                            onChange={(e) => updateElem({ shadowColor: e.target.value })}
+                            className="w-7 h-7 rounded-lg bg-transparent cursor-pointer border border-[var(--theme-border)]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[var(--theme-text-muted)]">Blur Radius</span>
+                          <span className="text-[var(--theme-text-primary)] font-mono">{elem.shadowBlur ?? 0}px</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="40"
+                          value={elem.shadowBlur ?? 0}
+                          onChange={(e) => updateElem({ shadowBlur: Number(e.target.value) })}
+                          className="w-full accent-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── ANIMATION SUB-TAB ── */}
+              {showAnimation && (
+                <div className="flex flex-col gap-4">
+                  {/* One-Click Animation Bundles */}
+                  <div className="p-3 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 rounded-xl border border-blue-500/30 space-y-2.5">
+                    <div className="flex items-center gap-2 text-blue-500">
+                      <Sparkles className="w-4 h-4 animate-pulse" />
+                      <span className="text-xs font-bold uppercase tracking-wider">Pro Motion Bundles</span>
+                    </div>
+                    <p className="text-[10px] text-[var(--theme-text-muted)] leading-tight">
+                      One-click cinematic entrance, continuous loop, and exit animation presets.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-1.5 pt-1">
+                      {[
+                        {
+                          name: '💥 Viral Pop',
+                          in: 'pop' as ElementAnimationIn,
+                          inDur: 0.4,
+                          loop: 'pulse' as ElementAnimationLoop,
+                          speed: 1.2,
+                          intensity: 35,
+                          out: 'pop_out' as ElementAnimationOut,
+                          outDur: 0.3,
+                        },
+                        {
+                          name: '☁️ Smooth Float',
+                          in: 'bounce_spring' as ElementAnimationIn,
+                          inDur: 0.5,
+                          loop: 'float' as ElementAnimationLoop,
+                          speed: 1.0,
+                          intensity: 40,
+                          out: 'fade_out' as ElementAnimationOut,
+                          outDur: 0.3,
+                        },
+                        {
+                          name: '⚡ Wiggle Alert',
+                          in: 'bounce_spring' as ElementAnimationIn,
+                          inDur: 0.45,
+                          loop: 'wiggle' as ElementAnimationLoop,
+                          speed: 1.8,
+                          intensity: 45,
+                          out: 'pop_out' as ElementAnimationOut,
+                          outDur: 0.3,
+                        },
+                        {
+                          name: '🔔 Pendulum Swing',
+                          in: 'slide_down' as ElementAnimationIn,
+                          inDur: 0.5,
+                          loop: 'swing' as ElementAnimationLoop,
+                          speed: 1.3,
+                          intensity: 40,
+                          out: 'slide_up' as ElementAnimationOut,
+                          outDur: 0.35,
+                        },
+                        {
+                          name: '🌀 Cosmic Spin',
+                          in: 'spin_in' as ElementAnimationIn,
+                          inDur: 0.6,
+                          loop: 'spin' as ElementAnimationLoop,
+                          speed: 1.0,
+                          intensity: 50,
+                          out: 'spin_out' as ElementAnimationOut,
+                          outDur: 0.4,
+                        },
+                        {
+                          name: '🫁 Breathing Glow',
+                          in: 'pop' as ElementAnimationIn,
+                          inDur: 0.4,
+                          loop: 'breathe' as ElementAnimationLoop,
+                          speed: 0.9,
+                          intensity: 30,
+                          out: 'fade_out' as ElementAnimationOut,
+                          outDur: 0.3,
+                        },
+                      ].map((bundle) => (
+                        <button
+                          key={bundle.name}
+                          onClick={() => {
+                            updateElem({
+                              animationIn: bundle.in,
+                              animationInDuration: bundle.inDur,
+                              animationLoop: bundle.loop,
+                              animationLoopSpeed: bundle.speed,
+                              animationLoopIntensity: bundle.intensity,
+                              animationOut: bundle.out,
+                              animationOutDuration: bundle.outDur,
+                            });
+                            toast.success(`Applied "${bundle.name}" motion preset`);
+                          }}
+                          className="px-2.5 py-2 text-[11px] font-bold rounded-lg border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:bg-[var(--theme-bg-subpanel)] hover:border-blue-500/50 text-[var(--theme-text-primary)] transition-all text-left truncate shadow-sm active:scale-95"
+                        >
+                          {bundle.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 1. Entrance Animation (IN) */}
+                  <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>▶</span> Entrance Animation (IN)
+                      </label>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <select
+                        value={elem.animationIn || 'none'}
+                        onChange={(e) => updateElem({ animationIn: e.target.value as ElementAnimationIn })}
+                        className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-emerald-500 capitalize"
+                      >
+                        <option value="none">None (Instant)</option>
+                        <option value="pop">💥 Pop / Scale In</option>
+                        <option value="bounce_spring">⚡ Bounce Spring</option>
+                        <option value="slide_up">⬆️ Slide Up</option>
+                        <option value="slide_down">⬇️ Slide Down</option>
+                        <option value="slide_left">⬅️ Slide Left</option>
+                        <option value="slide_right">➡️ Slide Right</option>
+                        <option value="spin_in">🌀 Spin In</option>
+                        <option value="expand">↔️ Expand</option>
+                      </select>
+
+                      {elem.animationIn && elem.animationIn !== 'none' && (
+                        <div className="flex flex-col gap-1.5 pt-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--theme-text-muted)]">In Duration</span>
+                            <span className="text-[var(--theme-text-primary)] font-mono">{(elem.animationInDuration ?? 0.4).toFixed(1)}s</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="2.5"
+                            step="0.05"
+                            value={elem.animationInDuration ?? 0.4}
+                            onChange={(e) => updateElem({ animationInDuration: Number(e.target.value) })}
+                            className="w-full accent-emerald-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 2. Continuous Loop Animation (LOOP) */}
+                  <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>🔄</span> Continuous Idle Loop (LOOP)
+                      </label>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <select
+                        value={elem.animationLoop || 'none'}
+                        onChange={(e) => updateElem({ animationLoop: e.target.value as ElementAnimationLoop })}
+                        className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-amber-500 capitalize"
+                      >
+                        <option value="none">None (Static)</option>
+                        <option value="pulse">💓 Heartbeat / Pulse</option>
+                        <option value="float">☁️ Float Hover</option>
+                        <option value="wiggle">🎨 Wiggle Shake</option>
+                        <option value="spin">🔄 Continuous Spin</option>
+                        <option value="swing">🔔 Swing Pendulum</option>
+                        <option value="breathe">🫁 Subtle Breathe</option>
+                      </select>
+
+                      {elem.animationLoop && elem.animationLoop !== 'none' && (
+                        <>
+                          <div className="flex flex-col gap-1.5 pt-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--theme-text-muted)]">Loop Speed</span>
+                              <span className="text-[var(--theme-text-primary)] font-mono">{(elem.animationLoopSpeed ?? 1).toFixed(1)}x</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.2"
+                              max="3.0"
+                              step="0.1"
+                              value={elem.animationLoopSpeed ?? 1}
+                              onChange={(e) => updateElem({ animationLoopSpeed: Number(e.target.value) })}
+                              className="w-full accent-amber-500"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 pt-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[var(--theme-text-muted)]">Motion Intensity</span>
+                              <span className="text-[var(--theme-text-primary)] font-mono">{elem.animationLoopIntensity ?? 40}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="10"
+                              max="100"
+                              step="5"
+                              value={elem.animationLoopIntensity ?? 40}
+                              onChange={(e) => updateElem({ animationLoopIntensity: Number(e.target.value) })}
+                              className="w-full accent-amber-500"
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 3. Exit Animation (OUT) */}
+                  <div className="p-3 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>⏹</span> Exit Animation (OUT)
+                      </label>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <select
+                        value={elem.animationOut || 'none'}
+                        onChange={(e) => updateElem({ animationOut: e.target.value as ElementAnimationOut })}
+                        className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-rose-500 capitalize"
+                      >
+                        <option value="none">None (Instant Cut)</option>
+                        <option value="fade_out">🌫️ Fade Out</option>
+                        <option value="pop_out">💥 Pop Out</option>
+                        <option value="slide_up">⬆️ Slide Up</option>
+                        <option value="slide_down">⬇️ Slide Down</option>
+                        <option value="spin_out">🌀 Spin Out</option>
+                        <option value="shrink">↔️ Shrink Collapse</option>
+                      </select>
+
+                      {elem.animationOut && elem.animationOut !== 'none' && (
+                        <div className="flex flex-col gap-1.5 pt-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--theme-text-muted)]">Out Duration</span>
+                            <span className="text-[var(--theme-text-primary)] font-mono">{(elem.animationOutDuration ?? 0.3).toFixed(1)}s</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="2.5"
+                            step="0.05"
+                            value={elem.animationOutDuration ?? 0.3}
+                            onChange={(e) => updateElem({ animationOutDuration: Number(e.target.value) })}
+                            className="w-full accent-rose-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── AI & Effects Tab ────────────────────────────────────────────── */}
         {currentTab === 'effects' && (

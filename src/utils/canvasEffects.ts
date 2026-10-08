@@ -1102,15 +1102,37 @@ export function applyFxEffect(
         break;
       }
       case 'vfx_breakdown': {
-        const split = 8 * norm;
-        const tmp = new Uint8ClampedArray(data);
+        // Cinematic before/after split wipe reveal with neon boundary line
+        const cyclePeriod = 4.0;
+        const sweepProgress = (Math.sin((relTime / cyclePeriod) * Math.PI * 2) + 1) / 2;
+        const splitX = Math.floor(w * (0.15 + 0.7 * sweepProgress));
+        
+        // Left side of split: desaturated high-contrast cool VFX look
         for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const sx = Math.min(w - 1, Math.max(0, Math.floor(x - split)));
-            const i = (y * w + x) * 4;
-            const si = (y * w + sx) * 4;
-            data[i] = tmp[si];
-            data[i + 2] = tmp[i + 2];
+          const row = y * w;
+          for (let x = 0; x < splitX; x++) {
+            const i = (row + x) * 4;
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+            data[i] = Math.min(255, (luma * 0.7 + r * 0.3) * 0.9);
+            data[i + 1] = Math.min(255, (luma * 0.8 + g * 0.2) * 1.05 + 10);
+            data[i + 2] = Math.min(255, (luma * 0.9 + b * 0.1) * 1.15 + 20);
+          }
+        }
+        
+        // Glowing cyan/white vertical boundary divider line
+        const lineW = 2;
+        for (let y = 0; y < h; y++) {
+          const row = y * w;
+          for (let lx = -lineW; lx <= lineW; lx++) {
+            const px = splitX + lx;
+            if (px >= 0 && px < w) {
+              const i = (row + px) * 4;
+              const glow = 1 - Math.abs(lx) / (lineW + 1);
+              data[i] = Math.min(255, data[i] + 180 * glow);
+              data[i + 1] = Math.min(255, data[i + 1] + 240 * glow);
+              data[i + 2] = Math.min(255, data[i + 2] + 255 * glow);
+            }
           }
         }
         break;
@@ -1158,13 +1180,34 @@ export function applyFxEffect(
         break;
       }
       case 'bw_to_color': {
-        const progress = Math.min(1, relTime / 0.6);
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i], g = data[i + 1], b = data[i + 2];
-          const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-          data[i] = luma * (1 - progress) + r * progress;
-          data[i + 1] = luma * (1 - progress) + g * progress;
-          data[i + 2] = luma * (1 - progress) + b * progress;
+        const cyclePeriod = 3.5;
+        const sweepProgress = Math.min(1, Math.max(0, (relTime % cyclePeriod) / (cyclePeriod * 0.75)));
+        const splitX = Math.floor(w * sweepProgress);
+        for (let y = 0; y < h; y++) {
+          const row = y * w;
+          for (let x = splitX; x < w; x++) {
+            const i = (row + x) * 4;
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+            data[i] = luma * norm + r * (1 - norm);
+            data[i + 1] = luma * norm + g * (1 - norm);
+            data[i + 2] = luma * norm + b * (1 - norm);
+          }
+        }
+        if (splitX > 2 && splitX < w - 2) {
+          for (let y = 0; y < h; y++) {
+            const row = y * w;
+            for (let lx = -2; lx <= 2; lx++) {
+              const px = splitX + lx;
+              if (px >= 0 && px < w) {
+                const i = (row + px) * 4;
+                const glow = 1 - Math.abs(lx) / 3;
+                data[i] = Math.min(255, data[i] + 255 * glow * norm);
+                data[i + 1] = Math.min(255, data[i + 1] + 200 * glow * norm);
+                data[i + 2] = Math.min(255, data[i + 2] + 100 * glow * norm);
+              }
+            }
+          }
         }
         break;
       }
@@ -1374,28 +1417,71 @@ export function applyFxEffect(
       }
       case 'zoom_blur': {
         const cx = w / 2, cy = h / 2;
-        const maxR = Math.sqrt(cx * cx + cy * cy);
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const dx = x - cx, dy = y - cy;
-            const r = Math.sqrt(dx * dx + dy * dy);
-            const blur = (r / maxR) * 8 * norm;
-            if (blur < 1) continue;
-            let sr = 0, sg = 0, sb = 0, count = 0;
-            for (let i = -blur; i <= blur; i += 2) {
-              const sx = Math.floor(x + (dx / r) * i);
-              const sy = Math.floor(y + (dy / r) * i);
-              if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
-                const idx = (sy * w + sx) * 4;
-                sr += data[idx]; sg += data[idx + 1]; sb += data[idx + 2];
-                count++;
+        const strength = 0.08 * norm;
+        if (strength > 0.001) {
+          const tmp = new Uint8ClampedArray(data);
+          const samples = 5;
+          for (let y = 0; y < h; y++) {
+            const dy = y - cy;
+            const rowIdx = y * w;
+            for (let x = 0; x < w; x++) {
+              const dx = x - cx;
+              let sr = 0, sg = 0, sb = 0;
+              for (let s = 0; s < samples; s++) {
+                const factor = 1 - (s / (samples - 1)) * strength;
+                const sx = Math.min(w - 1, Math.max(0, Math.round(cx + dx * factor)));
+                const sy = Math.min(h - 1, Math.max(0, Math.round(cy + dy * factor)));
+                const srcIdx = (sy * w + sx) * 4;
+                sr += tmp[srcIdx];
+                sg += tmp[srcIdx + 1];
+                sb += tmp[srcIdx + 2];
               }
+              const dstIdx = (rowIdx + x) * 4;
+              data[dstIdx] = sr / samples;
+              data[dstIdx + 1] = sg / samples;
+              data[dstIdx + 2] = sb / samples;
             }
-            if (count > 0) {
-              const idx = (y * w + x) * 4;
-              data[idx] = sr / count;
-              data[idx + 1] = sg / count;
-              data[idx + 2] = sb / count;
+          }
+        }
+        break;
+      }
+      case 'subject_outline_flash': {
+        const speed = fxSettings?.strobeSpeed || 8;
+        const strokeW = Math.max(1, Math.round((fxSettings?.outlineWidth || 3) * norm));
+        const colorHex = fxSettings?.outlineColor || '#00f0ff';
+        let cr = 0, cg = 240, cb = 255;
+        if (colorHex.startsWith('#') && colorHex.length >= 7) {
+          cr = parseInt(colorHex.slice(1, 3), 16) || 0;
+          cg = parseInt(colorHex.slice(3, 5), 16) || 240;
+          cb = parseInt(colorHex.slice(5, 7), 16) || 255;
+        }
+        const strobeWave = Math.sin(relTime * Math.PI * 2 * speed);
+        const flashIntensity = (0.5 + 0.5 * Math.abs(strobeWave)) * norm;
+        const tmp = new Uint8ClampedArray(data);
+        const step = strokeW;
+        for (let y = step; y < h - step; y += 2) {
+          const row = y * w;
+          for (let x = step; x < w - step; x += 2) {
+            const idx = (row + x) * 4;
+            const rightIdx = (row + (x + step)) * 4;
+            const downIdx = ((y + step) * w + x) * 4;
+            const diffX = Math.abs(tmp[idx] - tmp[rightIdx]) +
+                          Math.abs(tmp[idx + 1] - tmp[rightIdx + 1]) +
+                          Math.abs(tmp[idx + 2] - tmp[rightIdx + 2]);
+            const diffY = Math.abs(tmp[idx] - tmp[downIdx]) +
+                          Math.abs(tmp[idx + 1] - tmp[downIdx + 1]) +
+                          Math.abs(tmp[idx + 2] - tmp[downIdx + 2]);
+            const edgeVal = (diffX + diffY) / 6;
+            if (edgeVal > 22) {
+              const edgeAlpha = Math.min(1, (edgeVal / 70)) * flashIntensity;
+              for (let oy = 0; oy <= 1 && y + oy < h; oy++) {
+                for (let ox = 0; ox <= 1 && x + ox < w; ox++) {
+                  const targetIdx = ((y + oy) * w + (x + ox)) * 4;
+                  data[targetIdx] = Math.min(255, data[targetIdx] * (1 - edgeAlpha) + cr * edgeAlpha + 35 * flashIntensity);
+                  data[targetIdx + 1] = Math.min(255, data[targetIdx + 1] * (1 - edgeAlpha) + cg * edgeAlpha + 35 * flashIntensity);
+                  data[targetIdx + 2] = Math.min(255, data[targetIdx + 2] * (1 - edgeAlpha) + cb * edgeAlpha + 35 * flashIntensity);
+                }
+              }
             }
           }
         }
@@ -1447,25 +1533,45 @@ export function applyFxEffect(
       }
       case 'dreamy_blur': {
         const tmp = new Uint8ClampedArray(data);
-        const r = 4 * norm;
+        const blurRadius = Math.max(1, Math.round(4 * norm));
+        const hBuf = new Uint8ClampedArray(data.length);
         for (let y = 0; y < h; y++) {
+          const row = y * w;
           for (let x = 0; x < w; x++) {
             let sr = 0, sg = 0, sb = 0, count = 0;
-            for (let dy = -r; dy <= r; dy += 2) {
-              for (let dx = -r; dx <= r; dx += 2) {
-                const nx = x + dx, ny = y + dy;
-                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                  const i = (ny * w + nx) * 4;
-                  sr += tmp[i]; sg += tmp[i + 1]; sb += tmp[i + 2];
-                  count++;
-                }
+            for (let dx = -blurRadius; dx <= blurRadius; dx += 2) {
+              const nx = x + dx;
+              if (nx >= 0 && nx < w) {
+                const idx = (row + nx) * 4;
+                sr += tmp[idx]; sg += tmp[idx + 1]; sb += tmp[idx + 2];
+                count++;
               }
             }
-            const i = (y * w + x) * 4;
-            const br = sr / count, bg = sg / count, bb = sb / count;
-            data[i] = br + (tmp[i] - br) * 0.3;
-            data[i + 1] = bg + (tmp[i + 1] - bg) * 0.3;
-            data[i + 2] = bb + (tmp[i + 2] - bb) * 0.3;
+            const dst = (row + x) * 4;
+            hBuf[dst] = sr / count;
+            hBuf[dst + 1] = sg / count;
+            hBuf[dst + 2] = sb / count;
+          }
+        }
+        for (let y = 0; y < h; y++) {
+          const row = y * w;
+          for (let x = 0; x < w; x++) {
+            let sr = 0, sg = 0, sb = 0, count = 0;
+            for (let dy = -blurRadius; dy <= blurRadius; dy += 2) {
+              const ny = y + dy;
+              if (ny >= 0 && ny < h) {
+                const idx = (ny * w + x) * 4;
+                sr += hBuf[idx]; sg += hBuf[idx + 1]; sb += hBuf[idx + 2];
+                count++;
+              }
+            }
+            const dst = (row + x) * 4;
+            const br = sr / count;
+            const bg = sg / count;
+            const bb = sb / count;
+            data[dst] = Math.min(255, tmp[dst] * 0.6 + br * 0.4 + (br > 130 ? 25 * norm : 0));
+            data[dst + 1] = Math.min(255, tmp[dst + 1] * 0.6 + bg * 0.4 + (bg > 130 ? 20 * norm : 0));
+            data[dst + 2] = Math.min(255, tmp[dst + 2] * 0.6 + bb * 0.4 + (bb > 130 ? 30 * norm : 0));
           }
         }
         break;

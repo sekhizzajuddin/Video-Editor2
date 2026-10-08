@@ -105,9 +105,11 @@ function getSpeedRampMediaTime(
 }
 
 export interface RenderLayer {
-  type: 'video' | 'text' | 'image' | 'adjustment' | 'fx';
+  type: 'video' | 'text' | 'image' | 'adjustment' | 'fx' | 'element';
   frame?: CanvasImageSource | VideoFrame; // For video/image
   textData?: any;     // For text
+  elementSettings?: any; // For element
+  clipData?: any;
   /** Absolute timeline time (seconds) this layer is being evaluated at.
    *  Text layers use it to drive entry/exit animation progress; video layers
    *  use it (with `startTime`) to drive time-based FX and particles. */
@@ -735,6 +737,21 @@ export class FrameScheduler {
               type: 'text',
               textData: clip,
               timestampSeconds: t,
+              opacity,
+              transform,
+              ...visualSettings,
+              zIndex,
+              order: layerOrder,
+              transitionGeometry,
+              blendMode,
+            });
+          } else if (clip.elementSettings || track.type === 'element' || (clip as any).type === 'element') {
+            layers.push({
+              type: 'element',
+              elementSettings: clip.elementSettings,
+              clipData: clip,
+              timestampSeconds: t,
+              startTime: st,
               opacity,
               transform,
               ...visualSettings,
