@@ -73,6 +73,7 @@ import { analyzeAndDuckAudio } from '@/utils/aiAudioDucking';
 const AiSoundDesigner = lazy(() => import('@/components/AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AiMotionGraphicsDesigner = lazy(() => import('@/components/AiMotionGraphicsDesigner').then(m => ({ default: m.AiMotionGraphicsDesigner })));
 import type { PropertiesTab, ClipKenBurnsSettings, ClipAudioSettings, CornerPoints, VoiceTuneResult, TimelineClip, ClipElementSettings, ElementShapeType, ElementAnimationIn, ElementAnimationLoop, ElementAnimationOut, EmojiEmotionType, SocialBadgePlatform, SocialBadgeType } from '@/types';
+import { SHAPE_VARIANTS, ShapeVariantOption } from '@/constants/elements';
 import { getRampedClipSourceSpan, getSpeedRampEngine, SpeedRampEngine, getMediaTimeForClip } from '@/utils/speedRamp';
 import { analyzeClipsForVocalMatch } from '@/utils/vocalTone';
 import { VocalToneSection, type VocalMatchRow } from '@/components/properties/tabs/audio/VocalToneSection';
@@ -8260,62 +8261,79 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     {elem.elementType === 'shape' && (
                       <div className="space-y-3">
                         <div className="flex flex-col gap-1.5">
-                          <label className="text-xs text-[var(--theme-text-muted)]">Shape Geometry</label>
+                          <label className="text-xs text-[var(--theme-text-muted)]">Shape Family</label>
                           <select
                             value={elem.shapeType || 'rectangle'}
-                            onChange={(e) => updateElem({ shapeType: e.target.value as ElementShapeType })}
+                            onChange={(e) => {
+                              const newType = e.target.value as ElementShapeType;
+                              const defaultVariant = SHAPE_VARIANTS[newType]?.[0]?.id;
+                              updateElem({ shapeType: newType, shapeVariant: defaultVariant });
+                            }}
                             className="w-full bg-[var(--theme-bg-card)] text-xs text-[var(--theme-text-primary)] border border-[var(--theme-border)] rounded-lg p-2 focus:outline-none focus:border-blue-500 capitalize"
                           >
-                            <option value="rectangle">Rectangle</option>
-                            <option value="rounded_rect">Rounded Box</option>
-                            <option value="circle">Circle</option>
-                            <option value="ellipse">Ellipse</option>
-                            <option value="star">Parametric Star</option>
-                            <option value="heart">Heart</option>
-                            <option value="hexagon">Polygon (Hexagon/Triangle/Octagon)</option>
-                            <option value="triangle">Triangle</option>
-                            <option value="arrow">Arrow (Directional)</option>
-                            <option value="arrow_double">Double-Headed Arrow</option>
-                            <option value="speech_bubble">Speech Bubble</option>
-                            <option value="thought_bubble">Thought Cloud</option>
-                            <option value="shield">Crest Shield</option>
-                            <option value="callout">Ribbon Banner</option>
-                            <option value="badge">Starburst Rosette Badge</option>
+                            <option value="rectangle">Rectangle & Quadrilaterals</option>
+                            <option value="triangle">Triangle Family</option>
+                            <option value="rounded_rect">Rounded Boxes & Stadiums</option>
+                            <option value="circle">Circle & Curvatures</option>
+                            <option value="ellipse">Ellipse & Ovals</option>
+                            <option value="star">Star & Sparkles</option>
+                            <option value="hexagon">Polygon Family (Hexagon, Pentagon, Octagon...)</option>
+                            <option value="arrow">Arrow & Pointers</option>
+                            <option value="arrow_double">Double-Headed Arrows</option>
+                            <option value="speech_bubble">Speech & Thought Callouts</option>
+                            <option value="shield">Shields & Heraldic Crests</option>
+                            <option value="heart">Heart Variations</option>
+                            <option value="callout">Ribbon Banners & Flags</option>
+                            <option value="badge">Starburst Rosettes & Seals</option>
                           </select>
                         </div>
 
-                        {/* Shape Variant / Style */}
-                        <div className="flex flex-col gap-1.5">
-                          <label className="text-xs text-[var(--theme-text-muted)]">Shape Style Variant</label>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {[
-                              { id: undefined, label: 'Default Solid' },
-                              { id: 'cut_corners', label: 'Cyber Cut-Corners' },
-                              { id: 'sharp_star', label: 'Sharp Sparkle' },
-                              { id: 'hollow_border', label: 'Transparent Border' },
-                            ].map((variant) => (
-                              <button
-                                key={variant.label}
-                                onClick={() => {
-                                  if (variant.id === 'hollow_border') {
-                                    updateElem({ fillType: 'none', strokeWidth: Math.max(3, elem.strokeWidth || 3) });
-                                  } else if (variant.id === 'sharp_star') {
-                                    updateElem({ shapeType: 'star', starPoints: 4, starInnerRadiusRatio: 0.18 });
-                                  } else {
-                                    updateElem({ shapeVariant: variant.id });
-                                  }
-                                }}
-                                className={`px-2 py-1.5 text-[10px] font-semibold rounded-lg border transition-all text-left truncate ${
-                                  elem.shapeVariant === variant.id || (variant.id === 'hollow_border' && elem.fillType === 'none')
-                                    ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
-                                    : 'bg-[var(--theme-bg-card)] border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)]'
-                                }`}
-                              >
-                                {variant.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                        {/* Geometric Shape Variants */}
+                        {(() => {
+                          const activeShape = (elem.shapeType || 'rectangle') as ElementShapeType;
+                          const availableVariants: ShapeVariantOption[] = SHAPE_VARIANTS[activeShape] || [];
+                          if (availableVariants.length === 0) return null;
+
+                          return (
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-[var(--theme-text-primary)] flex items-center gap-1.5">
+                                  <span>📐</span> Geometric Variant ({availableVariants.length})
+                                </label>
+                                <span className="text-[10px] text-blue-400 font-mono">
+                                  {availableVariants.find((v: ShapeVariantOption) => v.id === elem.shapeVariant)?.label || availableVariants[0]?.label}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-1.5 max-h-52 overflow-y-auto pr-0.5 custom-scrollbar">
+                                {availableVariants.map((variant: ShapeVariantOption) => {
+                                  const isSelected =
+                                    elem.shapeVariant === variant.id ||
+                                    (!elem.shapeVariant && variant.id === availableVariants[0].id);
+
+                                  return (
+                                    <button
+                                      key={variant.id}
+                                      onClick={() => updateElem({ shapeVariant: variant.id })}
+                                      className={`px-2.5 py-2 text-left rounded-lg border transition-all ${
+                                        isSelected
+                                          ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                                          : 'bg-[var(--theme-bg-card)] border-[var(--theme-border)] text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:border-blue-500/40'
+                                      }`}
+                                    >
+                                      <span className="block text-[11px] font-bold truncate">
+                                        {variant.label}
+                                      </span>
+                                      <span className={`block text-[9px] truncate ${isSelected ? 'text-blue-100' : 'text-[var(--theme-text-muted)]'}`}>
+                                        {variant.desc}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
 

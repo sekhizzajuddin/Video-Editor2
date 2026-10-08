@@ -384,28 +384,63 @@ export function traceShapePath(
 ) {
   const hw = w / 2;
   const hh = h / 2;
+  const variant = settings?.shapeVariant;
   ctx.beginPath();
 
   switch (shapeType) {
-    case 'rectangle': {
-      if (settings?.shapeVariant === 'cut_corners') {
-        const c = Math.min(cornerRadius || 18, hw * 0.4, hh * 0.4);
-        ctx.moveTo(-hw + c, -hh);
-        ctx.lineTo(hw - c, -hh);
-        ctx.lineTo(hw, -hh + c);
-        ctx.lineTo(hw, hh - c);
-        ctx.lineTo(hw - c, hh);
-        ctx.lineTo(-hw + c, hh);
-        ctx.lineTo(-hw, hh - c);
-        ctx.lineTo(-hw, -hh + c);
-        ctx.closePath();
-      } else {
-        ctx.rect(-hw, -hh, w, h);
-      }
-      break;
-    }
+    case 'rectangle':
     case 'rounded_rect': {
-      if (settings?.shapeVariant === 'cut_corners') {
+      if (variant === 'square') {
+        const s = Math.min(w, h);
+        const hs = s / 2;
+        const r = Math.min(cornerRadius, hs);
+        if (r > 0 && typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-hs, -hs, s, s, r);
+        } else {
+          ctx.rect(-hs, -hs, s, s);
+        }
+      } else if (variant === 'parallelogram') {
+        const skew = hw * 0.35;
+        ctx.moveTo(-hw + skew, -hh);
+        ctx.lineTo(hw, -hh);
+        ctx.lineTo(hw - skew, hh);
+        ctx.lineTo(-hw, hh);
+        ctx.closePath();
+      } else if (variant === 'rhombus' || variant === 'diamond') {
+        ctx.moveTo(0, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(0, hh);
+        ctx.lineTo(-hw, 0);
+        ctx.closePath();
+      } else if (variant === 'trapezoid') {
+        const topW = hw * 0.55;
+        ctx.moveTo(-topW, -hh);
+        ctx.lineTo(topW, -hh);
+        ctx.lineTo(hw, hh);
+        ctx.lineTo(-hw, hh);
+        ctx.closePath();
+      } else if (variant === 'inverted_trapezoid') {
+        const botW = hw * 0.55;
+        ctx.moveTo(-hw, -hh);
+        ctx.lineTo(hw, -hh);
+        ctx.lineTo(botW, hh);
+        ctx.lineTo(-botW, hh);
+        ctx.closePath();
+      } else if (variant === 'kite') {
+        const shoulderY = -hh * 0.25;
+        ctx.moveTo(0, -hh);
+        ctx.lineTo(hw, shoulderY);
+        ctx.lineTo(0, hh);
+        ctx.lineTo(-hw, shoulderY);
+        ctx.closePath();
+      } else if (variant === 'pill') {
+        const r = Math.min(hw, hh);
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-hw, -hh, w, h, r);
+        } else {
+          ctx.rect(-hw, -hh, w, h);
+        }
+      } else if (variant === 'cut_corners') {
         const c = Math.min(cornerRadius || 22, hw * 0.4, hh * 0.4);
         ctx.moveTo(-hw + c, -hh);
         ctx.lineTo(hw - c, -hh);
@@ -417,7 +452,7 @@ export function traceShapePath(
         ctx.lineTo(-hw, -hh + c);
         ctx.closePath();
       } else {
-        const r = Math.min(cornerRadius, hw, hh);
+        const r = shapeType === 'rounded_rect' ? Math.min(cornerRadius, hw, hh) : 0;
         if (r <= 0) {
           ctx.rect(-hw, -hh, w, h);
         } else if (typeof ctx.roundRect === 'function') {
@@ -433,19 +468,102 @@ export function traceShapePath(
       }
       break;
     }
-    case 'circle': {
-      const radius = Math.min(hw, hh);
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+
+    case 'triangle': {
+      if (variant === 'right' || variant === 'right_triangle') {
+        // 90° perpendicular corner at bottom-left (-hw, hh)
+        ctx.moveTo(-hw, hh);
+        ctx.lineTo(-hw, -hh);
+        ctx.lineTo(hw, hh);
+        ctx.closePath();
+      } else if (variant === 'isosceles') {
+        // Tall isosceles triangle with narrow base
+        const baseHalf = hw * 0.55;
+        ctx.moveTo(0, -hh);
+        ctx.lineTo(baseHalf, hh);
+        ctx.lineTo(-baseHalf, hh);
+        ctx.closePath();
+      } else if (variant === 'acute' || variant === 'scalene') {
+        // Asymmetric scalene acute triangle
+        ctx.moveTo(-hw * 0.25, -hh);
+        ctx.lineTo(hw, hh * 0.85);
+        ctx.lineTo(-hw, hh);
+        ctx.closePath();
+      } else if (variant === 'obtuse') {
+        // Obtuse triangle with wide baseline and shallow skewed peak
+        ctx.moveTo(hw * 0.45, -hh * 0.35);
+        ctx.lineTo(hw, hh);
+        ctx.lineTo(-hw, hh);
+        ctx.closePath();
+      } else if (variant === 'inverted') {
+        // Inverted downward-pointing triangle
+        ctx.moveTo(-hw, -hh);
+        ctx.lineTo(hw, -hh);
+        ctx.lineTo(0, hh);
+        ctx.closePath();
+      } else {
+        // Default: Equilateral-style symmetric triangle
+        ctx.moveTo(0, -hh);
+        ctx.lineTo(hw, hh);
+        ctx.lineTo(-hw, hh);
+        ctx.closePath();
+      }
       break;
     }
+
+    case 'circle':
     case 'ellipse': {
-      ctx.ellipse(0, 0, hw, hh, 0, 0, Math.PI * 2);
+      if (variant === 'horizontal_oval') {
+        ctx.ellipse(0, 0, hw, hh * 0.65, 0, 0, Math.PI * 2);
+      } else if (variant === 'vertical_oval') {
+        ctx.ellipse(0, 0, hw * 0.65, hh, 0, 0, Math.PI * 2);
+      } else if (variant === 'semicircle') {
+        const r = Math.min(hw, hh);
+        ctx.arc(0, hh * 0.3, r, Math.PI, 0, false);
+        ctx.closePath();
+      } else if (variant === 'crescent') {
+        const r = Math.min(hw, hh);
+        ctx.arc(0, 0, r, -Math.PI * 0.4, Math.PI * 0.4, false);
+        ctx.bezierCurveTo(r * 0.35, r * 0.5, r * 0.35, -r * 0.5, Math.cos(-Math.PI * 0.4) * r, Math.sin(-Math.PI * 0.4) * r);
+        ctx.closePath();
+      } else if (variant === 'pill') {
+        const r = Math.min(hw, hh);
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(-hw, -hh, w, h, r);
+        } else {
+          ctx.rect(-hw, -hh, w, h);
+        }
+      } else if (shapeType === 'circle' || variant === 'circle') {
+        const radius = Math.min(hw, hh);
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      } else {
+        ctx.ellipse(0, 0, hw, hh, 0, 0, Math.PI * 2);
+      }
       break;
     }
+
     case 'star': {
-      const points = Math.max(3, Math.min(24, settings?.starPoints || 5));
+      let points = Math.max(3, Math.min(24, settings?.starPoints || 5));
+      let innerRatio = Math.max(0.1, Math.min(0.85, settings?.starInnerRadiusRatio ?? 0.42));
+
+      if (variant === 'sparkle_4') {
+        points = 4;
+        innerRatio = 0.18;
+      } else if (variant === 'compass_8') {
+        points = 8;
+        innerRatio = 0.36;
+      } else if (variant === 'seal_12') {
+        points = 12;
+        innerRatio = 0.78;
+      } else if (variant === 'sharp_needle') {
+        points = 5;
+        innerRatio = 0.16;
+      } else if (variant === 'soft_puffy') {
+        points = 5;
+        innerRatio = 0.62;
+      }
+
       const outerR = Math.min(hw, hh);
-      const innerRatio = Math.max(0.1, Math.min(0.85, settings?.starInnerRadiusRatio ?? 0.42));
       const innerR = outerR * innerRatio;
       const step = Math.PI / points;
       let angle = -Math.PI / 2;
@@ -459,16 +577,38 @@ export function traceShapePath(
       ctx.closePath();
       break;
     }
+
     case 'heart': {
-      const s = Math.min(w / 100, h / 100) * 0.9;
-      ctx.moveTo(0, 28 * s);
-      ctx.bezierCurveTo(-45 * s, -15 * s, -55 * s, -45 * s, 0, -20 * s);
-      ctx.bezierCurveTo(55 * s, -45 * s, 45 * s, -15 * s, 0, 28 * s);
-      ctx.closePath();
+      if (variant === 'deep_cleft') {
+        const s = Math.min(w / 100, h / 100) * 0.9;
+        ctx.moveTo(0, 32 * s);
+        ctx.bezierCurveTo(-50 * s, -10 * s, -60 * s, -55 * s, 0, -10 * s);
+        ctx.bezierCurveTo(60 * s, -55 * s, 50 * s, -10 * s, 0, 32 * s);
+        ctx.closePath();
+      } else if (variant === 'round_chubby') {
+        const s = Math.min(w / 100, h / 100) * 0.88;
+        ctx.moveTo(0, 24 * s);
+        ctx.bezierCurveTo(-45 * s, -18 * s, -50 * s, -40 * s, 0, -26 * s);
+        ctx.bezierCurveTo(50 * s, -40 * s, 45 * s, -18 * s, 0, 24 * s);
+        ctx.closePath();
+      } else {
+        const s = Math.min(w / 100, h / 100) * 0.9;
+        ctx.moveTo(0, 28 * s);
+        ctx.bezierCurveTo(-45 * s, -15 * s, -55 * s, -45 * s, 0, -20 * s);
+        ctx.bezierCurveTo(55 * s, -45 * s, 45 * s, -15 * s, 0, 28 * s);
+        ctx.closePath();
+      }
       break;
     }
+
     case 'hexagon': {
-      const sides = Math.max(3, Math.min(16, settings?.polygonSides || 6));
+      let sides = Math.max(3, Math.min(16, settings?.polygonSides || 6));
+      if (variant === 'pentagon') sides = 5;
+      else if (variant === 'octagon') sides = 8;
+      else if (variant === 'heptagon') sides = 7;
+      else if (variant === 'decagon') sides = 10;
+      else if (variant === 'dodecagon') sides = 12;
+
       const r = Math.min(hw, hh);
       for (let i = 0; i < sides; i++) {
         const a = (i * 2 * Math.PI) / sides - Math.PI / 2;
@@ -480,88 +620,195 @@ export function traceShapePath(
       ctx.closePath();
       break;
     }
-    case 'triangle': {
-      ctx.moveTo(0, -hh);
-      ctx.lineTo(hw, hh);
-      ctx.lineTo(-hw, hh);
-      ctx.closePath();
-      break;
-    }
+
     case 'arrow': {
-      const shaftH = hh * Math.max(0.2, Math.min(0.8, settings?.arrowTailWidth ? settings.arrowTailWidth / 100 : 0.45));
-      const headL = hw * Math.max(0.2, Math.min(0.8, settings?.arrowHeadSize ? settings.arrowHeadSize / 100 : 0.55));
-      ctx.moveTo(-hw, -shaftH);
-      ctx.lineTo(hw - headL, -shaftH);
-      ctx.lineTo(hw - headL, -hh);
-      ctx.lineTo(hw, 0);
-      ctx.lineTo(hw - headL, hh);
-      ctx.lineTo(hw - headL, shaftH);
-      ctx.lineTo(-hw, shaftH);
-      ctx.closePath();
+      if (variant === 'chevron') {
+        const depth = hw * 0.45;
+        ctx.moveTo(-hw, -hh);
+        ctx.lineTo(hw - depth, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(hw - depth, hh);
+        ctx.lineTo(-hw, hh);
+        ctx.lineTo(-hw + depth, 0);
+        ctx.closePath();
+      } else if (variant === 'steep_arrow') {
+        const shaftH = hh * 0.3;
+        const headL = hw * 0.75;
+        ctx.moveTo(-hw, -shaftH);
+        ctx.lineTo(hw - headL, -shaftH);
+        ctx.lineTo(hw - headL, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(hw - headL, hh);
+        ctx.lineTo(hw - headL, shaftH);
+        ctx.lineTo(-hw, shaftH);
+        ctx.closePath();
+      } else if (variant === 'fat_arrow') {
+        const shaftH = hh * 0.6;
+        const headL = hw * 0.45;
+        ctx.moveTo(-hw, -shaftH);
+        ctx.lineTo(hw - headL, -shaftH);
+        ctx.lineTo(hw - headL, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(hw - headL, hh);
+        ctx.lineTo(hw - headL, shaftH);
+        ctx.lineTo(-hw, shaftH);
+        ctx.closePath();
+      } else if (variant === 'notch_arrow') {
+        const shaftH = hh * 0.4;
+        const headL = hw * 0.55;
+        const notch = hw * 0.25;
+        ctx.moveTo(-hw, -shaftH);
+        ctx.lineTo(hw - headL, -shaftH);
+        ctx.lineTo(hw - headL, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(hw - headL, hh);
+        ctx.lineTo(hw - headL, shaftH);
+        ctx.lineTo(-hw, shaftH);
+        ctx.lineTo(-hw + notch, 0);
+        ctx.closePath();
+      } else {
+        const shaftH = hh * Math.max(0.2, Math.min(0.8, settings?.arrowTailWidth ? settings.arrowTailWidth / 100 : 0.45));
+        const headL = hw * Math.max(0.2, Math.min(0.8, settings?.arrowHeadSize ? settings.arrowHeadSize / 100 : 0.55));
+        ctx.moveTo(-hw, -shaftH);
+        ctx.lineTo(hw - headL, -shaftH);
+        ctx.lineTo(hw - headL, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(hw - headL, hh);
+        ctx.lineTo(hw - headL, shaftH);
+        ctx.lineTo(-hw, shaftH);
+        ctx.closePath();
+      }
       break;
     }
+
     case 'arrow_double': {
-      const shaftH = hh * 0.4;
-      const headL = hw * 0.4;
-      ctx.moveTo(-hw, 0);
-      ctx.lineTo(-hw + headL, -hh);
-      ctx.lineTo(-hw + headL, -shaftH);
-      ctx.lineTo(hw - headL, -shaftH);
-      ctx.lineTo(hw - headL, -hh);
-      ctx.lineTo(hw, 0);
-      ctx.lineTo(hw - headL, hh);
-      ctx.lineTo(hw - headL, shaftH);
-      ctx.lineTo(-hw + headL, shaftH);
-      ctx.lineTo(-hw + headL, hh);
-      ctx.closePath();
+      if (variant === 'steep_double') {
+        const shaftH = hh * 0.28;
+        const headL = hw * 0.55;
+        ctx.moveTo(-hw, 0);
+        ctx.lineTo(-hw + headL, -hh);
+        ctx.lineTo(-hw + headL, -shaftH);
+        ctx.lineTo(hw - headL, -shaftH);
+        ctx.lineTo(hw - headL, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(hw - headL, hh);
+        ctx.lineTo(hw - headL, shaftH);
+        ctx.lineTo(-hw + headL, shaftH);
+        ctx.lineTo(-hw + headL, hh);
+        ctx.closePath();
+      } else {
+        const shaftH = hh * 0.4;
+        const headL = hw * 0.4;
+        ctx.moveTo(-hw, 0);
+        ctx.lineTo(-hw + headL, -hh);
+        ctx.lineTo(-hw + headL, -shaftH);
+        ctx.lineTo(hw - headL, -shaftH);
+        ctx.lineTo(hw - headL, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(hw - headL, hh);
+        ctx.lineTo(hw - headL, shaftH);
+        ctx.lineTo(-hw + headL, shaftH);
+        ctx.lineTo(-hw + headL, hh);
+        ctx.closePath();
+      }
       break;
     }
-    case 'speech_bubble': {
-      const r = Math.min(cornerRadius || 18, hw * 0.5, hh * 0.5);
-      const tailW = hw * 0.35;
-      const tailH = hh * 0.35;
-      const boxBottom = hh - tailH;
-      ctx.moveTo(-hw + r, -hh);
-      ctx.lineTo(hw - r, -hh);
-      ctx.arcTo(hw, -hh, hw, boxBottom, r);
-      ctx.arcTo(hw, boxBottom, -hw, boxBottom, r);
-      ctx.lineTo(-hw * 0.1, boxBottom);
-      ctx.lineTo(-hw * 0.35, hh);
-      ctx.lineTo(-hw * 0.35, boxBottom);
-      ctx.lineTo(-hw + r, boxBottom);
-      ctx.arcTo(-hw, boxBottom, -hw, -hh, r);
-      ctx.arcTo(-hw, -hh, hw, -hh, r);
-      ctx.closePath();
-      break;
-    }
+
+    case 'speech_bubble':
     case 'thought_bubble': {
-      ctx.ellipse(0, -hh * 0.2, hw * 0.9, hh * 0.65, 0, 0, Math.PI * 2);
-      ctx.closePath();
+      if (variant === 'comic_shout') {
+        const n = 16;
+        const outerR = Math.min(hw, hh);
+        const innerR = outerR * 0.68;
+        const step = Math.PI / n;
+        for (let i = 0; i < n * 2; i++) {
+          const r = i % 2 === 0 ? outerR : innerR;
+          const a = i * step;
+          const px = Math.cos(a) * (hw / outerR * r);
+          const py = Math.sin(a) * (hh / outerR * r);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+      } else if (shapeType === 'thought_bubble') {
+        ctx.ellipse(0, -hh * 0.2, hw * 0.9, hh * 0.65, 0, 0, Math.PI * 2);
+        ctx.closePath();
+      } else {
+        const r = Math.min(cornerRadius || 18, hw * 0.5, hh * 0.5);
+        const tailW = hw * 0.35;
+        const tailH = hh * 0.35;
+        const boxBottom = hh - tailH;
+        ctx.moveTo(-hw + r, -hh);
+        ctx.lineTo(hw - r, -hh);
+        ctx.arcTo(hw, -hh, hw, boxBottom, r);
+        ctx.arcTo(hw, boxBottom, -hw, boxBottom, r);
+        ctx.lineTo(-hw * 0.1, boxBottom);
+        ctx.lineTo(-hw * 0.35, hh);
+        ctx.lineTo(-hw * 0.35, boxBottom);
+        ctx.lineTo(-hw + r, boxBottom);
+        ctx.arcTo(-hw, boxBottom, -hw, -hh, r);
+        ctx.arcTo(-hw, -hh, hw, -hh, r);
+        ctx.closePath();
+      }
       break;
     }
+
     case 'shield': {
-      ctx.moveTo(0, -hh);
-      ctx.lineTo(hw, -hh);
-      ctx.bezierCurveTo(hw, hh * 0.3, hw * 0.5, hh * 0.8, 0, hh);
-      ctx.bezierCurveTo(-hw * 0.5, hh * 0.8, -hw, hh * 0.3, -hw, -hh);
-      ctx.closePath();
+      if (variant === 'round_bottom') {
+        ctx.moveTo(-hw, -hh);
+        ctx.lineTo(hw, -hh);
+        ctx.lineTo(hw, hh * 0.2);
+        ctx.bezierCurveTo(hw, hh, -hw, hh, -hw, hh * 0.2);
+        ctx.closePath();
+      } else if (variant === 'pointed_crest') {
+        ctx.moveTo(0, -hh * 0.7);
+        ctx.quadraticCurveTo(hw * 0.5, -hh, hw, -hh * 0.85);
+        ctx.lineTo(hw, hh * 0.2);
+        ctx.bezierCurveTo(hw, hh * 0.7, hw * 0.4, hh * 0.9, 0, hh);
+        ctx.bezierCurveTo(-hw * 0.4, hh * 0.9, -hw, hh * 0.7, -hw, hh * 0.2);
+        ctx.lineTo(-hw, -hh * 0.85);
+        ctx.quadraticCurveTo(-hw * 0.5, -hh, 0, -hh * 0.7);
+        ctx.closePath();
+      } else if (variant === 'banner_swallowtail') {
+        ctx.moveTo(-hw, -hh);
+        ctx.lineTo(hw, -hh);
+        ctx.lineTo(hw, hh);
+        ctx.lineTo(0, hh * 0.4);
+        ctx.lineTo(-hw, hh);
+        ctx.closePath();
+      } else {
+        ctx.moveTo(0, -hh);
+        ctx.lineTo(hw, -hh);
+        ctx.bezierCurveTo(hw, hh * 0.3, hw * 0.5, hh * 0.8, 0, hh);
+        ctx.bezierCurveTo(-hw * 0.5, hh * 0.8, -hw, hh * 0.3, -hw, -hh);
+        ctx.closePath();
+      }
       break;
     }
+
     case 'callout': {
-      const indent = hw * 0.2;
-      ctx.moveTo(-hw, -hh);
-      ctx.lineTo(hw, -hh);
-      ctx.lineTo(hw - indent, 0);
-      ctx.lineTo(hw, hh);
-      ctx.lineTo(-hw, hh);
-      ctx.lineTo(-hw + indent, 0);
-      ctx.closePath();
+      if (variant === 'pennant') {
+        ctx.moveTo(-hw, -hh);
+        ctx.lineTo(hw, 0);
+        ctx.lineTo(-hw, hh);
+        ctx.closePath();
+      } else {
+        const indent = hw * 0.2;
+        ctx.moveTo(-hw, -hh);
+        ctx.lineTo(hw, -hh);
+        ctx.lineTo(hw - indent, 0);
+        ctx.lineTo(hw, hh);
+        ctx.lineTo(-hw, hh);
+        ctx.lineTo(-hw + indent, 0);
+        ctx.closePath();
+      }
       break;
     }
+
     case 'badge': {
       const outerR = Math.min(hw, hh);
-      const innerR = outerR * 0.82;
-      const n = 14;
+      const innerR = variant === 'seal_16' ? outerR * 0.88 : outerR * 0.82;
+      const n = variant === 'seal_16' ? 16 : 14;
       const step = Math.PI / n;
       for (let i = 0; i < n * 2; i++) {
         const r = i % 2 === 0 ? outerR : innerR;
@@ -574,10 +821,12 @@ export function traceShapePath(
       ctx.closePath();
       break;
     }
+
     case 'line': {
       ctx.rect(-hw, -hh * 0.2, w, hh * 0.4);
       break;
     }
+
     default: {
       ctx.rect(-hw, -hh, w, h);
       break;

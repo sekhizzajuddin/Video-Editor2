@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ELEMENT_SHAPES, ELEMENT_EMOJI_CATEGORIES, ELEMENT_STICKERS } from '@/constants/elements';
-import { calculateElementAnimation } from '@/utils/elementRenderer';
+import { ELEMENT_SHAPES, ELEMENT_EMOJI_CATEGORIES, ELEMENT_STICKERS, SHAPE_VARIANTS } from '@/constants/elements';
+import { calculateElementAnimation, traceShapePath } from '@/utils/elementRenderer';
 import { applyFxEffect } from '@/utils/canvasEffects';
 import { FX_EFFECTS } from '@/constants/mediaPanel';
 import { ClipElementSettings } from '@/types';
@@ -319,3 +319,104 @@ describe('Premium Animation Eases & Curves', () => {
     expect(slamStart.scaleX).toBeGreaterThan(1.2); // starts big before slam
   });
 });
+
+describe('Geometric Shape Variants Engine', () => {
+  it('defines mathematical shape variants for triangles, rectangles, stars, polygons, and arrows', () => {
+    // Triangle variants: Equilateral, Right, Isosceles, Acute/Scalene, Obtuse, Inverted
+    const triangleVariants = SHAPE_VARIANTS.triangle.map(v => v.id);
+    expect(triangleVariants).toContain('equilateral');
+    expect(triangleVariants).toContain('right');
+    expect(triangleVariants).toContain('isosceles');
+    expect(triangleVariants).toContain('acute');
+    expect(triangleVariants).toContain('obtuse');
+    expect(triangleVariants).toContain('inverted');
+
+    // Rectangle / quadrilateral variants: Rectangle, Square, Parallelogram, Rhombus, Trapezoid, Kite, etc.
+    const rectVariants = SHAPE_VARIANTS.rectangle.map(v => v.id);
+    expect(rectVariants).toContain('rectangle');
+    expect(rectVariants).toContain('square');
+    expect(rectVariants).toContain('parallelogram');
+    expect(rectVariants).toContain('rhombus');
+    expect(rectVariants).toContain('trapezoid');
+    expect(rectVariants).toContain('inverted_trapezoid');
+    expect(rectVariants).toContain('kite');
+    expect(rectVariants).toContain('cut_corners');
+
+    // Star variants
+    const starVariants = SHAPE_VARIANTS.star.map(v => v.id);
+    expect(starVariants).toContain('classic_5');
+    expect(starVariants).toContain('sparkle_4');
+    expect(starVariants).toContain('compass_8');
+    expect(starVariants).toContain('seal_12');
+  });
+
+  it('correctly executes traceShapePath on canvas context for all geometric variants without errors', () => {
+    const mockCtx: any = {
+      beginPath: () => {},
+      closePath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      rect: () => {},
+      roundRect: () => {},
+      arc: () => {},
+      ellipse: () => {},
+      bezierCurveTo: () => {},
+      arcTo: () => {},
+    };
+
+    // Test Triangle variants
+    const triVariants = ['equilateral', 'right', 'isosceles', 'acute', 'obtuse', 'inverted'];
+    for (const v of triVariants) {
+      expect(() => {
+        traceShapePath(mockCtx, 'triangle', 200, 200, 0, { elementType: 'shape', shapeType: 'triangle', shapeVariant: v as any });
+      }).not.toThrow();
+    }
+
+    // Test Rectangle variants
+    const rectVariants = ['square', 'parallelogram', 'rhombus', 'trapezoid', 'inverted_trapezoid', 'kite', 'pill', 'cut_corners', 'rectangle'];
+    for (const v of rectVariants) {
+      expect(() => {
+        traceShapePath(mockCtx, 'rectangle', 240, 160, 12, { elementType: 'shape', shapeType: 'rectangle', shapeVariant: v as any });
+      }).not.toThrow();
+    }
+
+    // Test Star variants
+    const starVariants = ['classic_5', 'sparkle_4', 'compass_8', 'seal_12', 'sharp_needle', 'soft_puffy'];
+    for (const v of starVariants) {
+      expect(() => {
+        traceShapePath(mockCtx, 'star', 220, 220, 0, { elementType: 'shape', shapeType: 'star', shapeVariant: v as any });
+      }).not.toThrow();
+    }
+
+    // Test Circle/Curvature variants
+    const circleVariants = ['circle', 'horizontal_oval', 'vertical_oval', 'semicircle', 'crescent'];
+    for (const v of circleVariants) {
+      expect(() => {
+        traceShapePath(mockCtx, 'circle', 200, 200, 0, { elementType: 'shape', shapeType: 'circle', shapeVariant: v as any });
+      }).not.toThrow();
+    }
+
+    // Test Arrow variants
+    const arrowVariants = ['standard_arrow', 'chevron', 'steep_arrow', 'fat_arrow', 'notch_arrow'];
+    for (const v of arrowVariants) {
+      expect(() => {
+        traceShapePath(mockCtx, 'arrow', 240, 140, 0, { elementType: 'shape', shapeType: 'arrow', shapeVariant: v as any });
+      }).not.toThrow();
+    }
+  });
+
+  it('provides direct presets in ELEMENT_SHAPES library for key geometric variants', () => {
+    const ids = ELEMENT_SHAPES.map(s => s.id);
+    expect(ids).toContain('shape_square');
+    expect(ids).toContain('shape_parallelogram');
+    expect(ids).toContain('shape_rhombus');
+    expect(ids).toContain('shape_trapezoid');
+    expect(ids).toContain('shape_kite');
+    expect(ids).toContain('shape_triangle_right');
+    expect(ids).toContain('shape_triangle_isosceles');
+    expect(ids).toContain('shape_triangle_obtuse');
+    expect(ids).toContain('shape_chevron');
+    expect(ids).toContain('shape_crescent');
+  });
+});
+
