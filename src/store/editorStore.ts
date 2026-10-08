@@ -666,9 +666,9 @@ const initialState: EditorState = {
   activePropertiesTab: 'transform',
   workspaceLayout: {
     preset: 'Editing',
-    leftWidth: 250,
-    rightWidth: 280,
-    timelineHeight: 320,
+    leftWidth: 350,
+    rightWidth: 380,
+    timelineHeight: 300,
   },
   canvasTransformMode: 'resize',
   previewCanvas: null,

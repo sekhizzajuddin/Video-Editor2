@@ -17,6 +17,7 @@ export type PropertiesTab =
   | 'effects'
   | 'ai'
   | 'thumbnail'
+  | 'pip'
   | 'history';
 
 export interface BasePropertyTabProps {

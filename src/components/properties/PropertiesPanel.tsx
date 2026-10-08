@@ -374,26 +374,28 @@ export interface PropertiesPanelProps {
 }
 
 
-const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
+const PANEL_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
   transform: [
-    { id: 'scale', label: 'Scale' },
     { id: 'position', label: 'Position' },
+    { id: 'scale', label: 'Scale' },
     { id: 'rotation', label: 'Rotation' },
     { id: 'opacity', label: 'Opacity' },
     { id: 'flip', label: 'Flip' },
     { id: 'perspective', label: 'Warp' },
     { id: 'blendMode', label: 'Blend' },
     { id: 'crop', label: 'Crop' },
+    { id: 'kenBurns', label: 'Ken Burns' },
+    { id: 'enterExit', label: 'Animation' },
     { id: 'reframe', label: 'Smart Reframe' },
     { id: 'keyframes', label: 'Keyframes' },
-    { id: 'kenBurns', label: 'Ken Burns' },
-    { id: 'keying', label: 'Chroma / AI' },
+    { id: 'all', label: 'All' },
   ],
   color: [
     { id: 'colorBasic', label: 'Basic' },
     { id: 'colorCreative', label: 'Creative' },
     { id: 'colorWheels', label: 'Color Wheels' },
     { id: 'lutGrade', label: 'LUT Grade' },
+    { id: 'all', label: 'All' },
   ],
   audio: [
     { id: 'audioVolume', label: 'Volume & Pan' },
@@ -401,10 +403,16 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
     { id: 'audioReverb', label: 'Reverb & Space' },
     { id: 'audioFades', label: 'Fades' },
     { id: 'audioSpeedPitch', label: 'Speed Pitch' },
+    { id: 'audioVocalTune', label: 'Voice Tune' },
+    { id: 'audioEnhancements', label: 'Voice Enhance' },
+    { id: 'aiVocalSeparation', label: 'Vocal Split' },
+    { id: 'audioDucking', label: 'Auto Ducking' },
+    { id: 'all', label: 'All' },
   ],
   speed: [
-    { id: 'speed', label: 'Speed Slider' },
+    { id: 'speed', label: 'Constant Speed' },
     { id: 'ramping', label: 'Speed Ramping' },
+    { id: 'all', label: 'All' },
   ],
   mask: [
     { id: 'mask', label: 'Masking & Matte' },
@@ -413,7 +421,8 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
     { id: 'text', label: 'Text & Typography' },
   ],
   effects: [
-    { id: 'audioDucking', label: 'AI Auto Ducking' },
+    { id: 'keying', label: 'Eraser & Chroma' },
+    { id: 'audioDucking', label: 'AI Ducking' },
     { id: 'soundDesign', label: 'AI Sound Design' },
     { id: 'aiVocalSeparation', label: 'AI Vocal Split' },
     { id: 'audioEnhancements', label: 'AI Voice Enhance' },
@@ -421,14 +430,20 @@ const MOBILE_SUB_TABS: Record<string, Array<{ id: string; label: string }>> = {
     { id: 'beatsync', label: 'Beat Sync' },
     { id: 'sfx', label: 'AI SFX' },
     { id: 'designer', label: 'Motion Graphics' },
-    { id: 'keying', label: 'Eraser & Chroma' },
     { id: 'motion', label: 'Motion Effects' },
     { id: 'particles', label: 'Particles' },
+    { id: 'all', label: 'All' },
+  ],
+  pip: [
+    { id: 'pipLayout', label: 'PIP Layout' },
+    { id: 'pipAnimation', label: 'PIP Animation' },
+    { id: 'all', label: 'All' },
   ],
   thumbnail: [
     { id: 'thumbnail', label: 'Thumbnail' },
   ],
 };
+const MOBILE_SUB_TABS = PANEL_SUB_TABS;
 
 export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }: PropertiesPanelProps = {}) {
 
@@ -510,7 +525,9 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     setShowAutoDuckingModal: s.setShowAutoDuckingModal,
   })));
 
-  const [mobileSubTab, setMobileSubTab] = useState<string>('');
+  const [activeSubTab, setActiveSubTab] = useState<string>('');
+  const mobileSubTab = activeSubTab;
+  const setMobileSubTab = setActiveSubTab;
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [isClipDetailsOpen, setIsClipDetailsOpen] = useState(true);
@@ -534,17 +551,23 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     if (isMobileView && mobileCategory) {
       const normalized = mobileCategory === 'style' ? 'transform' : mobileCategory === 'ai' ? 'effects' : mobileCategory;
       setActivePropertiesTab(normalized as any);
-      setMobileSubTab('');
+      setActiveSubTab('');
     }
   }, [isMobileView, mobileCategory, setActivePropertiesTab]);
 
-  const currentSubTabs = MOBILE_SUB_TABS[currentTab] || [];
-  const effectiveSubTab = currentSubTabs.some(t => t.id === mobileSubTab)
-    ? mobileSubTab
-    : (currentSubTabs[0]?.id || '');
+  const currentSubTabs = useMemo(() => {
+    return PANEL_SUB_TABS[currentTab] || [];
+  }, [currentTab]);
+
+  const effectiveSubTab = useMemo(() => {
+    if (currentSubTabs.some(t => t.id === activeSubTab)) {
+      return activeSubTab;
+    }
+    return currentSubTabs[0]?.id || '';
+  }, [currentSubTabs, activeSubTab]);
 
   const isSectionActive = (sectionId: string) => {
-    if (!isMobileView) return true;
+    if (effectiveSubTab === 'all' || !effectiveSubTab) return true;
     if (currentTab === 'mask' || currentTab === 'text') return true;
     if (currentTab === 'speed' && (sectionId === 'ramping' || sectionId === 'presets') && effectiveSubTab === 'ramping') return true;
     return effectiveSubTab === sectionId;
@@ -552,6 +575,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   const isSectionOpen = (sectionId: string) => {
     if (isMobileView) return true;
+    if (effectiveSubTab !== 'all' && effectiveSubTab === sectionId) return true;
     return !collapsedSections[sectionId];
   };
 
@@ -1107,43 +1131,89 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     }
   }, [mediaLibrary, updateClip, rawSelectedClip]);
 
+  const selectedMediaItem = rawSelectedClip
+    ? mediaLibrary.find((m) => m.id === selectedClip?.mediaId || m.url === selectedClip?.mediaId)
+    : null;
+
+  // Media type identification
+  const isAudioClip = Boolean(
+    rawSelectedClip &&
+    !rawSelectedClip.textSettings &&
+    (
+      selectedTrack?.type === 'audio' ||
+      selectedMediaItem?.type === 'audio' ||
+      (selectedMediaItem as any)?.mimeType?.startsWith('audio/') ||
+      (selectedMediaItem?.url && /\.(mp3|wav|ogg|aac|m4a|flac|opus)(\?.*)?$/i.test(selectedMediaItem.url)) ||
+      (selectedClip?.name && /\.(mp3|wav|ogg|aac|m4a|flac|opus)$/i.test(selectedClip.name)) ||
+      (typeof selectedClip?.mediaId === 'string' && selectedClip.mediaId.includes('audio')) ||
+      (typeof selectedClip?.id === 'string' && (selectedClip.id.startsWith('clip_vocals_') || selectedClip.id.startsWith('clip_inst_'))) ||
+      (!selectedMediaItem?.width && !selectedMediaItem?.height && selectedMediaItem?.type !== 'video' && selectedMediaItem?.type !== 'image' && !selectedTrack?.type?.startsWith('video') && (selectedClip?.duration > 0 || (selectedMediaItem?.duration ?? 0) > 0))
+    )
+  );
+
+  const isTextClip = Boolean(rawSelectedClip && (selectedTrack?.type === 'text' || selectedClip?.textSettings));
+
+  const isFxClip = Boolean(rawSelectedClip && (selectedTrack?.type === 'fx' || selectedClip?.fxSettings || selectedClip?.particleSettings));
+
+  const isImageClip = Boolean(
+    rawSelectedClip &&
+    !isAudioClip &&
+    !isTextClip &&
+    !isFxClip &&
+    (
+      selectedMediaItem?.type === 'image' ||
+      (selectedMediaItem as any)?.mimeType?.startsWith('image/') ||
+      (selectedMediaItem?.url && /\.(jpg|jpeg|png|webp|gif|svg|avif)(\?.*)?$/i.test(selectedMediaItem.url)) ||
+      (selectedClip?.name && /\.(jpg|jpeg|png|webp|gif|svg|avif)$/i.test(selectedClip.name))
+    )
+  );
+
+  const isVideoClip = Boolean(rawSelectedClip && !isAudioClip && !isTextClip && !isFxClip && !isImageClip);
+
   // Check if a given tab is supported by the clip & track
   const isTabSupportedForClip = useCallback((tab: PropertiesTab, clip: any, track: any): boolean => {
     if (!rawSelectedClip || clip?.id === '__inactive_clip__') {
       return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects' || tab === 'thumbnail';
     }
-    if (tab === 'thumbnail') return true;
-    // PIP tab available when clip is a PIP parent or inside a PIP window
-    if (tab === 'pip') return !!(clip.pipWindowIds?.length || isPipClip);
-    
-    if (track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
-      return tab === 'effects' || tab === 'transform';
+
+    if (isAudioClip) {
+      // Audio clips ONLY support Audio, Speed, and AI/effects tabs!
+      return tab === 'audio' || tab === 'speed' || tab === 'effects';
     }
-    
-    if (track?.type === 'text' || clip?.textSettings) {
+
+    if (isTextClip || track?.type === 'text' || clip?.textSettings) {
       return tab === 'text' || tab === 'transform' || tab === 'color' || tab === 'effects';
     }
-    
-    if (track?.type === 'audio' || (!clip?.textSettings && clip?.mediaId?.includes('audio'))) {
-      return tab === 'transform' || tab === 'speed' || tab === 'audio' || tab === 'effects';
+
+    if (isFxClip || track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
+      return tab === 'effects' || tab === 'transform';
     }
+
+    if (isImageClip) {
+      if (tab === 'pip') return !!(clip?.pipWindowIds?.length || isPipClip);
+      return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'effects' || tab === 'thumbnail';
+    }
+
+    if (tab === 'thumbnail') return true;
+    // PIP tab available when clip is a PIP parent or inside a PIP window
+    if (tab === 'pip') return !!(clip?.pipWindowIds?.length || isPipClip);
     
-    // Standard video/image clip supports: transform, mask, color, speed, audio, effects
+    // Standard video clip supports: transform, mask, color, speed, audio, effects
     return tab === 'transform' || tab === 'mask' || tab === 'color' || tab === 'speed' || tab === 'audio' || tab === 'effects';
-  }, [isPipClip, rawSelectedClip]);
+  }, [rawSelectedClip, isAudioClip, isTextClip, isFxClip, isImageClip, isPipClip]);
 
   const getDefaultTabForClip = useCallback((clip: any, track: any): PropertiesTab => {
-    if (track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
-      return 'effects';
-    }
-    if (track?.type === 'text' || clip?.textSettings) {
-      return 'text';
-    }
-    if (track?.type === 'audio') {
+    if (isAudioClip || track?.type === 'audio') {
       return 'audio';
     }
+    if (isFxClip || track?.type === 'fx' || clip?.fxSettings || clip?.particleSettings) {
+      return 'effects';
+    }
+    if (isTextClip || track?.type === 'text' || clip?.textSettings) {
+      return 'text';
+    }
     return 'transform';
-  }, []);
+  }, [isAudioClip, isFxClip, isTextClip]);
 
   // Remember user-selected tab and scroll positions so clicking similar clips does not reset view
   const lastActiveClipTab = useRef<PropertiesTab>('transform');
@@ -1400,14 +1470,29 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     return list;
   }, [selectedClipIds, selectedClipId, tracks, mediaLibrary]);
 
-  const selectedMediaItem = rawSelectedClip ? mediaLibrary.find((m) => m.id === selectedClip?.mediaId) : null;
-  const clipDisplayName = rawSelectedClip ? (selectedClip?.name || selectedMediaItem?.name || 'Clip') : 'No clip selected';
+  const clipDisplayName = rawSelectedClip
+    ? (selectedClip?.name || selectedMediaItem?.name || (isAudioClip ? 'Audio Track' : 'Clip'))
+    : 'No clip selected';
   const clipDurationStr = formatDuration(rawSelectedClip ? (selectedClip?.duration || selectedMediaItem?.duration || 0) : 0);
   const clipResolutionStr = selectedMediaItem?.height ? `${selectedMediaItem.height}p` : '1080p';
   const clipAspectStr = selectedMediaItem?.width && selectedMediaItem?.height
     ? (Math.abs(selectedMediaItem.width / selectedMediaItem.height - 16 / 9) < 0.1 ? '16:9' : Math.abs(selectedMediaItem.width / selectedMediaItem.height - 9 / 16) < 0.1 ? '9:16' : '1:1')
     : '16:9';
-  const clipMetaSubtitle = rawSelectedClip ? `${clipResolutionStr} · ${clipAspectStr} · ${clipDurationStr}` : 'Controls Inactive';
+
+  let clipMetaSubtitle = 'Controls Inactive';
+  if (rawSelectedClip) {
+    if (isAudioClip) {
+      clipMetaSubtitle = `Audio Track · ${clipDurationStr}`;
+    } else if (isTextClip) {
+      clipMetaSubtitle = `Text Layer · ${clipDurationStr}`;
+    } else if (isFxClip) {
+      clipMetaSubtitle = `Effect Layer · ${clipDurationStr}`;
+    } else if (selectedMediaItem?.height) {
+      clipMetaSubtitle = `${clipResolutionStr} · ${clipAspectStr} · ${clipDurationStr}`;
+    } else {
+      clipMetaSubtitle = `${clipAspectStr} · ${clipDurationStr}`;
+    }
+  }
 
   const handleReplaceMediaFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1437,36 +1522,40 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
   const baseTabs: { id: PropertiesTab; label: string; icon: any }[] = [];
 
-  // Always show Text tab first if the clip has textSettings
-  if (rawSelectedClip?.textSettings) {
+  if (rawSelectedClip && isAudioClip) {
+    // Audio Clips: Strictly audio-relevant features only (No visual transform, mask, color, thumbnail, pip)
+    baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
+    baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
+    baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
+  } else if (rawSelectedClip && isTextClip) {
     baseTabs.push({ id: 'text', label: 'Text', icon: Type });
-  }
-
-  if (rawSelectedClip && selectedTrack?.type === 'text') {
-    if (!baseTabs.some(t => t.id === 'text')) {
-      baseTabs.push({ id: 'text', label: 'Text', icon: Type });
-    }
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
-  } else if (rawSelectedClip && selectedTrack?.type === 'fx') {
+  } else if (rawSelectedClip && isFxClip) {
     baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+  } else if (rawSelectedClip && isImageClip) {
+    baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
+    baseTabs.push({ id: 'mask', label: 'Mask', icon: Crop });
+    baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
+    baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
+    baseTabs.push({ id: 'thumbnail', label: 'Thumbnail', icon: ImageIcon });
+    if (rawSelectedClip.pipWindowIds?.length || isPipClip) {
+      baseTabs.push({ id: 'pip', label: 'PIP', icon: Layers });
+    }
   } else {
-    // Video / Audio / Image/Text clips on other tracks, or when no clip is selected: full set of tabs
+    // Video clips or when NO clip is selected (shows full default tabs with controls inactive)
     baseTabs.push({ id: 'transform', label: 'Transform', icon: Move3D });
     baseTabs.push({ id: 'mask', label: 'Mask', icon: Crop });
     baseTabs.push({ id: 'color', label: 'Color', icon: Palette });
     baseTabs.push({ id: 'speed', label: 'Speed', icon: Gauge });
     baseTabs.push({ id: 'audio', label: 'Audio', icon: Music });
     baseTabs.push({ id: 'effects', label: 'AI', icon: Sparkles });
-  }
-
-  baseTabs.push({ id: 'thumbnail', label: 'Thumbnail', icon: ImageIcon });
-
-  // Show PIP tab when the clip is a PIP parent (has pipWindowIds) or is inside a PIP window
-  if (rawSelectedClip?.pipWindowIds?.length || (rawSelectedClip && isPipClip)) {
-    baseTabs.push({ id: 'pip', label: 'PIP', icon: Layers });
+    baseTabs.push({ id: 'thumbnail', label: 'Thumbnail', icon: ImageIcon });
+    if (rawSelectedClip && (rawSelectedClip.pipWindowIds?.length || isPipClip)) {
+      baseTabs.push({ id: 'pip', label: 'PIP', icon: Layers });
+    }
   }
 
   const tabs = baseTabs;
@@ -2866,8 +2955,10 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
     </div>
   );
 
-  const renderKeyingAndAiSection = () => (
-    <div className={`space-y-3 ${!isSectionActive('keying') ? 'hidden' : ''}`}>
+  const renderKeyingAndAiSection = () => {
+    if (rawSelectedClip && isAudioClip) return null;
+    return (
+      <div className={`space-y-3 ${!isSectionActive('keying') ? 'hidden' : ''}`}>
 
             {/* Cutout (AI) - YouTube Create / CapCut Style */}
             <div className="bg-[var(--theme-bg-subpanel)] rounded border border-cyan-500/30 mb-3 shadow-lg shadow-cyan-900/20 p-3">
@@ -3836,6 +3927,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             <div className={!isSectionActive('motion') ? 'hidden' : ''}><MotionEffectsPanel selectedClip={selectedClip} videoElements={videoElements} /></div>
     </div>
   );
+  };
 
   return (
     <div className={`h-full flex flex-col ${isMobileView ? 'bg-[#121215] text-white' : 'bg-[var(--theme-bg-panel)] border-l border-[var(--theme-border)] text-[var(--theme-text-primary)] transition-colors'}`}>
@@ -3893,7 +3985,10 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActivePropertiesTab(tab.id)}
+                  onClick={() => {
+                    setActivePropertiesTab(tab.id);
+                    setActiveSubTab('');
+                  }}
                   className={`py-2.5 text-xs font-semibold relative transition-colors whitespace-nowrap ${
                     isActive
                       ? 'text-blue-600 dark:text-blue-400 font-bold'
@@ -3908,6 +4003,29 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               );
             })}
           </div>
+
+          {/* Desktop Sub-Tabs Header (CapCut Style Pill/Chip Bar) */}
+          {currentSubTabs.length > 1 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)]/50 overflow-x-auto scrollbar-none select-none shrink-0">
+              {currentSubTabs.map((st) => {
+                const isSubActive = effectiveSubTab === st.id;
+                return (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setActiveSubTab(st.id)}
+                    className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                      isSubActive
+                        ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                        : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 bg-[var(--theme-bg-card)] border border-[var(--theme-border)]/50'
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {!rawSelectedClip && (
             <div className="border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)]/40 px-3.5 py-2.5 flex items-center justify-between select-none">
@@ -3994,7 +4112,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                               }`}
                             >
                               <div className="w-full h-16 rounded-lg overflow-hidden bg-black/40 relative flex items-center justify-center">
-                                {m?.url && (m.type === 'video' || m.type === 'image') ? (
+                                {(m?.type === 'audio' || c?.mediaId?.includes('audio') || c?.name?.match(/\.(mp3|wav|ogg|aac|m4a|flac|opus)$/i)) ? (
+                                  <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-emerald-500/15 to-teal-500/20 text-emerald-400">
+                                    <Music className="w-5 h-5" />
+                                  </div>
+                                ) : m?.url && (m.type === 'video' || m.type === 'image') ? (
                                   m.type === 'video' ? (
                                     <video src={m.url} className="w-full h-full object-cover pointer-events-none" />
                                   ) : (
@@ -4019,7 +4141,11 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                     /* Single Clip Preview Card matching reference image */
                     <div className="p-2.5 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] flex items-center gap-3">
                       <div className="w-16 h-12 rounded-lg bg-black/40 overflow-hidden relative shrink-0 border border-[var(--theme-border)] flex items-center justify-center">
-                        {selectedMediaItem?.url && (selectedMediaItem.type === 'video' || selectedMediaItem.type === 'image') ? (
+                        {isAudioClip ? (
+                          <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-emerald-500/15 to-teal-500/20 text-emerald-400">
+                            <Music className="w-5 h-5 animate-pulse" />
+                          </div>
+                        ) : selectedMediaItem?.url && (selectedMediaItem.type === 'video' || selectedMediaItem.type === 'image') ? (
                           selectedMediaItem.type === 'video' ? (
                             <video src={selectedMediaItem.url} className="w-full h-full object-cover pointer-events-none" />
                           ) : (
@@ -4167,6 +4293,29 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
       >
         <SequenceProperties />
         {currentTab === 'transform' && (() => {
+          if (rawSelectedClip && isAudioClip) {
+            return (
+              <div className="p-4 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] text-center space-y-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 mx-auto flex items-center justify-center">
+                  <Music className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-xs font-semibold text-[var(--theme-text-primary)]">Audio Clip Selected</h4>
+                  <p className="text-[11px] text-[var(--theme-text-muted)]">
+                    Visual transformation controls (Position, Scale, Rotation, Opacity, Warp) only apply to visual layers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActivePropertiesTab('audio')}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm inline-flex items-center gap-1.5"
+                >
+                  <Music className="w-3.5 h-3.5" />
+                  <span>Switch to Audio Properties</span>
+                </button>
+              </div>
+            );
+          }
           // Reusing outer component scope helpers: localTime, animations, getPropVal, setPropVal, handleToggleMasterKeyframe
           const keyframeTimes = getMasterKeyframes();
           const hasMasterKeyframes = keyframeTimes.length > 0;
@@ -5451,7 +5600,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               );
 
               return (
-                <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)]">
+                <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] ${!isSectionActive('kenBurns') ? 'hidden' : ''}`}>
                   <button
                     onClick={() => toggleSection('kenBurns')}
                     className={`${isMobileView ? "hidden" : ""} w-full flex items-center justify-between p-2.5 text-xs text-[var(--theme-text-primary)] font-semibold group`}
@@ -5639,6 +5788,29 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         })()}
 
         {currentTab === 'mask' && (() => {
+          if (rawSelectedClip && isAudioClip) {
+            return (
+              <div className="p-4 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] text-center space-y-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 mx-auto flex items-center justify-center">
+                  <Music className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-xs font-semibold text-[var(--theme-text-primary)]">Audio Clip Selected</h4>
+                  <p className="text-[11px] text-[var(--theme-text-muted)]">
+                    Masking tools only apply to visual video and image layers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActivePropertiesTab('audio')}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm inline-flex items-center gap-1.5"
+                >
+                  <Music className="w-3.5 h-3.5" />
+                  <span>Switch to Audio Properties</span>
+                </button>
+              </div>
+            );
+          }
           const mask = selectedClip.mask || { enabled: false, type: 'rectangle', x: 50, y: 50, width: 50, height: 50, points: [], feather: 0, invert: false, rotation: 0, roundness: 0, matteSourceClipId: '' };
           const updateMask = (updates: any) => {
             updateClip(selectedClip.id, { mask: { ...mask, ...updates } });
@@ -5758,6 +5930,27 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         })()}
 
         {currentTab === 'color' && (
+          rawSelectedClip && isAudioClip ? (
+            <div className="p-4 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] text-center space-y-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 mx-auto flex items-center justify-center">
+                <Music className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-xs font-semibold text-[var(--theme-text-primary)]">Audio Clip Selected</h4>
+                <p className="text-[11px] text-[var(--theme-text-muted)]">
+                  Color grading and LUTs only apply to visual video and image layers.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePropertiesTab('audio')}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm inline-flex items-center gap-1.5"
+              >
+                <Music className="w-3.5 h-3.5" />
+                <span>Switch to Audio Properties</span>
+              </button>
+            </div>
+          ) : (
           <div className="space-y-3">
             {selectedClip && (
               <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2 flex items-center justify-between gap-2">
@@ -6231,12 +6424,12 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               })()}
             </div>
           </div>
-        )}
+        ))}
 
         {currentTab === 'speed' && (
           <div className="space-y-3">
             {/* Speed range input */}
-            <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5">
+            <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5 ${!isSectionActive('speed') ? 'hidden' : ''}`}>
               <label className="text-xs text-[var(--theme-text-primary)] font-semibold block mb-2">Speed</label>
               <div className="flex items-center gap-2">
                 <input
@@ -6292,7 +6485,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 : 1;
 
               return (
-                <div className="bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5 space-y-2">
+                <div className={`bg-[var(--theme-bg-card)] rounded border border-[var(--theme-border)] p-2.5 space-y-2 ${!isSectionActive('ramping') ? 'hidden' : ''}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 font-semibold text-xs text-[var(--theme-text-primary)]">
                       <Gauge className="w-3.5 h-3.5 text-amber-500" />
@@ -6465,6 +6658,27 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
         )}
 
         {currentTab === 'audio' && (
+          rawSelectedClip && isImageClip ? (
+            <div className="p-4 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] text-center space-y-3">
+              <div className="w-10 h-10 rounded-full bg-blue-500/10 text-blue-400 mx-auto flex items-center justify-center">
+                <ImageIcon className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-xs font-semibold text-[var(--theme-text-primary)]">Image Clip Selected</h4>
+                <p className="text-[11px] text-[var(--theme-text-muted)]">
+                  Image files do not contain an audio track. Audio controls apply only to audio files and videos.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePropertiesTab('transform')}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm inline-flex items-center gap-1.5"
+              >
+                <Move3D className="w-3.5 h-3.5" />
+                <span>Switch to Transform Properties</span>
+              </button>
+            </div>
+          ) : (
           <div className="space-y-3">
             {/* Waveform & Frame Preview Refresh */}
             {selectedClip && selectedClip.mediaId && (
@@ -7288,8 +7502,52 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
                 </div>
               )}
             </div>
+
+            {/* AI Auto Audio Ducking (Under Audio Tab) */}
+            {isSectionActive('audioDucking') && selectedClip && (
+              <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs text-[var(--theme-text-primary)] font-semibold">AI Auto Audio Ducking</span>
+                </div>
+                <p className="text-[11px] text-[#90e0b0]">
+                  Analyze parallel dialogue &amp; vocals across timeline tracks using high-precision VAD speech detection, and automatically generate ducking volume keyframes.
+                </p>
+
+                {isDuckingAudio ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-3 bg-[var(--theme-bg-subpanel)] rounded border border-[var(--theme-border)]">
+                    <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
+                    <span className="text-[10px] text-emerald-400 font-medium">
+                      Scanning Dialogue &amp; Ducking Vocals ({duckingProgress}%)...
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAudioDucking}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> ⚡ Duck Audio
+                    </button>
+                    <button
+                      onClick={() => setShowAutoDuckingModal(true)}
+                      className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-emerald-300 rounded text-xs font-medium border border-emerald-500/30 transition-colors"
+                      title="Open Full Auto Ducking Studio"
+                    >
+                      Studio...
+                    </button>
+                  </div>
+                )}
+                
+                {selectedClip.animations?.['audio.volume'] && selectedClip.animations['audio.volume'].length > 0 && (
+                  <p className="text-[9px] text-emerald-400 mt-2 text-center">
+                    ✓ Volume keyframes applied.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
-        )}
+        ))}
 
         {/* ── Text Tab ─────────────────────────────────────────────────── */}
         {currentTab === 'text' && selectedClip.textSettings && (
@@ -8193,7 +8451,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
             {renderKeyingAndAiSection()}
 
             {/* ── Timeline FX Settings ── */}
-            {selectedClip.fxSettings && (
+            {selectedClip.fxSettings && !isAudioClip && (
               <div className="flex flex-col gap-3 bg-[var(--theme-bg-subpanel)] rounded p-3 border border-rose-500/20">
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider">Timeline FX</p>
@@ -8716,6 +8974,27 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
 
         {/* Thumbnail Designer Tab */}
         {currentTab === 'thumbnail' && (
+          rawSelectedClip && isAudioClip ? (
+            <div className="p-4 bg-[var(--theme-bg-subpanel)] rounded-xl border border-[var(--theme-border)] text-center space-y-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 mx-auto flex items-center justify-center">
+                <Music className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-xs font-semibold text-[var(--theme-text-primary)]">Audio Clip Selected</h4>
+                <p className="text-[11px] text-[var(--theme-text-muted)]">
+                  Thumbnail design and frame capture only apply to visual video and image layers.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePropertiesTab('audio')}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm inline-flex items-center gap-1.5"
+              >
+                <Music className="w-3.5 h-3.5" />
+                <span>Switch to Audio Properties</span>
+              </button>
+            </div>
+          ) : (
           <div className="flex flex-col gap-4">
             <div className="bg-[var(--theme-bg-card)] rounded-xl border border-[var(--theme-border)] p-4 flex flex-col gap-3 shadow-sm">
               <h3 className="text-xs font-bold text-[var(--theme-text-primary)] flex items-center gap-2">
@@ -8805,7 +9084,7 @@ export function PropertiesPanel({ isMobileView, mobileCategory, onMobileClose }:
               </div>
             </div>
           </div>
-        )}
+        ))}
 
 
         {currentTab === 'pip' && selectedClip && (() => {

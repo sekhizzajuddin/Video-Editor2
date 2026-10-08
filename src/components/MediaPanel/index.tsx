@@ -714,6 +714,7 @@ export function MediaPanel() {
   const [confirmLoadTemplateId, setConfirmLoadTemplateId] = useState<string | null>(null);
 
   // Subtab and generator states
+  const [audioSubTab, setAudioSubTab] = useState<'tts' | 'sfx' | 'library'>('tts');
   const [textSubTab, setTextSubTab] = useState<'text' | 'subtitle'>('text');
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
   const [captionProgress, setCaptionProgress] = useState(0);
@@ -1770,8 +1771,51 @@ export function MediaPanel() {
 
 
         {activeMediaTab === 'audio' && (
-          <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin">
-            {/* Timeline Voiceover Info */}
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0 bg-[var(--theme-bg-panel)]">
+            {/* Audio Sub-Tabs Header */}
+            <div className="flex border-b border-[var(--theme-border)] shrink-0 mx-2.5 mt-2 mb-2 bg-[var(--theme-bg-subpanel)] rounded-lg p-0.5 select-none">
+              <button
+                type="button"
+                onClick={() => setAudioSubTab('tts')}
+                className={`flex-1 py-1.5 text-[11px] font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                  audioSubTab === 'tts'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>AI Voiceover</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAudioSubTab('sfx')}
+                className={`flex-1 py-1.5 text-[11px] font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                  audioSubTab === 'sfx'
+                    ? 'bg-teal-600 text-white shadow-sm'
+                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <Waves className="w-3.5 h-3.5" />
+                <span>AI SFX</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAudioSubTab('library')}
+                className={`flex-1 py-1.5 text-[11px] font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                  audioSubTab === 'library'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <Music className="w-3.5 h-3.5" />
+                <span>Audio Files</span>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2.5 space-y-3.5 scrollbar-thin">
+              {audioSubTab === 'tts' && (
+                <>
+                  {/* Timeline Voiceover Info */}
             <div className="p-3.5 bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-xl shadow-sm transition-colors">
               <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 animate-pulse" />
@@ -2016,9 +2060,12 @@ export function MediaPanel() {
                 </button>
               </div>
             </div>
+          </>
+        )}
 
-            {/* AI SFX Generator */}
-            <div className="p-3.5 bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-xl space-y-3.5 mt-4 shadow-sm transition-colors">
+        {audioSubTab === 'sfx' && (
+          /* AI SFX Generator */
+          <div className="p-3.5 bg-[var(--theme-bg-card)] border border-[var(--theme-border)] rounded-xl space-y-3.5 shadow-sm transition-colors">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-bold text-teal-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Waves className="w-3.5 h-3.5" />
@@ -2144,9 +2191,83 @@ export function MediaPanel() {
                 </div>
               )}
             </div>
-            
-          </div>
-        )}
+          )}
+
+          {audioSubTab === 'library' && (() => {
+            const audioItems = mediaLibrary.filter(m => m.type === 'audio');
+            return (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-[var(--theme-text-primary)]">
+                    Project Audio Files ({audioItems.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-2.5 py-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/30 rounded-lg text-[10px] font-semibold transition-all flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Import Audio</span>
+                  </button>
+                </div>
+
+                {audioItems.length === 0 ? (
+                  <div className="p-6 text-center border border-dashed border-[var(--theme-border)] rounded-xl space-y-2">
+                    <Music className="w-8 h-8 text-[var(--theme-text-muted)] mx-auto opacity-50" />
+                    <p className="text-xs text-[var(--theme-text-muted)]">No audio files in project</p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5 shadow-sm"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Import Audio File</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {audioItems.map((media) => (
+                      <div
+                        key={media.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, media.id)}
+                        onClick={() => setPreviewItem(media)}
+                        className="p-2.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:border-purple-500/50 hover:shadow-md transition-all cursor-grab active:cursor-grabbing flex items-center gap-2.5 group"
+                      >
+                        <div className="w-9 h-9 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0 group-hover:scale-105 transition-transform">
+                          <Music className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-[var(--theme-text-primary)] truncate group-hover:text-purple-400 transition-colors">
+                            {media.name}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-[var(--theme-text-muted)] font-mono">
+                            <span>{formatDuration(media.duration)}</span>
+                            <span>•</span>
+                            <span>{formatSize(media.size)}</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteId(media.id);
+                          }}
+                          className="p-1 text-[var(--theme-text-muted)] hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100"
+                          title="Delete audio"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+    )}
 
         {activeMediaTab === 'text' && (
           <div className="flex-1 overflow-hidden flex flex-col p-2 min-h-0 bg-[var(--theme-bg-panel)] transition-colors">

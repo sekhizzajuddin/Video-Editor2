@@ -58,6 +58,23 @@ export function MobilePropertiesSheet({ category, onClose }: MobilePropertiesShe
 
   if (!clip) return null;
 
+  const selectedMediaItem = clip
+    ? mediaLibrary.find((m) => m.id === clip.mediaId || m.url === clip.mediaId)
+    : null;
+  const isAudioClip = Boolean(
+    clip &&
+    !clip.textSettings &&
+    (
+      clipResult?.track?.type === 'audio' ||
+      selectedMediaItem?.type === 'audio' ||
+      (selectedMediaItem as any)?.mimeType?.startsWith('audio/') ||
+      (selectedMediaItem?.url && /\.(mp3|wav|ogg|aac|m4a|flac|opus)(\?.*)?$/i.test(selectedMediaItem.url)) ||
+      (clip.name && /\.(mp3|wav|ogg|aac|m4a|flac|opus)$/i.test(clip.name)) ||
+      (typeof clip.mediaId === 'string' && clip.mediaId.includes('audio')) ||
+      (!selectedMediaItem?.width && !selectedMediaItem?.height && selectedMediaItem?.type !== 'video' && selectedMediaItem?.type !== 'image' && clipResult?.track?.type !== 'video' && clip.duration > 0)
+    )
+  );
+
   const ActiveComponent = tabs.find(t => t.id === currentSubTab)?.component;
 
   // We construct a prop object that contains everything a component might need.
@@ -188,7 +205,17 @@ export function MobilePropertiesSheet({ category, onClose }: MobilePropertiesShe
 
       {/* Content Area */}
       <div className="mobile-no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-4">
-        {ActiveComponent && <ActiveComponent {...commonProps} />}
+        {isAudioClip && (category === 'style' || category === 'color' || category === 'mask') ? (
+          <div className="p-4 bg-white/5 rounded-xl border border-white/10 text-center space-y-2">
+            <Music className="w-8 h-8 text-emerald-400 mx-auto" />
+            <p className="text-xs font-semibold text-white">Audio Clip Selected</p>
+            <p className="text-[11px] text-white/60">
+              Visual {category} controls only apply to video and image layers.
+            </p>
+          </div>
+        ) : (
+          ActiveComponent && <ActiveComponent {...commonProps} />
+        )}
       </div>
     </div>
   );

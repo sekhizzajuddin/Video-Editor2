@@ -588,15 +588,15 @@ function DesktopApp() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDraggingLeft.current) {
-        setLeftWidth(() => Math.max(180, Math.min(400, e.clientX)));
+        setLeftWidth(() => Math.max(240, Math.min(600, e.clientX)));
       }
       if (isDraggingRight.current) {
         const windowWidth = window.innerWidth;
-        setRightWidth(() => Math.max(200, Math.min(400, windowWidth - e.clientX)));
+        setRightWidth(() => Math.max(260, Math.min(650, windowWidth - e.clientX)));
       }
       if (isDraggingTimeline.current) {
         const windowHeight = window.innerHeight;
-        setTimelineHeight(() => Math.max(200, Math.min(500, windowHeight - e.clientY)));
+        setTimelineHeight(() => Math.max(160, Math.min(windowHeight - 180, windowHeight - e.clientY)));
       }
     };
 
@@ -644,28 +644,28 @@ function DesktopApp() {
       {/* Top Toolbar */}
       <TopToolbar />
 
-      {/* Main Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Media Panel (Left) */}
-        <div
-          className="shrink-0 overflow-hidden"
-          style={{ width: leftWidth }}
-        >
-          <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
-            <MediaPanel />
-          </Suspense>
-        </div>
+      {/* Main Workspace (CapCut Layout: Top Row for Panels & Preview, Full-Width Bottom Timeline) */}
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+        {/* Top Region: Media Panel (Left) | Center Preview | Properties Panel (Right) */}
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* Media Panel (Left) - Height terminates before timeline, extra wide */}
+          <div
+            className="shrink-0 overflow-hidden h-full"
+            style={{ width: leftWidth }}
+          >
+            <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
+              <MediaPanel />
+            </Suspense>
+          </div>
 
-        {/* Left Resize Handle */}
-        <div
-          className="w-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-col-resize shrink-0 transition-colors"
-          onMouseDown={() => { isDraggingLeft.current = true; }}
-        />
+          {/* Left Resize Handle */}
+          <div
+            className="w-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-col-resize shrink-0 transition-colors"
+            onMouseDown={() => { isDraggingLeft.current = true; }}
+          />
 
-        {/* Center Panel */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Preview Canvas / Generative Workspace */}
-          <div className="flex-1 overflow-hidden relative bg-[var(--theme-bg-app)]">
+          {/* Center Panel (Preview Canvas / Generative Workspace) */}
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0 bg-[var(--theme-bg-app)] relative h-full">
             {workspaceLayout?.preset === 'Generative' ? (
               <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)] flex items-center justify-center text-[var(--theme-text-muted)] text-sm">Loading Generative Workspace…</div>}>
                 <GenerativeWorkspace />
@@ -680,127 +680,127 @@ function DesktopApp() {
             )}
           </div>
 
-          {/* Timeline Resize Handle */}
-          <div
-            className="h-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-row-resize shrink-0 transition-colors"
-            onMouseDown={() => { isDraggingTimeline.current = true; }}
-          />
+          {/* Right Resize Handle + Properties Panel (hidden in Generative workspace) */}
+          {workspaceLayout?.preset !== 'Generative' && (
+            <>
+              <div
+                className="w-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-col-resize shrink-0 transition-colors"
+                onMouseDown={() => { isDraggingRight.current = true; }}
+              />
 
-          {/* Timeline / Audio Mixer Container */}
-          <div style={{ height: timelineHeight }} className="flex flex-col bg-[var(--theme-bg-panel)] overflow-hidden shrink-0">
-            {/* Header Tabs */}
-            <div className="h-9 flex items-center justify-between px-3 bg-[var(--theme-bg-panel)] border-b border-[var(--theme-border)] shrink-0 select-none text-xs">
-              <div className="flex items-center gap-1.5 bg-[var(--theme-bg-card)] p-1 rounded-lg border border-[var(--theme-border)] shadow-sm">
-                <button
-                  onClick={() => setBottomTab('timeline')}
-                  className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold ${
-                    bottomTab === 'timeline'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  Timeline
-                </button>
-                <button
-                  onClick={() => setBottomTab('mixer')}
-                  className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
-                    bottomTab === 'mixer'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  <Music className="w-3 h-3 text-purple-400" /> Audio Mixer
-                </button>
-              </div>
-
-              {/* Editing Tools */}
-              <div className="flex items-center gap-1.5 opacity-95 hover:opacity-100 transition-opacity">
-                <div className="flex items-center bg-[var(--theme-bg-card)] rounded-lg border border-[var(--theme-border)] p-0.5 shadow-sm">
-                  {tools.map((tool) => {
-                    const Icon = tool.icon;
-                    const isActive = tool.id !== 'split' && activeTool === tool.id;
-                    return (
-                      <button
-                        key={tool.id}
-                        onClick={() => {
-                          if (tool.id === 'split') {
-                            handleSplitAtPlayhead();
-                          } else {
-                            setActiveTool(tool.id);
-                          }
-                        }}
-                        title={tool.id === 'split' ? "Split Clip at Playhead" : `${tool.label} (${tool.shortcut})`}
-                        className={`relative p-1.5 rounded-md transition-all duration-150 group ${
-                          isActive
-                            ? 'bg-blue-600 text-white shadow-sm font-semibold'
-                            : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-                        }`}
-                      >
-                        <Icon className="w-3.5 h-3.5" />
-                        <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-[var(--theme-bg-panel)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] text-[9px] font-medium rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-                          {tool.id === 'split' ? 'Split Clip at Playhead' : `${tool.label} (${tool.shortcut})`}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="w-px h-5 bg-[var(--theme-border)] mx-1" />
-
-                <button
-                  onClick={undo}
-                  disabled={!canUndo}
-                  title="Undo (Ctrl+Z)"
-                  className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md border border-[var(--theme-border)] disabled:opacity-30 transition-all"
-                >
-                  <Undo2 className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={redo}
-                  disabled={!canRedo}
-                  title="Redo (Ctrl+Y)"
-                  className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md border border-[var(--theme-border)] disabled:opacity-30 transition-all"
-                >
-                  <Redo2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-hidden relative">
-              {bottomTab === 'timeline' ? (
-                <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-[var(--theme-bg-panel)] font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
-                  <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
-                    <Timeline />
-                  </Suspense>
-                </ErrorBoundary>
-              ) : (
-                <Suspense fallback={null}>
-                  <AudioMixer />
+              {/* Properties Panel (Right) - Height terminates before timeline, extra wide */}
+              <div
+                className="shrink-0 overflow-hidden h-full"
+                style={{ width: rightWidth }}
+              >
+                <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
+                  <PropertiesPanel />
                 </Suspense>
-              )}
-            </div>
-          </div>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Right Resize Handle + Properties Panel (hidden in Generative workspace) */}
-        {workspaceLayout?.preset !== 'Generative' && (
-          <>
-            <div
-              className="w-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-col-resize shrink-0 transition-colors"
-              onMouseDown={() => { isDraggingRight.current = true; }}
-            />
+        {/* Timeline Resize Handle (Full-width spanning from far left to far right) */}
+        <div
+          className="h-1 bg-[var(--theme-border)] hover:bg-blue-500 cursor-row-resize shrink-0 transition-colors w-full"
+          onMouseDown={() => { isDraggingTimeline.current = true; }}
+        />
 
-            {/* Properties Panel (Right) */}
-            <div
-              className="shrink-0 overflow-hidden"
-              style={{ width: rightWidth }}
-            >
-              <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
-                <PropertiesPanel />
-              </Suspense>
+        {/* Timeline / Audio Mixer Container (Full Width from Full Left to Full Right across window) */}
+        <div style={{ height: timelineHeight }} className="w-full flex flex-col bg-[var(--theme-bg-panel)] overflow-hidden shrink-0">
+          {/* Header Tabs */}
+          <div className="h-9 flex items-center justify-between px-3 bg-[var(--theme-bg-panel)] border-b border-[var(--theme-border)] shrink-0 select-none text-xs">
+            <div className="flex items-center gap-1.5 bg-[var(--theme-bg-card)] p-1 rounded-lg border border-[var(--theme-border)] shadow-sm">
+              <button
+                onClick={() => setBottomTab('timeline')}
+                className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold ${
+                  bottomTab === 'timeline'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                Timeline
+              </button>
+              <button
+                onClick={() => setBottomTab('mixer')}
+                className={`px-3 py-1 text-[11px] rounded-md transition-all uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                  bottomTab === 'mixer'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <Music className="w-3 h-3 text-purple-400" /> Audio Mixer
+              </button>
             </div>
-          </>
-        )}
+
+            {/* Editing Tools */}
+            <div className="flex items-center gap-1.5 opacity-95 hover:opacity-100 transition-opacity">
+              <div className="flex items-center bg-[var(--theme-bg-card)] rounded-lg border border-[var(--theme-border)] p-0.5 shadow-sm">
+                {tools.map((tool) => {
+                  const Icon = tool.icon;
+                  const isActive = tool.id !== 'split' && activeTool === tool.id;
+                  return (
+                    <button
+                      key={tool.id}
+                      onClick={() => {
+                        if (tool.id === 'split') {
+                          handleSplitAtPlayhead();
+                        } else {
+                          setActiveTool(tool.id);
+                        }
+                      }}
+                      title={tool.id === 'split' ? "Split Clip at Playhead" : `${tool.label} (${tool.shortcut})`}
+                      className={`relative p-1.5 rounded-md transition-all duration-150 group ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-sm font-semibold'
+                          : 'text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-[var(--theme-bg-panel)] text-[var(--theme-text-primary)] border border-[var(--theme-border)] text-[9px] font-medium rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+                        {tool.id === 'split' ? 'Split Clip at Playhead' : `${tool.label} (${tool.shortcut})`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="w-px h-5 bg-[var(--theme-border)] mx-1" />
+
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+                className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md border border-[var(--theme-border)] disabled:opacity-30 transition-all"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Y)"
+                className="p-1.5 text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5 rounded-md border border-[var(--theme-border)] disabled:opacity-30 transition-all"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-hidden relative">
+            {bottomTab === 'timeline' ? (
+              <ErrorBoundary fallback={<div className="flex h-full items-center justify-center text-[#ff6b6b] bg-[var(--theme-bg-panel)] font-medium p-8 text-center">Timeline crashed. Please refresh the page.</div>}>
+                <Suspense fallback={<div className="w-full h-full bg-[var(--theme-bg-panel)]" />}>
+                  <Timeline />
+                </Suspense>
+              </ErrorBoundary>
+            ) : (
+              <Suspense fallback={null}>
+                <AudioMixer />
+              </Suspense>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Modals & Global Handlers */}

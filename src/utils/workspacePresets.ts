@@ -28,10 +28,10 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     description: 'Balanced workspace for general video editing with all panels visible.',
     icon: '🎬',
     category: 'production',
-    leftWidth: 250,
-    rightWidth: 280,
-    timelineHeight: 320,
-    preview: { left: 0.2, right: 0.22, timeline: 0.42 },
+    leftWidth: 350,
+    rightWidth: 380,
+    timelineHeight: 300,
+    preview: { left: 0.25, right: 0.28, timeline: 0.38 },
   },
   {
     id: 'Color',
@@ -131,7 +131,7 @@ export function getPresetById(id: string): WorkspacePreset | undefined {
 
 export function getPresetLayout(id: string): { preset: string; leftWidth: number; rightWidth: number; timelineHeight: number } {
   const preset = getPresetById(id);
-  if (!preset) return { preset: 'Editing', leftWidth: 250, rightWidth: 280, timelineHeight: 320 };
+  if (!preset) return { preset: 'Editing', leftWidth: 350, rightWidth: 380, timelineHeight: 300 };
   return {
     preset: preset.id,
     leftWidth: preset.leftWidth,
