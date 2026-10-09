@@ -1543,9 +1543,13 @@ export async function renderCanvasEngine({
           videoEl =
             (clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
             null;
-          if (videoEl) {
-            videoElements.set(clip.id, videoEl);
-          }
+          // FIX 4: Do NOT cache the sibling element into videoElements.set().
+          // The sibling is a temporary stand-in currently positioned at a
+          // DIFFERENT media time (it was decoding another segment). Caching it
+          // permanently makes every subsequent render draw the wrong frame
+          // until the clip's own element loads. Instead, use it transiently
+          // for this render only — the pool will assign the correct element
+          // once it's ready, and videoElements will be updated naturally.
         }
         if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
           vw = videoEl.videoWidth;

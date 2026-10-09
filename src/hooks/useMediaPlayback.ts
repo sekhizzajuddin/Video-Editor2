@@ -1421,6 +1421,34 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 }
               }
             }
+            // FIX 1 (Graceful ShareKey Transition): When a split chain breaks
+            // (clip moved/gapped), the clip gets a dedicated shareKey (::clip:).
+            // Instead of creating a brand new <video> element (destroying the old
+            // decoder → 200-800ms black frame), reuse any ready element from the
+            // SAME mediaId that is being evicted from the pool in this reconcile
+            // pass. The element already has the correct src loaded — only a cheap
+            // seek is needed, NOT a full decoder restart.
+            if (!el) {
+              for (const [evictId, e] of pool) {
+                if (e.type !== 'video' || e.mediaId !== info.mediaId) continue;
+                if (neededClips.has(evictId)) continue; // still needed by another clip
+                const evEl = e.el as HTMLVideoElement;
+                if (evEl.readyState >= 1) {
+                  el = evEl;
+                  // Migrate the element to the new key
+                  const oldKey = e._shareKey ?? e.mediaId;
+                  const oldRc = mediaVideoRefCount.get(oldKey) ?? 1;
+                  if (oldRc <= 1) {
+                    mediaVideoRefCount.delete(oldKey);
+                    mediaVideoEls.delete(oldKey);
+                  } else {
+                    mediaVideoRefCount.set(oldKey, oldRc - 1);
+                  }
+                  mediaVideoEls.set(key, el);
+                  break;
+                }
+              }
+            }
             const elIsNew = !el;
             if (!el) {
               el = document.createElement('video');
@@ -2248,7 +2276,24 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               // playback resumed and the clip re-activated. Issuing a redundant
               // seek cancels the in-flight decode and restarts it from scratch,
               // which is the #1 cause of the stutter storm on ruler-click jumps.
-              if (!el.seeking && Math.abs(rawDrift) > 0.05) {
+              //
+              // FIX 2 (Split Boundary Smooth Activation): When a clip activates
+              // at a split boundary and the element is SHARED with the previous
+              // segment (same <video> DOM node), the element's currentTime is
+              // already at (or very near) the correct position — it just played
+              // up to the boundary. Issuing a hard seek here would cancel the
+              // in-flight decode, trigger el.seeking=true, and trip the
+              // buffering detector — causing a playback freeze at every cut.
+              // Allow the PLL to handle drift < 0.15s smoothly instead.
+              const isSharedElement = justActivated && playingIds.size > 0 && (() => {
+                for (const prevId of lastActiveClipIdsRef.current) {
+                  const prevEntry = pool.get(prevId);
+                  if (prevEntry && prevEntry.el === el) return true;
+                }
+                return false;
+              })();
+              const effectiveThreshold = isSharedElement ? 0.15 : 0.05;
+              if (!el.seeking && Math.abs(rawDrift) > effectiveThreshold) {
                 el.currentTime = mediaTime;
                 pendingSeeksRef.current.delete(clip.clipId);
               }
@@ -2292,6 +2337,16 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // advances at most one frame ahead — imperceptible.
       if (playing && !scrubbing) {
         let anyBuffering = false;
+        // FIX 5 (Split Boundary Buffering Suppression): Build a set of
+        // elements currently used by active clips. If a seeking element is
+        // shared with another clip that IS active and playing, the decoder
+        // is still producing frames for the canvas — the transient seeking
+        // state from a boundary seek must NOT freeze the entire playhead.
+        const activeEls = new Set<HTMLMediaElement>();
+        for (const ac of clips) {
+          const ae = pool.get(ac.clipId);
+          if (ae && ae.type === 'video') activeEls.add(ae.el);
+        }
         for (const clip of clips) {
           const entry = pool.get(clip.clipId);
           if (!entry || entry.type !== 'video') continue;
@@ -2302,14 +2357,27 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // readyState < HAVE_CURRENT_DATA (2) means the decoder hasn't produced the
           // frame at `currentTime` yet. `seeking` means a seek is in flight.
           if (el.seeking || (el.readyState < 2 && el.src !== '')) {
-            anyBuffering = true;
-            break;
+            // If this element is shared with another active clip (split sibling),
+            // it's still decoding frames — don't treat it as buffering.
+            let isSharedWithActive = false;
+            for (const ac of clips) {
+              if (ac.clipId === clip.clipId) continue;
+              const ae = pool.get(ac.clipId);
+              if (ae && ae.el === el) { isSharedWithActive = true; break; }
+            }
+            if (!isSharedWithActive) {
+              anyBuffering = true;
+              break;
+            }
           }
         }
         const wasBuffering = store.isBuffering;
         if (anyBuffering) {
           bufferingTickCount++;
-          if (!wasBuffering && bufferingTickCount >= 2) {
+          // FIX 5b: 3-tick hysteresis (~50ms) instead of 2 (~33ms). Split
+          // boundary seeks complete in 1-2 ticks; the extra tick filters
+          // transient buffering without perceptibly advancing the clock.
+          if (!wasBuffering && bufferingTickCount >= 3) {
             store.setIsBuffering(true);
           }
         } else {
@@ -2761,6 +2829,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // ---- Zustand subscription for paused seek (scrubbing) ----
   useEffect(() => {
     if (!isPrimary) return;
+    // FIX 3 (Deferred Paused-Seek): track the latest RAF id for cleanup.
+    let pausedSeekRafId: number | null = null;
     const unsub = useEditorStore.subscribe((state, previous) => {
       if (state.isPlaying || isPreviewSuspendedForExport()) return;
       // History, export UI and autosave notifications are not seek requests.
@@ -2769,55 +2839,91 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       if (state.currentTime === previous.currentTime && state.tracks === previous.tracks &&
           state.mediaLibrary === previous.mediaLibrary && state.pipWindows === previous.pipWindows &&
           state.isPlaying === previous.isPlaying) return;
-      const newTime = getEffectivePreviewTime();
-      const pool = poolRef.current;
-      if (!pool || pool.size === 0) return;
 
-      const freshTracks = useEditorStore.getState().tracks;
-      const freshMediaLibrary = useEditorStore.getState().mediaLibrary;
-      const mediaMap = new Map<string, any>();
-      for (const m of freshMediaLibrary) mediaMap.set(m.id, m);
+      // FIX 3 (Deferred Paused-Seek with Pool-Ready Guard): Defer the seek
+      // via requestAnimationFrame so it fires AFTER React's pool reconciliation
+      // effect has committed. When a clip is moved while paused, this subscriber
+      // fires synchronously during the store update — BEFORE the pool effect
+      // allocates elements for the new clip positions. pool.get(clip.id) would
+      // return undefined for the moved clip, silently skipping it and leaving
+      // the preview showing a stale or black frame. Deferring by one frame
+      // ensures the pool has reconciled.
+      if (pausedSeekRafId !== null) cancelAnimationFrame(pausedSeekRafId);
+      pausedSeekRafId = requestAnimationFrame(() => {
+        pausedSeekRafId = null;
+        if (useEditorStore.getState().isPlaying) return;
+        const newTime = getEffectivePreviewTime();
+        const pool = poolRef.current;
+        if (!pool || pool.size === 0) return;
 
-      for (const track of freshTracks) {
-        if (track.hidden) continue;
-        for (const clip of track.clips) {
-          const isVideo = track.type === 'video' || (clip as any).type === 'video';
-          if (!isVideo) continue;
-          if (newTime < clip.startTime || newTime >= clip.startTime + clip.duration) continue;
+        const freshTracks = useEditorStore.getState().tracks;
+        const freshMediaLibrary = useEditorStore.getState().mediaLibrary;
+        const mediaMap = new Map<string, any>();
+        for (const m of freshMediaLibrary) mediaMap.set(m.id, m);
 
-          const entry = pool.get(clip.id);
-          if (!entry || entry.type !== 'video') continue;
+        for (const track of freshTracks) {
+          if (track.hidden) continue;
+          for (const clip of track.clips) {
+            const isVideo = track.type === 'video' || (clip as any).type === 'video';
+            if (!isVideo) continue;
+            if (newTime < clip.startTime || newTime >= clip.startTime + clip.duration) continue;
 
-          const el = entry.el as HTMLVideoElement;
-          const mediaItem = mediaMap.get(clip.mediaId);
-          const maxDuration = mediaItem ? mediaItem.duration : 10000;
-          const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
-            id: clip.id,
-            startTime: clip.startTime,
-            duration: clip.duration,
-            trimStart: (clip as any).trimStart ?? 0,
-            speed: (clip as any).speed ?? 1,
-            speedRamp: (clip as any).speedRamp,
-            speedFrames: (clip as any).speedFrames,
-            speedFrameSourceEnd: (clip as any).speedFrameSourceEnd,
-            isReversed: (clip as any).isReversed,
-            freezeFrame: (clip as any).freezeFrame,
-          }, newTime)));
+            const entry = pool.get(clip.id);
+            if (!entry || entry.type !== 'video') {
+              // Pool hasn't allocated an element yet — queue the seek target
+              // so the pool effect's seeked handler will drain it when ready.
+              const mediaItem = mediaMap.get(clip.mediaId);
+              const maxDuration = mediaItem ? mediaItem.duration : 10000;
+              const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+                id: clip.id,
+                startTime: clip.startTime,
+                duration: clip.duration,
+                trimStart: (clip as any).trimStart ?? 0,
+                speed: (clip as any).speed ?? 1,
+                speedRamp: (clip as any).speedRamp,
+                speedFrames: (clip as any).speedFrames,
+                speedFrameSourceEnd: (clip as any).speedFrameSourceEnd,
+                isReversed: (clip as any).isReversed,
+                freezeFrame: (clip as any).freezeFrame,
+              }, newTime)));
+              pendingSeeksRef.current.set(clip.id, mediaTime);
+              continue;
+            }
 
-          if (el.seeking) {
-            pendingSeeksRef.current.set(clip.id, mediaTime);
-          } else {
-            const drift = Math.abs(el.currentTime - mediaTime);
-            if (drift > 0.02) {
-              // The entry's single permanent seeked handler drains the latest
-              // pending target. Do not accumulate a new listener per edit.
-              el.currentTime = mediaTime;
+            const el = entry.el as HTMLVideoElement;
+            const mediaItem = mediaMap.get(clip.mediaId);
+            const maxDuration = mediaItem ? mediaItem.duration : 10000;
+            const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+              id: clip.id,
+              startTime: clip.startTime,
+              duration: clip.duration,
+              trimStart: (clip as any).trimStart ?? 0,
+              speed: (clip as any).speed ?? 1,
+              speedRamp: (clip as any).speedRamp,
+              speedFrames: (clip as any).speedFrames,
+              speedFrameSourceEnd: (clip as any).speedFrameSourceEnd,
+              isReversed: (clip as any).isReversed,
+              freezeFrame: (clip as any).freezeFrame,
+            }, newTime)));
+
+            if (el.seeking) {
+              pendingSeeksRef.current.set(clip.id, mediaTime);
+            } else {
+              const drift = Math.abs(el.currentTime - mediaTime);
+              if (drift > 0.02) {
+                // The entry's single permanent seeked handler drains the latest
+                // pending target. Do not accumulate a new listener per edit.
+                el.currentTime = mediaTime;
+              }
             }
           }
         }
-      }
+      });
     });
-    return unsub;
+    return () => {
+      unsub();
+      if (pausedSeekRafId !== null) cancelAnimationFrame(pausedSeekRafId);
+    };
   }, [isPrimary]);
 
   // ---- Visibility handling ----
