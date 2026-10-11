@@ -416,15 +416,42 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         }
       }
 
-      // If a valid non-overlapping placement was found, apply it. Otherwise, block movement.
+      // DRAG FIX: When a non-overlapping placement is found, use it. When ALL
+      // bump offsets fail (every neighboring track has clips at this time), fall
+      // back to placing the clip at the user's desired position on the target
+      // track even if it temporarily overlaps. This lets the user drag a clip
+      // PAST other clips freely. On pointer up, resolveOverlaps() will move
+      // the overlapping clip to an existing blank track of the same type or
+      // automatically create a new dynamic track — preventing permanent overlap.
+      if (!finalUpdates) {
+        // Build fallback updates at bump=0 (the user's intended target track)
+        const fallbackUpdates = [];
+        for (const c of dragState.draggedClips) {
+          const clipNewTime = c.originalStartTime + clampedFinalDt;
+          const clipTrackIdx = latestTracks.findIndex((t) => t.id === c.trackId);
+          const newTrackIdx = clipTrackIdx + trackDelta;
+          const originalTrack = latestTracks.find((t) => t.id === c.trackId);
+          const tTrack = latestTracks[newTrackIdx];
+          const tTrackId = tTrack && originalTrack && tTrack.type === originalTrack.type
+            ? tTrack.id
+            : c.trackId; // fallback to source track if target is incompatible
+          fallbackUpdates.push({
+            clipId: c.id,
+            newStartTime: clipNewTime,
+            newTrackId: tTrackId,
+          });
+        }
+        finalUpdates = fallbackUpdates;
+      }
+
       if (finalUpdates) {
         // Filter out duplicate clip updates (just in case)
         const seen = new Set<string>();
-        const uniqueUpdates = finalUpdates.filter((u) => {
+        const uniqueUpdates = finalUpdates.filter((u: any) => {
           if (seen.has(u.clipId)) return false;
           seen.add(u.clipId);
           return true;
-        }).map(u => ({ clipId: u.clipId, newStartTime: u.newStartTime, newTrackId: u.newTrackId }));
+        }).map((u: any) => ({ clipId: u.clipId, newStartTime: u.newStartTime, newTrackId: u.newTrackId }));
 
         moveClips(uniqueUpdates, false);
       }
