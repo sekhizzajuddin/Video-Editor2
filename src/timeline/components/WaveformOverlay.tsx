@@ -84,11 +84,13 @@ export const WaveformOverlay = React.memo(function WaveformOverlay({
     if (!media) return;
     if (media.waveformPeaks && media.waveformPeaks.length > 0) return;
     let cancelled = false;
-    getWaveformFromDisk(media.id).then((p) => {
-      if (!cancelled && p && p.length > 0) {
-        setDiskPeaks(p);
-      }
-    });
+    getWaveformFromDisk(media.id)
+      .then((p) => {
+        if (!cancelled && p && p.length > 0) {
+          setDiskPeaks(p);
+        }
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };

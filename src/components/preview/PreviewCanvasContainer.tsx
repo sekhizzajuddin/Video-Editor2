@@ -534,193 +534,205 @@ export function PreviewCanvasContainer() {
     };
     document.addEventListener('visibilitychange', onVisChange);
     let isRendering = false;
+    let renderStartTime = 0;
     let lastTime = performance.now();
     let lastSyncTime = performance.now();
     const isMobile = isMobileDevice();
 
     const tick = (now: number) => {
       rafId = requestAnimationFrame(tick);
-      if (isPreviewSuspendedForExport()) {
-        // Keep the last preview image, but leave decoding/compositing resources
-        // to worker export. Capture fallback releases this suspension first.
-        lastTime = now;
-        lastSyncTime = now;
-        framePendingRef.current = true;
-        return;
-      }
+      try {
+        if (isRendering && now - renderStartTime > 5000) {
+          console.warn('PreviewCanvasContainer: isRendering mutex timeout exceeded (5s), resetting lock');
+          isRendering = false;
+          isRenderingRef.current = false;
+        }
 
-      const state = useEditorStore.getState();
-      // While paused, the clock and the store agree exactly (seek/pause both flush
-      // it), so this is the authoritative position in every state.
-      // During trimming, use the trim preview time for canvas rendering.
-      const trimTime = getTrimPreviewTime();
-      const actualTime = trimTime !== null ? trimTime : getPlaybackTime();
-
-      if (state.isPlaying) {
-        // RULER-CLICK / SEEK DURING PLAYBACK: if something wrote a NEW position
-        // to the clock since our last frame (e.g. the user clicked the timeline
-        // ruler while playing), adopt it immediately and keep playing from there
-        // instead of overwriting it with our own accumulated advance.
-        if (Math.abs(actualTime - currentTimeRef.current) > 0.001) {
-          currentTimeRef.current = actualTime;
-          setPlaybackTime(actualTime);
+        if (isPreviewSuspendedForExport()) {
+          // Keep the last preview image, but leave decoding/compositing resources
+          // to worker export. Capture fallback releases this suspension first.
           lastTime = now;
+          lastSyncTime = now;
           framePendingRef.current = true;
+          return;
         }
 
-        // SPEED FRAME FIX: framePending is NOT set unconditionally here.
-        // The change-check below (currentTimeRef vs lastRenderedTimeRef) already
-        // marks every frame where the clock advances. Setting it unconditionally
-        // re-rendered the SAME composite every tick during buffering freezes
-        // (isBuffering holds the clock) — competing with the already-struggling
-        // decoders on ramped/split timelines.
+        const state = useEditorStore.getState();
+        // While paused, the clock and the store agree exactly (seek/pause both flush
+        // it), so this is the authoritative position in every state.
+        // During trimming, use the trim preview time for canvas rendering.
+        const trimTime = getTrimPreviewTime();
+        const actualTime = trimTime !== null ? trimTime : getPlaybackTime();
 
-        const dir = state.playbackDirection ?? 1;
-        const speed = state.playbackSpeed;
-        const currentSeek = state.seek;
-        const currentPause = state.pause;
-
-        let newTime = currentTimeRef.current;
-
-        // BUFFERING FREEZE: when video decoders haven't caught up (isBuffering),
-        // freeze the clock so the playhead doesn't race ahead. Keep lastTime
-        // current so there's no time-jump when buffering clears.
-        if (state.isBuffering) {
-          lastTime = now;
-          // Don't advance newTime — stay at currentTimeRef.current
-        } else if (state.isExporting) {
-          const targetFps = state.exportFps || 30;
-          const frameDuration = 1000 / targetFps;
-          const elapsed = now - lastTime;
-          if (elapsed >= frameDuration) {
-            lastTime = now - (elapsed % frameDuration);
-            newTime = currentTimeRef.current + (1 / targetFps) * speed * dir;
+        if (state.isPlaying) {
+          // RULER-CLICK / SEEK DURING PLAYBACK: if something wrote a NEW position
+          // to the clock since our last frame (e.g. the user clicked the timeline
+          // ruler while playing), adopt it immediately and keep playing from there
+          // instead of overwriting it with our own accumulated advance.
+          if (Math.abs(actualTime - currentTimeRef.current) > 0.001) {
+            currentTimeRef.current = actualTime;
+            setPlaybackTime(actualTime);
+            lastTime = now;
+            framePendingRef.current = true;
           }
-        } else {
-          const dt = (now - lastTime) / 1000;
-          lastTime = now;
-          newTime = currentTimeRef.current + dt * speed * dir;
-        }
 
-        if (newTime !== currentTimeRef.current) {
-          // PERF: both values are ref-cached (recomputed only on allClips /
-          // region change) — was an O(N) clip scan + O(R) region find per frame.
-          const maxEndSequence = maxEndSequenceRef.current;
+          // SPEED FRAME FIX: framePending is NOT set unconditionally here.
+          // The change-check below (currentTimeRef vs lastRenderedTimeRef) already
+          // marks every frame where the clock advances. Setting it unconditionally
+          // re-rendered the SAME composite every tick during buffering freezes
+          // (isBuffering holds the clock) — competing with the already-struggling
+          // decoders on ramped/split timelines.
 
-          const isStretchLooping = state.dynamicStretch?.isActive && state.dynamicStretch?.isLoopingRegion;
-          const selectedRegion = selectedRegionBoundsRef.current;
+          const dir = state.playbackDirection ?? 1;
+          const speed = state.playbackSpeed;
+          const currentSeek = state.seek;
+          const currentPause = state.pause;
 
-          if (isStretchLooping) {
-            const rStart = state.dynamicStretch.markStart;
-            const rEnd = state.dynamicStretch.markEnd;
-            if (newTime >= rEnd || newTime < rStart) {
-              newTime = dir >= 0 ? rStart : rEnd;
-            }
-          } else if (selectedRegion) {
-            const rStart = selectedRegion.start;
-            const rEnd = selectedRegion.end;
-            if (newTime >= rEnd || newTime < rStart) {
-              newTime = dir >= 0 ? rStart : rEnd;
+          let newTime = currentTimeRef.current;
+
+          // BUFFERING FREEZE: when video decoders haven't caught up (isBuffering),
+          // freeze the clock so the playhead doesn't race ahead. Keep lastTime
+          // current so there's no time-jump when buffering clears.
+          if (state.isBuffering) {
+            lastTime = now;
+            // Don't advance newTime — stay at currentTimeRef.current
+          } else if (state.isExporting) {
+            const targetFps = state.exportFps || 30;
+            const frameDuration = 1000 / targetFps;
+            const elapsed = now - lastTime;
+            if (elapsed >= frameDuration) {
+              lastTime = now - (elapsed % frameDuration);
+              newTime = currentTimeRef.current + (1 / targetFps) * speed * dir;
             }
           } else {
-            if (dir < 0 && newTime <= 0) {
-              newTime = 0;
-              currentPause();
-              // BUG FIX: Force immediate seek to 0 — bypass the 30ms throttle.
-              // Without this, the paused else-branch reads store.currentTime (still at end)
-              // on the next tick and reverts currentTimeRef back to the end position,
-              // breaking the second playback. Also resets lastSyncTime so the throttled
-              // seek doesn't fire again right after and clobber this one.
-              currentSeek(0);
-              lastSyncTime = now;
-            } else if (dir >= 0 && newTime >= maxEndSequence) {
-              newTime = 0;
-              currentPause();
-              // BUG FIX: Same as above — force immediate seek on forward-direction end.
-              currentSeek(0);
+            const dt = (now - lastTime) / 1000;
+            lastTime = now;
+            newTime = currentTimeRef.current + dt * speed * dir;
+          }
+
+          if (newTime !== currentTimeRef.current) {
+            // PERF: both values are ref-cached (recomputed only on allClips /
+            // region change) — was an O(N) clip scan + O(R) region find per frame.
+            const maxEndSequence = maxEndSequenceRef.current;
+
+            const isStretchLooping = state.dynamicStretch?.isActive && state.dynamicStretch?.isLoopingRegion;
+            const selectedRegion = selectedRegionBoundsRef.current;
+
+            if (isStretchLooping) {
+              const rStart = state.dynamicStretch.markStart;
+              const rEnd = state.dynamicStretch.markEnd;
+              if (newTime >= rEnd || newTime < rStart) {
+                newTime = dir >= 0 ? rStart : rEnd;
+              }
+            } else if (selectedRegion) {
+              const rStart = selectedRegion.start;
+              const rEnd = selectedRegion.end;
+              if (newTime >= rEnd || newTime < rStart) {
+                newTime = dir >= 0 ? rStart : rEnd;
+              }
+            } else {
+              if (dir < 0 && newTime <= 0) {
+                newTime = 0;
+                currentPause();
+                // BUG FIX: Force immediate seek to 0 — bypass the 30ms throttle.
+                // Without this, the paused else-branch reads store.currentTime (still at end)
+                // on the next tick and reverts currentTimeRef back to the end position,
+                // breaking the second playback. Also resets lastSyncTime so the throttled
+                // seek doesn't fire again right after and clobber this one.
+                currentSeek(0);
+                lastSyncTime = now;
+              } else if (dir >= 0 && newTime >= maxEndSequence) {
+                newTime = 0;
+                currentPause();
+                // BUG FIX: Same as above — force immediate seek on forward-direction end.
+                currentSeek(0);
+                lastSyncTime = now;
+              }
+            }
+
+            currentTimeRef.current = newTime;
+
+            // Publish the EXACT position to the React-free clock every single frame.
+            // The media-sync PLL reads this, so it now measures true drift instead of
+            // the up-to-33ms staircase produced by the throttled store write below.
+            // Removing that quantisation noise is what stops the PLL from chasing
+            // phantom drift and wobbling playbackRate on multi-track timelines.
+            setPlaybackTime(newTime);
+
+            // Sync the store for React consumers (timeline scroll, timecode).
+            // 30 Hz (33ms) keeps the timeline playhead buttery-smooth without
+            // flooding React with 60+ re-renders/sec.
+            if (now - lastSyncTime > 33) {
+              currentSeek(newTime);
               lastSyncTime = now;
             }
           }
+        } else {
+          lastTime = now;
+          lastSyncTime = now;
 
-          currentTimeRef.current = newTime;
-
-          // Publish the EXACT position to the React-free clock every single frame.
-          // The media-sync PLL reads this, so it now measures true drift instead of
-          // the up-to-33ms staircase produced by the throttled store write below.
-          // Removing that quantisation noise is what stops the PLL from chasing
-          // phantom drift and wobbling playbackRate on multi-track timelines.
-          setPlaybackTime(newTime);
-
-          // Sync the store for React consumers (timeline scroll, timecode).
-          // 30 Hz (33ms) keeps the timeline playhead buttery-smooth without
-          // flooding React with 60+ re-renders/sec.
-          if (now - lastSyncTime > 33) {
-            currentSeek(newTime);
-            lastSyncTime = now;
+          if (Math.abs(actualTime - currentTimeRef.current) > 0.001) {
+            currentTimeRef.current = actualTime;
+            framePendingRef.current = true;
           }
         }
-      } else {
-        lastTime = now;
-        lastSyncTime = now;
 
-        if (Math.abs(actualTime - currentTimeRef.current) > 0.001) {
-          currentTimeRef.current = actualTime;
+        if (Math.abs(currentTimeRef.current - lastRenderedTimeRef.current) > 0.001) {
           framePendingRef.current = true;
         }
-      }
+        if (tabVisible && framePendingRef.current) {
+          const freshState = useEditorStore.getState();
+          // CT-2: treat an active canvas transform drag like a scrub for RENDER
+          // quality only — cheap path (skip heavy FX, concurrent renders) removes
+          // the mutex frame-drops that made resizing/rotating feel like the canvas
+          // was fighting the pointer. Audio is unaffected (isScrubbing untouched).
+          const currentlyScrubbing = freshState.isScrubbing || freshState.isEditingTransform;
+          const currentlyPlaying = freshState.isPlaying;
 
-      if (Math.abs(currentTimeRef.current - lastRenderedTimeRef.current) > 0.001) {
-      framePendingRef.current = true;
-    }
-      if (tabVisible && framePendingRef.current) {
-        const freshState = useEditorStore.getState();
-        // CT-2: treat an active canvas transform drag like a scrub for RENDER
-        // quality only — cheap path (skip heavy FX, concurrent renders) removes
-        // the mutex frame-drops that made resizing/rotating feel like the canvas
-        // was fighting the pointer. Audio is unaffected (isScrubbing untouched).
-        const currentlyScrubbing = freshState.isScrubbing || freshState.isEditingTransform;
-        const currentlyPlaying = freshState.isPlaying;
+          // BUG FIX: Restore split mutex strategy.
+          // Scrubbing: allow concurrent renders — scrub renders skip ALL heavy async FX
+          //   (skipExpensiveFX=true when isScrubbing), so they complete near-synchronously.
+          //   Dropping scrub frames makes the playhead feel unresponsive.
+          // Playback: enforce exclusive mutex — playback renders CAN have async mask/AI-bg
+          //   operations. Concurrent renders corrupt Canvas2D ctx.save/restore/transform state
+          //   producing the intermittent chop. A dropped playback frame is invisible;
+          //   a corrupt one is a visible glitch.
+          const allowConcurrentScrub = currentlyScrubbing;
 
-        // BUG FIX: Restore split mutex strategy.
-        // Scrubbing: allow concurrent renders — scrub renders skip ALL heavy async FX
-        //   (skipExpensiveFX=true when isScrubbing), so they complete near-synchronously.
-        //   Dropping scrub frames makes the playhead feel unresponsive.
-        // Playback: enforce exclusive mutex — playback renders CAN have async mask/AI-bg
-        //   operations. Concurrent renders corrupt Canvas2D ctx.save/restore/transform state
-        //   producing the intermittent chop. A dropped playback frame is invisible;
-        //   a corrupt one is a visible glitch.
-        const allowConcurrentScrub = currentlyScrubbing;
+          if (allowConcurrentScrub || !isRendering) {
+            framePendingRef.current = false;
+            if (!allowConcurrentScrub) {
+              isRendering = true;
+              isRenderingRef.current = true;
+              renderStartTime = now;
+            }
 
-        if (allowConcurrentScrub || !isRendering) {
-          framePendingRef.current = false;
-          if (!allowConcurrentScrub) {
-            isRendering = true;
-            isRenderingRef.current = true;
+            // CRITICAL: Patch renderDepsRef with FRESH store data right before rendering.
+            // Without this, renderDepsRef holds stale values because React's useEffect hasn't
+            // processed the Zustand state change yet when the RAF tick fires.
+            const deps = renderDepsRef.current;
+            deps.currentTime = currentTimeRef.current;
+            deps.tracks = freshState.tracks;
+            deps.selectedClipId = freshState.selectedClipId;
+            deps.mediaLibrary = freshState.mediaLibrary;
+            deps.isPlaying = currentlyPlaying;
+            deps.isScrubbing = currentlyScrubbing;
+
+            renderCanvasRef.current()
+              .catch((err: unknown) => {
+                console.error('Error in renderCanvas:', err);
+              })
+              .finally(() => {
+                if (!allowConcurrentScrub) {
+                  isRendering = false;
+                  isRenderingRef.current = false;
+                }
+                lastRenderedTimeRef.current = currentTimeRef.current;
+              });
           }
-
-          // CRITICAL: Patch renderDepsRef with FRESH store data right before rendering.
-          // Without this, renderDepsRef holds stale values because React's useEffect hasn't
-          // processed the Zustand state change yet when the RAF tick fires.
-          const deps = renderDepsRef.current;
-          deps.currentTime = currentTimeRef.current;
-          deps.tracks = freshState.tracks;
-          deps.selectedClipId = freshState.selectedClipId;
-          deps.mediaLibrary = freshState.mediaLibrary;
-          deps.isPlaying = currentlyPlaying;
-          deps.isScrubbing = currentlyScrubbing;
-
-          renderCanvasRef.current()
-            .catch((err: unknown) => {
-              console.error('Error in renderCanvas:', err);
-            })
-            .finally(() => {
-              if (!allowConcurrentScrub) {
-                isRendering = false;
-                isRenderingRef.current = false;
-              }
-              lastRenderedTimeRef.current = currentTimeRef.current;
-            });
         }
+      } catch (err) {
+        console.error('Uncaught error in tick loop:', err);
       }
     };
 

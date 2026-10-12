@@ -276,7 +276,8 @@ export async function renderCanvasEngine({
   isScrubbing: isScrubbingParam,
   renderDeps
 }: RenderCanvasParams) {
-  const currentTime = renderDeps.currentTime;
+  try {
+    const currentTime = renderDeps.currentTime;
   const {
     tracks: tracksRaw,
     mediaLibrary: mediaLibraryRaw,
@@ -1130,7 +1131,8 @@ export async function renderCanvasEngine({
     if (targetCtxForBlend) ctx = targetCtxForBlend;
 
     ctx.save();
-    ctx.globalAlpha = targetCtxForBlend ? 1 : blendPlan.alpha;
+    try {
+      ctx.globalAlpha = targetCtxForBlend ? 1 : blendPlan.alpha;
     ctx.globalCompositeOperation = targetCtxForBlend ? 'source-over' : blendPlan.mode;
 
     // Hard-edge, full-opacity vector masks: exact zero-cost clip. Feathered or
@@ -2707,9 +2709,9 @@ export async function renderCanvasEngine({
       const anim = calculateElementAnimation(currentTime, clip.startTime, clip.duration, es);
       const relTime = Math.max(0, currentTime - clip.startTime);
       renderElement(ctx, es, elemW, elemH, anim, relTime, clip.duration, null, isPlaying);
+    } finally {
+      ctx.restore();
     }
-
-    ctx.restore();
 
     // Resolve the partial blend (see the setup block above for the maths).
     if (blendLayer && blendBackdrop && targetCtxForBlend) {
@@ -3496,5 +3498,9 @@ export async function renderCanvasEngine({
       snapCtx.clearRect(0, 0, snapCanvas.width, snapCanvas.height);
       snapCtx.drawImage(composite, 0, 0);
     }
+  }
+  } catch (err) {
+    console.error('Error in renderCanvasEngine:', err);
+    return;
   }
 }

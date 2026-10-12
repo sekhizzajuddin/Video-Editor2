@@ -57,6 +57,11 @@ if (typeof window !== 'undefined') {
  */
 function releaseMediaElement(el: HTMLVideoElement | HTMLAudioElement) {
   try {
+    const elAny = el as any;
+    if (elAny._onVisibilityChange) {
+      document.removeEventListener('visibilitychange', elAny._onVisibilityChange);
+      delete elAny._onVisibilityChange;
+    }
     el.pause();
     el.removeAttribute('src');
     el.load();
@@ -134,6 +139,7 @@ interface MediaElement {
   _shareKey?: string;
   _shareStart?: number;
   _shareEnd?: number;
+  _migrated?: boolean;
   audioCtx?: AudioContext;
   sourceNode?: MediaElementAudioSourceNode;
   pitchNode?: ScriptProcessorNode;
@@ -1444,6 +1450,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                   } else {
                     mediaVideoRefCount.set(oldKey, oldRc - 1);
                   }
+                  e._shareKey = key;
+                  e._migrated = true;
                   mediaVideoEls.set(key, el);
                   break;
                 }
@@ -1550,6 +1558,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             }
           };
           entry._onVisibilityChange = onVisibilityChange;
+          (el as any)._onVisibilityChange = onVisibilityChange;
           document.addEventListener('visibilitychange', onVisibilityChange);
         }
 
@@ -1596,7 +1605,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
     for (const [clipId, entry] of pool) {
       if (!neededClips.has(clipId)) {
-        entry.el.pause();
+        if (!entry._migrated) {
+          entry.el.pause();
+        }
         const el = entry.el as any;
         if (entry._handleSeeked) el.removeEventListener('seeked', entry._handleSeeked);
         if (entry._mediaRetryLoad) {
@@ -1609,6 +1620,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (entry.sourceNode) { try { entry.sourceNode.disconnect(); } catch (e) {} }
         if (entry.feedbackNode) { try { entry.feedbackNode.disconnect(); } catch(e) {} }
         if (entry.delayNode) { try { entry.delayNode.disconnect(); } catch(e) {} }
+
+        if (entry._migrated) {
+          pool.delete(clipId);
+          videoMap.delete(clipId);
+          pendingSeeksRef.current.delete(clipId);
+          continue;
+        }
 
         if (entry.type === 'video') {
           // Shared element: only tear the element down when the LAST clip
@@ -1629,7 +1647,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             if (entry._rvfcHandle != null && 'cancelVideoFrameCallback' in el) {
               try { el.cancelVideoFrameCallback(entry._rvfcHandle); } catch { /* element gone */ }
             }
-            if (entry._onVisibilityChange) {
+            if (el._onVisibilityChange) {
+              document.removeEventListener('visibilitychange', el._onVisibilityChange);
+              delete el._onVisibilityChange;
+            } else if (entry._onVisibilityChange) {
               document.removeEventListener('visibilitychange', entry._onVisibilityChange);
             }
             releaseMediaElement(el);

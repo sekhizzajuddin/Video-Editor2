@@ -103,7 +103,7 @@ export function useSmoothPlayback({
             isRenderingRef.current = false;
             if (pendingFrameRef.current) {
               pendingFrameRef.current = false;
-              requestAnimationFrame(renderLoop);
+              rafIdRef.current = requestAnimationFrame(renderLoop);
             }
             updatePerformanceMetrics(false);
           })
@@ -116,7 +116,7 @@ export function useSmoothPlayback({
         isRenderingRef.current = false;
         if (pendingFrameRef.current) {
           pendingFrameRef.current = false;
-          requestAnimationFrame(renderLoop);
+          rafIdRef.current = requestAnimationFrame(renderLoop);
         }
         updatePerformanceMetrics(false);
       }
