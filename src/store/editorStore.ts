@@ -2969,7 +2969,15 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       if (!anyMoved) return {};
 
       return { 
-        tracks: newTracks.map(sanitizeTrackSplitGroups),
+        // P2 PERF: sanitizeTrackSplitGroups on every 60Hz drag frame always
+        // creates a new tracks array reference (even when nothing changed),
+        // which invalidates the getClipIndex cache and forces a full rebuild
+        // of the clip-by-id index (N objects + 2 Maps) every single frame.
+        // Only run sanitization when at least one touched track actually HAS
+        // clips with splitGroupIds; skip the .map() entirely otherwise.
+        tracks: movedIds.size > 0 && newTracks.some(t => (t.clips || []).some(c => c.splitGroupId))
+          ? newTracks.map(sanitizeTrackSplitGroups)
+          : newTracks,
         pipWindows: newPipWindows
       };
     });
