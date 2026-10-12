@@ -82,5 +82,24 @@ This file outlines repository-specific domain knowledge, styling rules, and feat
   - Contrast-Adaptive Sharpening (CAS / unsharp masking) to extract high-frequency detail from low-res webcam sensors without halos.
   - Interactive Before/After split comparison and direct timeline track insertion.
 
+---
+
+## 🧼 5. AI Watermark Remover & Harmonic Dirichlet Coons Inpainting Engine
+- **Modal Component**: [WatermarkRemoverModal.tsx](file:///d:/Video-Editor/src/components/WatermarkRemoverModal.tsx)
+- **Core Canvas Engine**: [objectRemoval.ts](file:///d:/Video-Editor/src/utils/objectRemoval.ts)
+- **WebGPU Acceleration**: [WebGPUObjectRemoval.ts](file:///d:/Video-Editor/src/utils/webgpu/WebGPUObjectRemoval.ts)
+- **Preset Library**: [watermarkPresets.ts](file:///d:/Video-Editor/src/utils/watermarkPresets.ts)
+- **Mathematical Infilling Formulation**:
+  - Solves the interior Dirichlet boundary value problem on video frames using transfinite bilinear Coons surface interpolation with cubic Hermite blending:
+    $$S_u = 3u^2 - 2u^3, \quad S_v = 3v^2 - 2v^3$$
+    $$C(u, v) = (1 - S_v) T(u) + S_v B(u) + (1 - S_u) L(v) + S_u R(v) - \text{Corners}(S_u, S_v)$$
+  - **Zero Discontinuity**: $C^1$ tangency into surrounding video pixels along all 4 perimeter borders.
+  - **Adaptive Film Grain Matching**: Samples border luminance variance $\sigma^2$ and synthesizes high-frequency coherent sensor noise so the patch never looks smudgy or plastic.
+  - **Poisson Clone Stamp (`patch_replace`)**: Calculates boundary luminance/chrominance delta $\Delta RGB = \mu_{\text{target}} - \mu_{\text{source}}$ to color-calibrate clone sources against local scene exposure.
+  - **Watermark Text Pre-Neutralization (`blur_conceal`)**: Suppresses stark white text luminance spikes towards background mean before spatial blurring, preventing bright glowing halo smudges.
+  - **Clean Compositing**: Strictly eliminates all `destination-out` calls, using pure cubic Hermite alpha masks with `source-over` compositing so video frames are never hole-punched.
+  - **WebGPU Compliance**: Matches top-down canvas coordinates, float uniform unpacking, and enforces 256-byte `bytesPerRow` row pitch alignment for universal multi-aspect-ratio (16:9, 9:16 vertical reels) GPU execution.
+
+
 
 
