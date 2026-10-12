@@ -2709,6 +2709,7 @@ export async function renderCanvasEngine({
       const anim = calculateElementAnimation(currentTime, clip.startTime, clip.duration, es);
       const relTime = Math.max(0, currentTime - clip.startTime);
       renderElement(ctx, es, elemW, elemH, anim, relTime, clip.duration, null, isPlaying);
+    }
     } finally {
       ctx.restore();
     }
