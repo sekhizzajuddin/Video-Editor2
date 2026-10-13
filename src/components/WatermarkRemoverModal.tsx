@@ -15,12 +15,28 @@ import {
   Maximize2,
   HelpCircle,
   Wand2,
+  Pipette,
+  ScanSearch,
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
-import type { TimelineClip, ClipObjectRemovalSettings, ObjectRemovalMode, ObjectRemovalShape, WatermarkRegion } from '@/types';
+import type {
+  TimelineClip,
+  ClipObjectRemovalSettings,
+  ObjectRemovalMode,
+  ObjectRemovalShape,
+  WatermarkRegion,
+  WatermarkColorProfileId,
+} from '@/types';
 import { applyObjectRemoval } from '@/utils/objectRemoval';
-import { WATERMARK_PRESETS, WatermarkPreset, detectWatermarkRegion, detectWatermarkWithAI } from '@/utils/watermarkPresets';
+import {
+  WATERMARK_PRESETS,
+  WatermarkPreset,
+  FAMOUS_WATERMARK_COLOR_PROFILES,
+  detectWatermarkRegion,
+  detectWatermarkWithAI,
+  scanWatermarkColorInBox,
+} from '@/utils/watermarkPresets';
 import { toast } from 'sonner';
 
 interface WatermarkRemoverModalProps {
@@ -88,7 +104,13 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
   const [settings, setSettings] = useState<ClipObjectRemovalSettings>(() => {
     const initial = activeClip?.objectRemoval;
     if (initial && initial.enabled) {
-      return { ...initial };
+      return {
+        watermarkProfile: 'auto_smart',
+        targetColor: '#FFFFFF',
+        colorTolerance: 38,
+        alphaUnblend: true,
+        ...initial,
+      };
     }
     return {
       enabled: true,
@@ -104,6 +126,10 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
       stretchStrength: 85,
       patchSourceX: 30,
       patchSourceY: 30,
+      watermarkProfile: 'auto_smart',
+      targetColor: '#FFFFFF',
+      colorTolerance: 38,
+      alphaUnblend: true,
       showHighlight: true,
       temporalSmoothing: true,
       quality: 'preview',
@@ -119,6 +145,13 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [showOriginal, setShowOriginal] = useState<boolean>(false);
   const [isDetecting, setIsDetecting] = useState<boolean>(false);
+  const [isPickingColor, setIsPickingColor] = useState<boolean>(false);
+  const [scannedInfo, setScannedInfo] = useState<{
+    detectedHex: string;
+    estimatedOpacity: number;
+    matchedProfileId: WatermarkColorProfileId;
+    watermarkPixelRatio: number;
+  } | null>(null);
 
   // Canvas and video element refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -142,7 +175,13 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
   useEffect(() => {
     if (activeClip) {
       if (activeClip.objectRemoval && activeClip.objectRemoval.enabled) {
-        setSettings({ ...activeClip.objectRemoval });
+        setSettings({
+          watermarkProfile: 'auto_smart',
+          targetColor: '#FFFFFF',
+          colorTolerance: 38,
+          alphaUnblend: true,
+          ...activeClip.objectRemoval,
+        });
       } else {
         setSettings((prev) => ({
           ...prev,
@@ -173,6 +212,10 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
         stretchStrength: settings.stretchStrength,
         patchSourceX: settings.patchSourceX,
         patchSourceY: settings.patchSourceY,
+        watermarkProfile: settings.watermarkProfile ?? 'auto_smart',
+        targetColor: settings.targetColor ?? '#FFFFFF',
+        colorTolerance: settings.colorTolerance ?? 38,
+        alphaUnblend: settings.alphaUnblend ?? true,
       };
     }
     const reg = settings.regions[selectedRegionIndex - 1];
@@ -182,6 +225,10 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
       feather: reg.feather ?? settings.feather ?? 14,
       opacity: reg.opacity ?? settings.opacity ?? 100,
       stretchStrength: reg.stretchStrength ?? settings.stretchStrength ?? 85,
+      watermarkProfile: reg.watermarkProfile ?? settings.watermarkProfile ?? 'auto_smart',
+      targetColor: reg.targetColor ?? settings.targetColor ?? '#FFFFFF',
+      colorTolerance: reg.colorTolerance ?? settings.colorTolerance ?? 38,
+      alphaUnblend: reg.alphaUnblend ?? settings.alphaUnblend ?? true,
     };
   }, [settings, selectedRegionIndex]);
 
@@ -240,8 +287,8 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
       return;
     }
 
-    // If user is holding "Compare Original", do not apply inpainting
-    if (showOriginal) {
+    // If user is holding "Compare Original" or picking watermark color with eyedropper, show clean unedited video
+    if (showOriginal || isPickingColor) {
       return;
     }
 
@@ -292,10 +339,10 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
     };
   }, [isPlaying, renderFrame]);
 
-  // Trigger frame render whenever settings, time or showOriginal changes
+  // Trigger frame render whenever settings, time, showOriginal or isPickingColor changes
   useEffect(() => {
     renderFrame();
-  }, [settings, clipTime, showOriginal, renderFrame]);
+  }, [settings, clipTime, showOriginal, isPickingColor, renderFrame]);
 
   // Scrub time change handler
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,6 +352,78 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
       videoRef.current.currentTime = val;
     }
     renderFrame();
+  };
+
+  // Helper to obtain a clean un-inpainted frame canvas for accurate watermark color scanning
+  const getRawFrameCanvas = useCallback((): HTMLCanvasElement | null => {
+    const video = videoRef.current;
+    const displayCanvas = canvasRef.current;
+    const w = displayCanvas?.width || 1280;
+    const h = displayCanvas?.height || 720;
+    const rawCanvas = document.createElement('canvas');
+    rawCanvas.width = w;
+    rawCanvas.height = h;
+    const rawCtx = rawCanvas.getContext('2d');
+    if (!rawCtx) return null;
+
+    if (video && video.readyState >= 2) {
+      rawCtx.drawImage(video, 0, 0, w, h);
+    } else if (displayCanvas) {
+      rawCtx.drawImage(displayCanvas, 0, 0, w, h);
+    } else {
+      return null;
+    }
+    return rawCanvas;
+  }, []);
+
+  // Scan the marked box for watermark pixel color, opacity, and famous brand signature
+  const handleScanBoxColor = useCallback((customBox?: { x: number; y: number; width: number; height: number }) => {
+    const rawCanvas = getRawFrameCanvas();
+    if (!rawCanvas) return;
+
+    const box = customBox || currentRegion;
+    const result = scanWatermarkColorInBox(rawCanvas, box.x, box.y, box.width, box.height);
+    setScannedInfo(result);
+
+    updateCurrentRegion({
+      watermarkProfile: result.matchedProfileId,
+      targetColor: result.detectedHex,
+      alphaUnblend: true,
+    });
+
+    const matchedProfile = FAMOUS_WATERMARK_COLOR_PROFILES.find((p) => p.id === result.matchedProfileId);
+    toast.success(
+      `Detected ${result.detectedHex} (~${result.estimatedOpacity}% opacity) • ${matchedProfile?.name || 'Smart Match'}`
+    );
+  }, [getRawFrameCanvas, currentRegion, updateCurrentRegion]);
+
+  // Eyedropper click on video canvas to pick exact watermark pixel color
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isPickingColor) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / Math.max(1, rect.width);
+    const scaleY = canvas.height / Math.max(1, rect.height);
+    const px = Math.max(0, Math.min(canvas.width - 1, Math.floor((e.clientX - rect.left) * scaleX)));
+    const py = Math.max(0, Math.min(canvas.height - 1, Math.floor((e.clientY - rect.top) * scaleY)));
+
+    const rawCanvas = getRawFrameCanvas() || canvas;
+    const ctx = rawCanvas.getContext('2d');
+    if (!ctx) return;
+
+    const pixel = ctx.getImageData(px, py, 1, 1).data;
+    const toHex = (n: number) => n.toString(16).padStart(2, '0').toUpperCase();
+    const hex = `#${toHex(pixel[0])}${toHex(pixel[1])}${toHex(pixel[2])}`;
+
+    updateCurrentRegion({
+      watermarkProfile: 'custom_color',
+      targetColor: hex,
+      alphaUnblend: true,
+    });
+    setIsPickingColor(false);
+    toast.success(`Picked watermark color ${hex}`);
   };
 
   // 1-Click Preset application
@@ -331,9 +450,10 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
     toast.info('Scanning frame for watermarks & logos...');
 
     try {
+      const rawCanvas = getRawFrameCanvas() || canvas;
       // 1. Try AI detection if key exists
       let detectedBox: { x: number; y: number; width: number; height: number; label?: string } | null = null;
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const dataUrl = rawCanvas.toDataURL('image/jpeg', 0.85);
 
       try {
         const aiResult = await detectWatermarkWithAI(dataUrl);
@@ -347,26 +467,32 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
 
       // 2. If AI not available, run instant corner edge gradient heuristic
       if (!detectedBox) {
-        const heuristicResult = detectWatermarkRegion(canvas, canvas.width, canvas.height);
+        const heuristicResult = detectWatermarkRegion(rawCanvas, rawCanvas.width, rawCanvas.height);
         if (heuristicResult) {
           detectedBox = heuristicResult;
           toast.success(`Watermark detected at ${heuristicResult.cornerName} (${heuristicResult.confidence}% confidence)`);
         }
       }
 
-      if (detectedBox) {
-        updateCurrentRegion({
-          x: detectedBox.x,
-          y: detectedBox.y,
-          width: detectedBox.width,
-          height: detectedBox.height,
-          mode: 'content_aware',
-          shape: 'rectangle',
-        });
-      } else {
+      const targetBox = detectedBox || { x: 88, y: 88, width: 20, height: 12 };
+      if (!detectedBox) {
         toast.info('No high-contrast watermark detected. Defaulting to Bottom-Right corner.');
-        updateCurrentRegion({ x: 88, y: 88, width: 20, height: 12 });
       }
+
+      const colorScan = scanWatermarkColorInBox(rawCanvas, targetBox.x, targetBox.y, targetBox.width, targetBox.height);
+      setScannedInfo(colorScan);
+
+      updateCurrentRegion({
+        x: targetBox.x,
+        y: targetBox.y,
+        width: targetBox.width,
+        height: targetBox.height,
+        mode: 'content_aware',
+        shape: 'rectangle',
+        watermarkProfile: colorScan.matchedProfileId,
+        targetColor: colorScan.detectedHex,
+        alphaUnblend: true,
+      });
     } catch (err) {
       toast.error('Auto-detection error. Please position box manually.');
     } finally {
@@ -605,11 +731,14 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
                   ref={canvasRef}
                   width={1280}
                   height={720}
-                  className="w-full h-full object-contain block"
+                  onClick={handleCanvasClick}
+                  className={`w-full h-full object-contain block ${
+                    isPickingColor ? 'cursor-crosshair' : ''
+                  }`}
                 />
 
                 {/* INTERACTIVE WATERMARK BOUNDING BOX OVERLAY */}
-                {settings.enabled && !showOriginal && (
+                {settings.enabled && !showOriginal && !isPickingColor && (
                   <div
                     onPointerDown={(e) => handlePointerDown(e, 'move')}
                     className="absolute cursor-move border-2 border-cyan-400 bg-cyan-500/15 hover:bg-cyan-500/25 transition-colors group"
@@ -653,7 +782,7 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
                 )}
 
                 {/* Additional watermark boxes if multi-region */}
-                {settings.enabled && !showOriginal && settings.regions && settings.regions.map((reg, idx) => {
+                {settings.enabled && !showOriginal && !isPickingColor && settings.regions && settings.regions.map((reg, idx) => {
                   const regIdx = idx + 1;
                   if (regIdx === selectedRegionIndex || !reg.enabled) return null;
                   return (
@@ -676,10 +805,17 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
                   );
                 })}
 
-                {/* Original badge indicator when comparing */}
-                {showOriginal && (
-                  <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-amber-500/90 text-black font-bold text-xs uppercase tracking-wider shadow-lg">
-                    Showing Original Video
+                {/* Original badge indicator when comparing or picking color */}
+                {(showOriginal || isPickingColor) && (
+                  <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-amber-500/90 text-black font-bold text-xs uppercase tracking-wider shadow-lg flex items-center gap-1.5">
+                    {isPickingColor ? (
+                      <>
+                        <Pipette className="w-3.5 h-3.5" />
+                        <span>Click any watermark letter to sample its color</span>
+                      </>
+                    ) : (
+                      <span>Showing Original Video</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -800,7 +936,7 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
                 >
                   🔮 Content-Aware
                   <span className="block text-[10px] font-normal text-slate-400 mt-0.5">
-                    AI color diffusion
+                    Smart pixel unblending
                   </span>
                 </button>
 
@@ -847,6 +983,163 @@ export function WatermarkRemoverModal({ onClose }: WatermarkRemoverModalProps) {
                 </button>
               </div>
             </div>
+
+            {/* 2.5 FAMOUS WATERMARK COLOR SIGNATURES & REVERSE ALPHA UNBLENDING */}
+            {currentRegion.mode === 'content_aware' && (
+              <div className="space-y-2.5 pt-2.5 border-t border-white/10 bg-[#131325]/90 p-3 rounded-xl border border-cyan-500/20">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1">
+                    🎨 Watermark Color Signature
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleScanBoxColor()}
+                      className="px-2 py-0.5 text-[10px] font-bold bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 rounded-md flex items-center gap-1 transition-all"
+                      title="Scan marked box to find exact watermark pixel color & opacity"
+                    >
+                      <ScanSearch className="w-3 h-3" />
+                      Scan Box
+                    </button>
+                    <button
+                      onClick={() => setIsPickingColor(!isPickingColor)}
+                      className={`p-1 rounded-md border transition-all ${
+                        isPickingColor
+                          ? 'bg-amber-500 text-black border-amber-400'
+                          : 'bg-[#1a1a32] hover:bg-white/10 text-slate-300 border-white/10'
+                      }`}
+                      title="Pick watermark pixel color directly from video frame"
+                    >
+                      <Pipette className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  Finds only the watermark-colored pixels inside the box and unblends them with background—keeping clean video between letters 100% sharp.
+                </p>
+
+                {/* Scanned Watermark Telemetry Badge */}
+                {scannedInfo && (
+                  <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-black/40 border border-cyan-500/30 text-[10px]">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full border border-white/30 shadow-sm"
+                        style={{ backgroundColor: scannedInfo.detectedHex }}
+                      />
+                      <span className="font-mono font-bold text-white">{scannedInfo.detectedHex}</span>
+                      <span className="text-cyan-300">~{scannedInfo.estimatedOpacity}% α</span>
+                    </div>
+                    <span className="text-slate-400 font-mono">
+                      {Math.round(scannedInfo.watermarkPixelRatio * 100)}% of box
+                    </span>
+                  </div>
+                )}
+
+                {/* Famous Watermark Color Profile Grid */}
+                <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-0.5 custom-scrollbar">
+                  {FAMOUS_WATERMARK_COLOR_PROFILES.map((prof) => {
+                    const isSelected = (currentRegion.watermarkProfile || 'auto_smart') === prof.id;
+                    return (
+                      <button
+                        key={prof.id}
+                        onClick={() =>
+                          updateCurrentRegion({
+                            watermarkProfile: prof.id,
+                            targetColor: prof.primaryHex,
+                            colorTolerance: prof.defaultTolerance,
+                            alphaUnblend: prof.id !== 'full_box',
+                          })
+                        }
+                        className={`p-1.5 rounded-lg text-left border transition-all ${
+                          isSelected
+                            ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-sm'
+                            : 'bg-[#17172b] border-white/5 text-slate-300 hover:border-cyan-500/30'
+                        }`}
+                        title={`${prof.description} (${prof.brands})`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[11px] font-bold truncate">
+                            {prof.icon} {prof.name}
+                          </span>
+                          <div className="flex items-center -space-x-1 shrink-0">
+                            {prof.colors.slice(0, 3).map((c, ci) => (
+                              <span
+                                key={ci}
+                                className="w-2.5 h-2.5 rounded-full border border-black/60"
+                                style={{ backgroundColor: c.hex }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <span className="block text-[9px] text-slate-400 truncate mt-0.5">
+                          {prof.brands}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Target Color Picker + Tolerance Slider */}
+                {currentRegion.watermarkProfile !== 'full_box' && (
+                  <div className="space-y-2 pt-1.5 border-t border-white/10">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-[11px] text-slate-400">Target Watermark Color</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="color"
+                          value={currentRegion.targetColor || '#FFFFFF'}
+                          onChange={(e) =>
+                            updateCurrentRegion({
+                              watermarkProfile: 'custom_color',
+                              targetColor: e.target.value.toUpperCase(),
+                            })
+                          }
+                          className="w-5 h-5 rounded cursor-pointer bg-transparent border-0 p-0"
+                        />
+                        <span className="font-mono text-[11px] text-cyan-300">
+                          {(currentRegion.targetColor || '#FFFFFF').toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Color Detection Sensitivity */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-slate-400">Color Match Sensitivity</span>
+                        <span className="font-mono text-cyan-400">{currentRegion.colorTolerance ?? 38}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={5}
+                        max={95}
+                        step={1}
+                        value={currentRegion.colorTolerance ?? 38}
+                        onChange={(e) => updateCurrentRegion({ colorTolerance: parseFloat(e.target.value) })}
+                        className="w-full h-1.5 bg-[#18182a] rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                      />
+                    </div>
+
+                    {/* Reverse Alpha Unblending Toggle */}
+                    <label className="flex items-center justify-between cursor-pointer select-none pt-1">
+                      <div>
+                        <span className="text-[11px] text-cyan-300 font-semibold block">
+                          🧮 Reverse Alpha Unblending
+                        </span>
+                        <span className="text-[9px] text-slate-400 block">
+                          Recovers video under semi-transparent white (#FFFFFF)
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={currentRegion.alphaUnblend !== false}
+                        onChange={(e) => updateCurrentRegion({ alphaUnblend: e.target.checked })}
+                        className="rounded accent-cyan-500 cursor-pointer"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 3. MULTI-REGION WATERMARK LIST */}
             <div className="space-y-1.5 pt-2 border-t border-white/10">

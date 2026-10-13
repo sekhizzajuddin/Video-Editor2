@@ -701,6 +701,19 @@ export interface ClipLumaKeySettings {
 export type ObjectRemovalMode = 'content_aware' | 'patch_replace' | 'blur_conceal' | 'pixelate';
 export type ObjectRemovalShape = 'rectangle' | 'ellipse' | 'polygon';
 
+export type WatermarkColorProfileId =
+  | 'auto_smart'
+  | 'semi_white'
+  | 'tiktok'
+  | 'kinemaster'
+  | 'filmora'
+  | 'shutterstock'
+  | 'bandicam'
+  | 'capcut'
+  | 'dark_logo'
+  | 'custom_color'
+  | 'full_box';
+
 export interface WatermarkRegion {
   id: string;
   name?: string;
@@ -717,6 +730,10 @@ export interface WatermarkRegion {
   stretchStrength?: number; // Inward diffusion intensity (1 to 100)
   patchSourceX?: number;    // Reference sampling X % (0 to 100)
   patchSourceY?: number;    // Reference sampling Y % (0 to 100)
+  watermarkProfile?: WatermarkColorProfileId; // Famous watermark color signature profile
+  targetColor?: string;     // Specific watermark hex color (e.g. '#FFFFFF')
+  colorTolerance?: number;  // Pixel detection sensitivity (1 to 100, default 55)
+  alphaUnblend?: boolean;   // Reverse alpha unblending for semi-transparent marks
 }
 
 export type ClipWatermarkRegion = WatermarkRegion;
@@ -735,6 +752,10 @@ export interface ClipObjectRemovalSettings {
   stretchStrength?: number; // For content_aware: inward color stretch intensity (1 to 100, default 80)
   patchSourceX?: number;    // For patch_replace: reference sampling X % (0 to 100, default 30)
   patchSourceY?: number;    // For patch_replace: reference sampling Y % (0 to 100, default 30)
+  watermarkProfile?: WatermarkColorProfileId; // Famous watermark color signature (default 'auto_smart')
+  targetColor?: string;     // Custom hex color for watermark pixel matching (default '#FFFFFF')
+  colorTolerance?: number;  // Sensitivity for watermark pixel isolation (1 to 100, default 55)
+  alphaUnblend?: boolean;   // Mathematical reverse alpha unblending (default true)
   showHighlight?: boolean;  // Highlight target area with outline during placement
   temporalSmoothing?: boolean; // Frame-to-frame stabilization for video
   quality?: 'preview' | 'export'; // Fast preview vs studio export quality

@@ -5,7 +5,7 @@
  * channel bugs, timestamps, and logos.
  */
 
-import type { ObjectRemovalMode, ObjectRemovalShape, WatermarkRegion } from '@/types';
+import type { ObjectRemovalMode, ObjectRemovalShape, WatermarkRegion, WatermarkColorProfileId } from '@/types';
 
 export interface WatermarkPreset {
   id: string;
@@ -301,3 +301,446 @@ export async function detectWatermarkWithAI(
 
   return null;
 }
+
+/**
+ * ============================================================================
+ * FAMOUS WATERMARK COLOR SIGNATURES & REVERSE ALPHA UNBLENDING DATABASE
+ * ============================================================================
+ */
+
+export interface WatermarkColorSample {
+  name: string;
+  hex: string;
+  rgb: [number, number, number];
+  typicalAlphaRange: [number, number]; // e.g., [0.15, 0.85]
+  isWhiteOrNeutral?: boolean;
+  isDarkShadow?: boolean;
+}
+
+export interface WatermarkColorProfile {
+  id: WatermarkColorProfileId;
+  name: string;
+  shortName: string;
+  icon: string;
+  brands: string;
+  description: string;
+  primaryHex: string;
+  accentHex?: string;
+  defaultTolerance: number;
+  supportsAlphaUnblend: boolean;
+  colors: WatermarkColorSample[];
+}
+
+export const FAMOUS_WATERMARK_COLOR_PROFILES: WatermarkColorProfile[] = [
+  {
+    id: 'auto_smart',
+    name: 'Auto Smart (Semi-White + All Famous Brands)',
+    shortName: 'Auto Smart',
+    icon: '✨',
+    brands: 'Universal: Veo, Sora, TikTok, KineMaster, Filmora, Stock, TV',
+    description: 'Automatically isolates Semi-Transparent White (#FFFFFF), Silver (#E6E6E6), and famous brand accent colors while keeping clean background pixels untouched.',
+    primaryHex: '#FFFFFF',
+    accentHex: '#25F4EE',
+    defaultTolerance: 55,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'Semi-Transparent White', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.12, 1.0], isWhiteOrNeutral: true },
+      { name: 'Translucent Silver', hex: '#E6E6E6', rgb: [230, 230, 230], typicalAlphaRange: [0.15, 0.90], isWhiteOrNeutral: true },
+      { name: 'TikTok Neon Cyan', hex: '#25F4EE', rgb: [37, 244, 238], typicalAlphaRange: [0.60, 1.0] },
+      { name: 'TikTok / KineMaster Red', hex: '#EE1D51', rgb: [238, 29, 81], typicalAlphaRange: [0.60, 1.0] },
+      { name: 'KineMaster Coral Red', hex: '#E72229', rgb: [231, 34, 41], typicalAlphaRange: [0.60, 1.0] },
+      { name: 'Filmora Mint Cyan', hex: '#28D7C8', rgb: [40, 215, 200], typicalAlphaRange: [0.60, 1.0] },
+      { name: 'Filmora / Viva Orange', hex: '#FF5500', rgb: [255, 85, 0], typicalAlphaRange: [0.60, 1.0] },
+      { name: 'Drop Shadow Black', hex: '#000000', rgb: [0, 0, 0], typicalAlphaRange: [0.15, 0.55], isDarkShadow: true },
+    ],
+  },
+  {
+    id: 'semi_white',
+    name: 'Semi-Transparent White (#FFFFFF)',
+    shortName: 'Semi-White',
+    icon: '🤍',
+    brands: 'Google Veo, Gemini, Sora, Runway, Luma, Kling, YouTube, TV Bugs',
+    description: 'Uses Mathematical Reverse Alpha Unblending to subtract translucent white/silver overlays (#FFFFFF to #D4D4D8) and restore the real video pixels underneath.',
+    primaryHex: '#FFFFFF',
+    accentHex: '#E2E8F0',
+    defaultTolerance: 55,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'Pure White Veil', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.10, 0.95], isWhiteOrNeutral: true },
+      { name: 'Frost Silver', hex: '#E8E8E8', rgb: [232, 232, 232], typicalAlphaRange: [0.15, 0.85], isWhiteOrNeutral: true },
+      { name: 'Soft Gray Mist', hex: '#D4D4D8', rgb: [212, 212, 216], typicalAlphaRange: [0.15, 0.80], isWhiteOrNeutral: true },
+    ],
+  },
+  {
+    id: 'tiktok',
+    name: 'TikTok / Douyin (#FFFFFF + #25F4EE + #EE1D51)',
+    shortName: 'TikTok',
+    icon: '🎵',
+    brands: 'TikTok, Douyin, Musical.ly',
+    description: 'Targets TikTok pure white text (#FFFFFF) plus chromatic glitch Cyan (#25F4EE) and Neon Red/Pink (#EE1D51 / #FE2C55) with dark drop-shadow.',
+    primaryHex: '#25F4EE',
+    accentHex: '#EE1D51',
+    defaultTolerance: 60,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'TikTok White', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.50, 1.0], isWhiteOrNeutral: true },
+      { name: 'TikTok Glitch Cyan', hex: '#25F4EE', rgb: [37, 244, 238], typicalAlphaRange: [0.50, 1.0] },
+      { name: 'TikTok Glitch Pink-Red', hex: '#EE1D51', rgb: [238, 29, 81], typicalAlphaRange: [0.50, 1.0] },
+      { name: 'TikTok Crimson', hex: '#FE2C55', rgb: [254, 44, 85], typicalAlphaRange: [0.50, 1.0] },
+      { name: 'TikTok Shadow', hex: '#010101', rgb: [1, 1, 1], typicalAlphaRange: [0.15, 0.50], isDarkShadow: true },
+    ],
+  },
+  {
+    id: 'kinemaster',
+    name: 'KineMaster (#FFFFFF + #E72229)',
+    shortName: 'KineMaster',
+    icon: '🎬',
+    brands: 'KineMaster Mobile & Pro ("Made with KINEMASTER")',
+    description: 'Targets KineMaster translucent white typography (#FFFFFF) and signature Coral Red K-logo (#E72229 / #FF3B30).',
+    primaryHex: '#E72229',
+    accentHex: '#FFFFFF',
+    defaultTolerance: 58,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'KineMaster White', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.40, 1.0], isWhiteOrNeutral: true },
+      { name: 'KineMaster Brand Red', hex: '#E72229', rgb: [231, 34, 41], typicalAlphaRange: [0.55, 1.0] },
+      { name: 'KineMaster Coral', hex: '#FF3B30', rgb: [255, 59, 48], typicalAlphaRange: [0.55, 1.0] },
+      { name: 'KineMaster Shadow', hex: '#141414', rgb: [20, 20, 20], typicalAlphaRange: [0.15, 0.50], isDarkShadow: true },
+    ],
+  },
+  {
+    id: 'filmora',
+    name: 'Wondershare Filmora (#FFFFFF + #28D7C8 + #FF5500)',
+    shortName: 'Filmora',
+    icon: '💎',
+    brands: 'Wondershare Filmora, FilmoraGo',
+    description: 'Targets Filmora white text (#FFFFFF), Mint-Cyan diamond icon (#28D7C8 / #00E5FF), and Brand Orange (#FF5500).',
+    primaryHex: '#28D7C8',
+    accentHex: '#FF5500',
+    defaultTolerance: 58,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'Filmora White', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.40, 1.0], isWhiteOrNeutral: true },
+      { name: 'Filmora Mint Cyan', hex: '#28D7C8', rgb: [40, 215, 200], typicalAlphaRange: [0.50, 1.0] },
+      { name: 'Filmora Aqua', hex: '#00E5FF', rgb: [0, 229, 255], typicalAlphaRange: [0.50, 1.0] },
+      { name: 'Filmora Coral Orange', hex: '#FF5500', rgb: [255, 85, 0], typicalAlphaRange: [0.50, 1.0] },
+    ],
+  },
+  {
+    id: 'shutterstock',
+    name: 'Stock Agencies (Shutterstock / Getty / Adobe)',
+    shortName: 'Stock Veil',
+    icon: '🏛️',
+    brands: 'Shutterstock, Getty Images, iStock, Adobe Stock, Pond5, Storyblocks',
+    description: 'Specialized low-opacity reverse alpha unblender for 15%–50% translucent white/gray stock preview watermarks and red accents (#E31B23).',
+    primaryHex: '#FFFFFF',
+    accentHex: '#E31B23',
+    defaultTolerance: 62,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'Stock Translucent White', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.10, 0.60], isWhiteOrNeutral: true },
+      { name: 'Stock Neutral Gray', hex: '#CCCCCC', rgb: [204, 204, 204], typicalAlphaRange: [0.10, 0.60], isWhiteOrNeutral: true },
+      { name: 'Shutterstock Red', hex: '#E31B23', rgb: [227, 27, 35], typicalAlphaRange: [0.35, 0.95] },
+    ],
+  },
+  {
+    id: 'bandicam',
+    name: 'Screen Recorders (Bandicam / Camtasia / OBS)',
+    shortName: 'Bandicam',
+    icon: '🖥️',
+    brands: 'www.BANDICAM.com, Camtasia, Fraps, Action!, ScreenRec',
+    description: 'Targets crisp white URL lettering (#FFFFFF) and its dark anti-aliased outer stroke (#1A1A1A).',
+    primaryHex: '#FFFFFF',
+    accentHex: '#1A1A1A',
+    defaultTolerance: 56,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'Bandicam White', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.35, 1.0], isWhiteOrNeutral: true },
+      { name: 'Bandicam Light Gray', hex: '#DCDCDC', rgb: [220, 220, 220], typicalAlphaRange: [0.30, 0.90], isWhiteOrNeutral: true },
+      { name: 'Recorder Dark Stroke', hex: '#1A1A1A', rgb: [26, 26, 26], typicalAlphaRange: [0.20, 0.65], isDarkShadow: true },
+    ],
+  },
+  {
+    id: 'capcut',
+    name: 'CapCut / InShot / VivaVideo / Canva',
+    shortName: 'CapCut / Social',
+    icon: '📱',
+    brands: 'CapCut, InShot, VivaVideo, YouCut, VN, Canva, Kapwing, Veed',
+    description: 'Targets mobile & web editor watermarks in White (#FFFFFF), Viva/InShot Orange (#FF6600), and Canva Cyan (#00C4CC).',
+    primaryHex: '#FFFFFF',
+    accentHex: '#FF6600',
+    defaultTolerance: 56,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'CapCut / InShot White', hex: '#FFFFFF', rgb: [255, 255, 255], typicalAlphaRange: [0.30, 1.0], isWhiteOrNeutral: true },
+      { name: 'VivaVideo / InShot Orange', hex: '#FF6600', rgb: [255, 102, 0], typicalAlphaRange: [0.50, 1.0] },
+      { name: 'Canva Cyan', hex: '#00C4CC', rgb: [0, 196, 204], typicalAlphaRange: [0.50, 1.0] },
+      { name: 'Canva Purple', hex: '#7D2AE8', rgb: [125, 42, 232], typicalAlphaRange: [0.50, 1.0] },
+    ],
+  },
+  {
+    id: 'dark_logo',
+    name: 'Dark / Black Watermark (#000000 – #2C2C2C)',
+    shortName: 'Dark / Black',
+    icon: '🖤',
+    brands: 'Dark Channel Bugs, Black Text on Bright / Daylit Videos',
+    description: 'Detects semi-transparent or solid black/charcoal watermarks (#000000 to #2C2C2C) over bright backgrounds.',
+    primaryHex: '#000000',
+    accentHex: '#2C2C2C',
+    defaultTolerance: 55,
+    supportsAlphaUnblend: true,
+    colors: [
+      { name: 'Pure Black', hex: '#000000', rgb: [0, 0, 0], typicalAlphaRange: [0.15, 1.0], isDarkShadow: true },
+      { name: 'Charcoal Gray', hex: '#2C2C2C', rgb: [44, 44, 44], typicalAlphaRange: [0.15, 0.95], isDarkShadow: true },
+    ],
+  },
+  {
+    id: 'custom_color',
+    name: 'Custom Picked Watermark Color',
+    shortName: 'Custom Color',
+    icon: '🎨',
+    brands: 'Any Custom Brand Logo or Eyedropper Sampled Color',
+    description: 'Isolates pixels matching your custom hex color (or sampled via the video canvas eyedropper) and blends only those pixels with the surrounding background.',
+    primaryHex: '#FFFFFF',
+    defaultTolerance: 55,
+    supportsAlphaUnblend: true,
+    colors: [],
+  },
+  {
+    id: 'full_box',
+    name: 'Full Box Harmonic Infill (Solid Badges)',
+    shortName: 'Full Box',
+    icon: '⬛',
+    brands: 'Opaque Rectangular Banners & Solid Box Overlays',
+    description: 'Replaces 100% of the marked bounding box with Harmonic Dirichlet Coons surface interpolation and camera grain.',
+    primaryHex: '#FFFFFF',
+    defaultTolerance: 100,
+    supportsAlphaUnblend: false,
+    colors: [],
+  },
+];
+
+export function hexToRgb(hex: string): [number, number, number] {
+  const clean = (hex || '#FFFFFF').replace('#', '').trim();
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16) || 255;
+    const g = parseInt(clean[1] + clean[1], 16) || 255;
+    const b = parseInt(clean[2] + clean[2], 16) || 255;
+    return [r, g, b];
+  }
+  const num = parseInt(clean.substring(0, 6), 16);
+  if (isNaN(num)) return [255, 255, 255];
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+export function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+  return (
+    '#' +
+    [clamp(r), clamp(g), clamp(b)]
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase()
+  );
+}
+
+export function getWatermarkColorProfile(profileId?: WatermarkColorProfileId): WatermarkColorProfile {
+  return (
+    FAMOUS_WATERMARK_COLOR_PROFILES.find((p) => p.id === profileId) ||
+    FAMOUS_WATERMARK_COLOR_PROFILES[0]
+  );
+}
+
+/**
+ * Scans the pixels inside the user's marked watermark bounding box and compares
+ * them against the surrounding clean background border ring to automatically
+ * identify the watermark's exact color code (Hex/RGB), estimated semi-transparency (alpha),
+ * and closest Famous Watermark Profile.
+ */
+export function scanWatermarkColorInBox(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  xPct: number,
+  yPct: number,
+  wPct: number,
+  hPct: number
+): {
+  detectedHex: string;
+  detectedRgb: [number, number, number];
+  estimatedAlphaPct: number;
+  estimatedOpacity: number;
+  matchedProfileId: WatermarkColorProfileId;
+  matchedProfileName: string;
+  watermarkPixelsPct: number;
+  watermarkPixelRatio: number;
+} {
+  const fallback = {
+    detectedHex: '#FFFFFF',
+    detectedRgb: [255, 255, 255] as [number, number, number],
+    estimatedAlphaPct: 45,
+    estimatedOpacity: 45,
+    matchedProfileId: 'semi_white' as WatermarkColorProfileId,
+    matchedProfileName: 'Semi-Transparent White (#FFFFFF)',
+    watermarkPixelsPct: 25,
+    watermarkPixelRatio: 0.25,
+  };
+
+  try {
+    const cw = canvas.width || 640;
+    const ch = canvas.height || 360;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true }) as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null;
+    if (!ctx) return fallback;
+
+    const cx = (xPct / 100) * cw;
+    const cy = (yPct / 100) * ch;
+    const bw = Math.max(8, Math.round((wPct / 100) * cw));
+    const bh = Math.max(8, Math.round((hPct / 100) * ch));
+    const pad = 6;
+
+    const sx = Math.max(0, Math.floor(cx - bw / 2 - pad));
+    const sy = Math.max(0, Math.floor(cy - bh / 2 - pad));
+    const sw = Math.min(cw - sx, bw + pad * 2);
+    const sh = Math.min(ch - sy, bh + pad * 2);
+    if (sw <= 4 || sh <= 4) return fallback;
+
+    const imgData = ctx.getImageData(sx, sy, sw, sh);
+    const data = imgData.data;
+
+    // 1. Sample clean perimeter ring to estimate local background mean RGB & luminance
+    let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const isBorder = x < pad || x >= sw - pad || y < pad || y >= sh - pad;
+        if (!isBorder) continue;
+        const idx = (y * sw + x) * 4;
+        bgR += data[idx];
+        bgG += data[idx + 1];
+        bgB += data[idx + 2];
+        bgCount++;
+      }
+    }
+
+    if (bgCount === 0) return fallback;
+    bgR /= bgCount;
+    bgG /= bgCount;
+    bgB /= bgCount;
+    const bgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+
+    // 2. Scan interior pixels for watermark outliers (deviating significantly from background)
+    let wmR = 0, wmG = 0, wmB = 0, wmWeightSum = 0;
+    let wmPixelCount = 0;
+    let totalInterior = 0;
+    let alphaSum = 0;
+
+    for (let y = pad; y < sh - pad; y++) {
+      for (let x = pad; x < sw - pad; x++) {
+        totalInterior++;
+        const idx = (y * sw + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+
+        const dR = r - bgR;
+        const dG = g - bgG;
+        const dB = b - bgB;
+        const colorDist = Math.sqrt(0.3 * dR * dR + 0.59 * dG * dG + 0.11 * dB * dB);
+
+        if (colorDist > 16) {
+          wmPixelCount++;
+          const weight = colorDist;
+          wmR += r * weight;
+          wmG += g * weight;
+          wmB += b * weight;
+          wmWeightSum += weight;
+
+          // Estimate implied alpha if blending toward white or black
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          const estAlpha =
+            lum >= bgLum
+              ? (lum - bgLum) / Math.max(15, 255 - bgLum)
+              : (bgLum - lum) / Math.max(15, bgLum);
+          alphaSum += Math.max(0.1, Math.min(1.0, estAlpha));
+        }
+      }
+    }
+
+    if (wmPixelCount === 0 || wmWeightSum === 0) return fallback;
+
+    const avgWmR = wmR / wmWeightSum;
+    const avgWmG = wmG / wmWeightSum;
+    const avgWmB = wmB / wmWeightSum;
+    const avgAlpha = alphaSum / wmPixelCount;
+
+    // Unblend the observed average watermark pixel from background to find the true pure watermark source color
+    const unblendFactor = Math.max(0.25, Math.min(1.0, avgAlpha));
+    let pureR = bgR + (avgWmR - bgR) / unblendFactor;
+    let pureG = bgG + (avgWmG - bgG) / unblendFactor;
+    let pureB = bgB + (avgWmB - bgB) / unblendFactor;
+
+    pureR = Math.max(0, Math.min(255, pureR));
+    pureG = Math.max(0, Math.min(255, pureG));
+    pureB = Math.max(0, Math.min(255, pureB));
+
+    // If low saturation and high brightness, snap cleanly to #FFFFFF (Semi-Transparent White)
+    const maxC = Math.max(pureR, pureG, pureB);
+    const minC = Math.min(pureR, pureG, pureB);
+    const sat = maxC - minC;
+    const pureLum = 0.299 * pureR + 0.587 * pureG + 0.114 * pureB;
+
+    let matchedProfileId: WatermarkColorProfileId = 'auto_smart';
+    let matchedProfileName = 'Auto Smart (Semi-White + Famous Brands)';
+
+    if (pureLum > 195 && sat < 38) {
+      pureR = 255;
+      pureG = 255;
+      pureB = 255;
+      matchedProfileId = 'semi_white';
+      matchedProfileName = 'Semi-Transparent White (#FFFFFF)';
+    } else if (pureLum < 55 && sat < 35) {
+      pureR = 0;
+      pureG = 0;
+      pureB = 0;
+      matchedProfileId = 'dark_logo';
+      matchedProfileName = 'Dark / Black Watermark (#000000)';
+    } else {
+      // Find closest famous brand color
+      let bestDist = Infinity;
+      for (const prof of FAMOUS_WATERMARK_COLOR_PROFILES) {
+        if (prof.id === 'auto_smart' || prof.id === 'semi_white' || prof.id === 'custom_color' || prof.id === 'full_box') continue;
+        for (const c of prof.colors) {
+          if (c.isWhiteOrNeutral || c.isDarkShadow) continue;
+          const dist = Math.hypot(pureR - c.rgb[0], pureG - c.rgb[1], pureB - c.rgb[2]);
+          if (dist < bestDist) {
+            bestDist = dist;
+            if (dist < 75) {
+              matchedProfileId = prof.id;
+              matchedProfileName = prof.name;
+            }
+          }
+        }
+      }
+    }
+
+    const detectedHex = rgbToHex(pureR, pureG, pureB);
+    const estimatedAlphaPct = Math.max(12, Math.min(100, Math.round(avgAlpha * 100)));
+    const watermarkPixelRatio = Math.max(0.01, Math.min(1.0, wmPixelCount / Math.max(1, totalInterior)));
+    const watermarkPixelsPct = Math.max(1, Math.min(100, Math.round(watermarkPixelRatio * 100)));
+
+    return {
+      detectedHex,
+      detectedRgb: [Math.round(pureR), Math.round(pureG), Math.round(pureB)],
+      estimatedAlphaPct,
+      estimatedOpacity: estimatedAlphaPct,
+      matchedProfileId,
+      matchedProfileName,
+      watermarkPixelsPct,
+      watermarkPixelRatio,
+    };
+  } catch (err) {
+    console.warn('[WatermarkScanner] Failed to scan watermark color in box:', err);
+    return fallback;
+  }
+}
+

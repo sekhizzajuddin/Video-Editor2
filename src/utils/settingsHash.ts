@@ -44,8 +44,12 @@ export function getObjectRemovalSettingsHash(settings: any): string {
     `srcX:${(settings.patchSourceX ?? 30).toFixed(1)}`,
     `srcY:${(settings.patchSourceY ?? 30).toFixed(1)}`,
     `shape:${settings.shape ?? 'rect'}`,
+    `wmProf:${settings.watermarkProfile ?? 'auto_smart'}`,
+    `wmCol:${settings.targetColor ?? ''}`,
+    `wmTol:${settings.colorTolerance ?? 38}`,
+    `wmUnb:${settings.alphaUnblend !== false ? 1 : 0}`,
     settings.regions && settings.regions.length > 0 
-      ? `regions:${settings.regions.map((r: any) => `${r.id}:${r.enabled ? '1' : '0'}:${r.x?.toFixed(1)}:${r.y?.toFixed(1)}:${r.width?.toFixed(1)}:${r.height?.toFixed(1)}:${r.mode}`).join(';')}`
+      ? `regions:${settings.regions.map((r: any) => `${r.id}:${r.enabled ? '1' : '0'}:${r.x?.toFixed(1)}:${r.y?.toFixed(1)}:${r.width?.toFixed(1)}:${r.height?.toFixed(1)}:${r.mode}:${r.watermarkProfile ?? ''}:${r.targetColor ?? ''}:${r.colorTolerance ?? ''}`).join(';')}`
       : 'no_regions',
   ];
   

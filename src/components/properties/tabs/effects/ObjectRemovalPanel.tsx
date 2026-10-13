@@ -5,7 +5,7 @@ import { getAnimatedValue, addOrUpdateKeyframe } from '@/utils/keyframes';
 import { KeyframeControl } from '@/components/KeyframeControls';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
 
-import { WATERMARK_PRESETS } from '@/utils/watermarkPresets';
+import { WATERMARK_PRESETS, FAMOUS_WATERMARK_COLOR_PROFILES } from '@/utils/watermarkPresets';
 
 interface ObjectRemovalPanelProps {
   selectedClip: TimelineClip;
@@ -25,6 +25,10 @@ const defaultSettings: ClipObjectRemovalSettings = {
   stretchStrength: 80,
   patchSourceX: 25,
   patchSourceY: 25,
+  watermarkProfile: 'auto_smart',
+  targetColor: '#FFFFFF',
+  colorTolerance: 38,
+  alphaUnblend: true,
   showHighlight: true,
   temporalSmoothing: true,
   quality: 'preview',
@@ -336,8 +340,93 @@ export function ObjectRemovalPanel({ selectedClip }: ObjectRemovalPanelProps) {
 
           {/* Mode Specific Controls */}
           {or.mode === 'content_aware' && (
-            <div className="bg-cyan-500/10 p-3 rounded-xl border border-cyan-500/20 space-y-2 mt-2">
-              <span className="text-[11px] font-bold text-cyan-600 dark:text-cyan-400 block">🔮 Content-Aware Diffusion</span>
+            <div className="bg-cyan-500/10 p-3 rounded-xl border border-cyan-500/20 space-y-3 mt-2">
+              <span className="text-[11px] font-bold text-cyan-600 dark:text-cyan-400 block">
+                🎨 Smart Watermark Color & Unblending
+              </span>
+
+              {/* Famous Watermark Color Signature Dropdown */}
+              <div className="space-y-1">
+                <span className="text-[10px] text-[var(--theme-text-muted)] font-semibold uppercase block">
+                  Watermark Color Signature
+                </span>
+                <select
+                  value={or.watermarkProfile || 'auto_smart'}
+                  onChange={(e) => {
+                    const prof = FAMOUS_WATERMARK_COLOR_PROFILES.find((p) => p.id === e.target.value);
+                    if (prof) {
+                      updateOR({
+                        watermarkProfile: prof.id,
+                        targetColor: prof.primaryHex,
+                        colorTolerance: prof.defaultTolerance,
+                        alphaUnblend: prof.id !== 'full_box',
+                      });
+                      saveSnapshot();
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--theme-bg-subpanel)] border border-[var(--theme-border)] text-xs text-[var(--theme-text-primary)] focus:outline-none"
+                >
+                  {FAMOUS_WATERMARK_COLOR_PROFILES.map((prof) => (
+                    <option key={prof.id} value={prof.id}>
+                      {prof.icon} {prof.name} ({prof.primaryHex})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {or.watermarkProfile !== 'full_box' && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-[var(--theme-text-muted)] font-medium">
+                      Target Watermark Color
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="color"
+                        value={or.targetColor || '#FFFFFF'}
+                        onChange={(e) => {
+                          updateOR({
+                            watermarkProfile: 'custom_color',
+                            targetColor: e.target.value.toUpperCase(),
+                          });
+                        }}
+                        onBlur={() => saveSnapshot()}
+                        className="w-5 h-5 rounded cursor-pointer bg-transparent border-0 p-0"
+                      />
+                      <span className="text-[11px] font-mono text-cyan-400">
+                        {(or.targetColor || '#FFFFFF').toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {renderSliderControl(
+                    'Color Match Sensitivity',
+                    'colorTolerance',
+                    'objectRemoval.colorTolerance',
+                    getVal(or.colorTolerance, 38, 'objectRemoval.colorTolerance'),
+                    5,
+                    95,
+                    1,
+                    '%'
+                  )}
+
+                  <label className="flex items-center justify-between cursor-pointer select-none pt-1">
+                    <span className="text-[11px] text-cyan-500 dark:text-cyan-300 font-semibold">
+                      🧮 Reverse Alpha Unblending
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={or.alphaUnblend !== false}
+                      onChange={(e) => {
+                        updateOR({ alphaUnblend: e.target.checked });
+                        saveSnapshot();
+                      }}
+                      className="rounded accent-cyan-500 cursor-pointer"
+                    />
+                  </label>
+                </>
+              )}
+
               {renderSliderControl('Inward Stretch Strength', 'stretchStrength', 'objectRemoval.stretchStrength', getVal(or.stretchStrength, 80, 'objectRemoval.stretchStrength'), 1, 100, 1, '%')}
             </div>
           )}

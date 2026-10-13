@@ -36,7 +36,14 @@ struct ObjectRemovalUniforms {
   shape: f32,          // 0=rectangle, 1=ellipse
   canvasWidth: f32,
   canvasHeight: f32,
-  padding: vec2<f32>,
+  targetR: f32,        // Normalized 0..1 target watermark R
+  targetG: f32,        // Normalized 0..1 target watermark G
+  targetB: f32,        // Normalized 0..1 target watermark B
+  colorTolerance: f32, // 0 = full_box, >0 = selective watermark tolerance
+  alphaUnblend: f32,   // 1 = reverse alpha unblending enabled
+  isAutoSmart: f32,    // 1 = auto/brand multi-signature detection
+  pad0: f32,
+  pad1: f32,
 };
 
 @group(0) @binding(0) var<uniform> params: ObjectRemovalUniforms;
@@ -88,8 +95,8 @@ fn getMaskBlendWeight(uv: vec2<f32>) -> f32 {
   }
 }
 
-// Harmonic Dirichlet Coons Boundary Surface Interpolation with sensor film grain
-fn sampleHarmonicInfill(uv: vec2<f32>) -> vec4<f32> {
+// Harmonic Dirichlet Coons Boundary Surface Interpolation + Reverse Alpha Unblending
+fn sampleHarmonicInfill(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
   let cx = params.centerX / params.canvasWidth;
   let cy = params.centerY / params.canvasHeight;
   let halfW = (params.width / params.canvasWidth) * 0.5;
@@ -151,14 +158,60 @@ fn sampleHarmonicInfill(uv: vec2<f32>) -> vec4<f32> {
   let loftX = (1.0 - Su) * L + Su * R;
   let loftXY = (1.0 - Su) * (1.0 - Sv) * CTL + Su * (1.0 - Sv) * CTR + (1.0 - Su) * Sv * CBL + Su * Sv * CBR;
 
-  var color = loftY + loftX - loftXY;
+  var macroBG = clamp(loftY + loftX - loftXY, vec4<f32>(0.0), vec4<f32>(1.0));
 
   // Add coherent camera sensor noise grain
   let grainSeed = uv * vec2<f32>(params.canvasWidth, params.canvasHeight);
   let n = fract(sin(dot(grainSeed, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-  let grain = (n - 0.5) * 0.024 * (params.stretchStrength * 0.01);
+  let grain = (n - 0.5) * 0.024 * params.stretchStrength;
+  let filledBG = clamp(macroBG.rgb + vec3<f32>(grain), vec3<f32>(0.0), vec3<f32>(1.0));
 
-  return clamp(color + vec4<f32>(grain, grain, grain, 0.0), vec4<f32>(0.0), vec4<f32>(1.0));
+  // If full_box mode (colorTolerance <= 0.001), return full Coons infill
+  if (params.colorTolerance <= 0.001) {
+    return vec4<f32>(filledBG, 1.0);
+  }
+
+  // Selective Watermark Pixel Detection & Reverse Alpha Unblending
+  let bgDiff = distance(obsColor.rgb, macroBG.rgb);
+  let minBgDev = max(0.03, (1.0 - params.colorTolerance) * 0.14);
+
+  // If pixel is already indistinguishable from surrounding background (clean pixel between letters), preserve it!
+  if (bgDiff < minBgDev) {
+    return vec4<f32>(obsColor.rgb, 0.0);
+  }
+
+  var wmColor = vec3<f32>(params.targetR, params.targetG, params.targetB);
+  if (params.isAutoSmart > 0.5) {
+    let obsLum = dot(obsColor.rgb, vec3<f32>(0.299, 0.587, 0.114));
+    let bgLum = dot(macroBG.rgb, vec3<f32>(0.299, 0.587, 0.114));
+    if (obsLum >= bgLum + 0.02) {
+      wmColor = vec3<f32>(1.0, 1.0, 1.0); // Semi-transparent white
+    } else if (obsLum < bgLum - 0.05) {
+      wmColor = vec3<f32>(0.06, 0.06, 0.06); // Dark drop shadow / stroke
+    }
+  }
+
+  let vecBGtoWM = wmColor - macroBG.rgb;
+  let vecBGtoObs = obsColor.rgb - macroBG.rgb;
+  let lenWM2 = dot(vecBGtoWM, vecBGtoWM);
+  var estAlpha = clamp(bgDiff / 0.55, 0.15, 0.92);
+  if (lenWM2 > 0.01) {
+    let proj = dot(vecBGtoObs, vecBGtoWM) / lenWM2;
+    if (proj > 0.04) {
+      estAlpha = clamp(proj, 0.06, 0.95);
+    }
+  }
+
+  var finalRGB = filledBG;
+  if (params.alphaUnblend > 0.5 && estAlpha >= 0.05 && estAlpha <= 0.85) {
+    let invOneMinusA = 1.0 / max(0.14, 1.0 - estAlpha);
+    let unblended = clamp((obsColor.rgb - estAlpha * wmColor) * invOneMinusA, vec3<f32>(0.0), vec3<f32>(1.0));
+    let unblendTrust = max(0.0, min(1.0, (0.85 - estAlpha) / 0.55));
+    finalRGB = mix(filledBG, unblended, unblendTrust * 0.72);
+  }
+
+  let maskConfidence = clamp((bgDiff - minBgDev) / max(0.02, minBgDev * 1.5), 0.0, 1.0);
+  return vec4<f32>(finalRGB, maskConfidence);
 }
 
 // Color-calibrated patch replace (clone stamp)
@@ -179,17 +232,17 @@ fn samplePatch(uv: vec2<f32>) -> vec4<f32> {
   let srcBorder = textureSample(inputTexture, textureSampler, clamp(vec2<f32>(srcX, srcY + halfH + 0.01), vec2<f32>(0.0), vec2<f32>(1.0)));
   let delta = tgtBorder - srcBorder;
 
-  return clamp(srcSample + delta * 0.85, vec4<f32>(0.0), vec4<f32>(1.0));
+  return vec4<f32>(clamp((srcSample + delta * 0.85).rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
 
 // Blur with watermark text neutralization
-fn applyBlur(uv: vec2<f32>) -> vec4<f32> {
+fn applyBlur(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
   let blurAmount = max(0.005, (params.width / params.canvasWidth) * 0.03);
   var color: vec4<f32> = vec4<f32>(0.0);
   var weight: f32 = 0.0;
 
   // Center harmonic estimate to pull high-contrast white text glyphs
-  let harmonic = sampleHarmonicInfill(uv);
+  let harmonic = sampleHarmonicInfill(uv, obsColor);
 
   for (var x = -3; x <= 3; x++) {
     for (var y = -3; y <= 3; y++) {
@@ -200,7 +253,7 @@ fn applyBlur(uv: vec2<f32>) -> vec4<f32> {
       // Contrast spike suppression
       let diff = abs(dot(samp.rgb, vec3<f32>(0.299, 0.587, 0.114)) - dot(harmonic.rgb, vec3<f32>(0.299, 0.587, 0.114)));
       if (diff > 0.08) {
-        samp = mix(samp, harmonic, 0.8);
+        samp = mix(samp, vec4<f32>(harmonic.rgb, 1.0), 0.8);
       }
 
       let w = exp(-dot(offset, offset) / max(0.00001, blurAmount * blurAmount));
@@ -212,14 +265,15 @@ fn applyBlur(uv: vec2<f32>) -> vec4<f32> {
   if (weight > 0.0) {
     color /= weight;
   }
-  return color;
+  return vec4<f32>(color.rgb, 1.0);
 }
 
 // Mosaic pixelate
 fn applyPixelate(uv: vec2<f32>) -> vec4<f32> {
   let pixelSize = max(0.005, (params.width / params.canvasWidth) * 0.06);
   let quantizedUV = floor(uv / pixelSize) * pixelSize + pixelSize * 0.5;
-  return textureSample(inputTexture, textureSampler, clamp(quantizedUV, vec2<f32>(0.0), vec2<f32>(1.0)));
+  let s = textureSample(inputTexture, textureSampler, clamp(quantizedUV, vec2<f32>(0.0), vec2<f32>(1.0)));
+  return vec4<f32>(s.rgb, 1.0);
 }
 
 @compute @workgroup_size(16, 16)
@@ -245,18 +299,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   }
 
   var processedColor: vec4<f32>;
-  if (params.mode < 0.5) { // Content-aware Harmonic Coons
-    processedColor = sampleHarmonicInfill(uv);
+  if (params.mode < 0.5) { // Content-aware Harmonic Coons + Selective Unblending
+    processedColor = sampleHarmonicInfill(uv, color);
   } else if (params.mode < 1.5) { // Patch replace
     processedColor = samplePatch(uv);
   } else if (params.mode < 2.5) { // Blur
-    processedColor = applyBlur(uv);
+    processedColor = applyBlur(uv, color);
   } else { // Pixelate
     processedColor = applyPixelate(uv);
   }
 
-  let finalAlpha = blendWeight * (params.opacity * 0.01);
-  let blendedColor = mix(color, processedColor, finalAlpha);
+  let finalAlpha = blendWeight * params.opacity * processedColor.a;
+  let blendedColor = vec4<f32>(mix(color.rgb, processedColor.rgb, finalAlpha), color.a);
 
   textureStore(outputTexture, global_id.xy, blendedColor);
 }
@@ -281,6 +335,12 @@ export interface ObjectRemovalUniforms {
   shape: number;
   canvasWidth: number;
   canvasHeight: number;
+  targetR: number;
+  targetG: number;
+  targetB: number;
+  colorTolerance: number;
+  alphaUnblend: number;
+  isAutoSmart: number;
 }
 
 export class WebGPUObjectRemovalEngine {
@@ -438,7 +498,13 @@ export class WebGPUObjectRemovalEngine {
       settings.shape,
       settings.canvasWidth,
       settings.canvasHeight,
-      0, 0, // padding
+      settings.targetR,
+      settings.targetG,
+      settings.targetB,
+      settings.colorTolerance,
+      settings.alphaUnblend,
+      settings.isAutoSmart,
+      0, 0, // padding (22 floats total = 88 bytes, buffer is 96 bytes)
     ]);
     
     this.device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
@@ -456,6 +522,15 @@ export class WebGPUObjectRemovalEngine {
     if (!this.initialized || !this.device || !this.pipeline || !this.sampler) {
       return null;
     }
+
+    // Parse target Hex color
+    const hex = (settings.targetColor || '#FFFFFF').replace('#', '');
+    const targetR = (parseInt(hex.substring(0, 2), 16) || 255) / 255;
+    const targetG = (parseInt(hex.substring(2, 4), 16) || 255) / 255;
+    const targetB = (parseInt(hex.substring(4, 6), 16) || 255) / 255;
+    const profileId = settings.watermarkProfile || 'auto_smart';
+    const isFullBox = profileId === 'full_box';
+    const isAutoSmart = profileId !== 'custom_color' && profileId !== 'semi_white' && !isFullBox ? 1 : 0;
     
     // Convert percentage settings to pixels
     const uniforms: ObjectRemovalUniforms = {
@@ -473,6 +548,12 @@ export class WebGPUObjectRemovalEngine {
       shape: settings.shape === 'ellipse' ? 1 : 0,
       canvasWidth,
       canvasHeight,
+      targetR: profileId === 'dark_logo' ? 0.08 : targetR,
+      targetG: profileId === 'dark_logo' ? 0.08 : targetG,
+      targetB: profileId === 'dark_logo' ? 0.08 : targetB,
+      colorTolerance: isFullBox ? 0 : (settings.colorTolerance ?? 38) / 100,
+      alphaUnblend: settings.alphaUnblend !== false ? 1 : 0,
+      isAutoSmart,
     };
     
     // Create input texture
@@ -484,10 +565,10 @@ export class WebGPUObjectRemovalEngine {
     if (!outputTexture) return null;
     
     // Create or update uniform buffer
-    if (!this.uniformBuffer || this.uniformBuffer.size < 64) {
+    if (!this.uniformBuffer || this.uniformBuffer.size < 96) {
       this.uniformBuffer?.destroy();
       this.uniformBuffer = this.device.createBuffer({
-        size: 64,
+        size: 96,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
     }

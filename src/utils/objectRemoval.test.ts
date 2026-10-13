@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { applyObjectRemoval, generateObjectRemovalInpaint, clearObjectRemovalCache } from './objectRemoval';
+import { scanWatermarkColorInBox, FAMOUS_WATERMARK_COLOR_PROFILES } from './watermarkPresets';
 import type { ClipObjectRemovalSettings } from '@/types';
 
 class MockCanvasContext {
@@ -10,6 +11,9 @@ class MockCanvasContext {
   globalCompositeOperation: string = 'source-over';
   imageSmoothingEnabled: boolean = true;
   filter: string = 'none';
+  tx: number = 0;
+  ty: number = 0;
+  private stack: { tx: number; ty: number; globalAlpha: number; globalCompositeOperation: string }[] = [];
 
   constructor(width: number, height: number, initialColor = [0, 128, 0, 255]) {
     this.width = width;
@@ -31,9 +35,27 @@ class MockCanvasContext {
     };
   }
 
-  save() {}
-  restore() {}
-  translate() {}
+  save() {
+    this.stack.push({
+      tx: this.tx,
+      ty: this.ty,
+      globalAlpha: this.globalAlpha,
+      globalCompositeOperation: this.globalCompositeOperation,
+    });
+  }
+  restore() {
+    const s = this.stack.pop();
+    if (s) {
+      this.tx = s.tx;
+      this.ty = s.ty;
+      this.globalAlpha = s.globalAlpha;
+      this.globalCompositeOperation = s.globalCompositeOperation;
+    }
+  }
+  translate(x: number, y: number) {
+    this.tx += x;
+    this.ty += y;
+  }
   rotate() {}
   beginPath() {}
   rect() {}
@@ -49,10 +71,10 @@ class MockCanvasContext {
   createRadialGradient() { return { addColorStop() {} }; }
 
   clearRect(x: number, y: number, w: number, h: number) {
-    const startX = Math.max(0, Math.floor(x));
-    const startY = Math.max(0, Math.floor(y));
-    const endX = Math.min(this.width, Math.ceil(x + w));
-    const endY = Math.min(this.height, Math.ceil(y + h));
+    const startX = Math.max(0, Math.floor(x + this.tx));
+    const startY = Math.max(0, Math.floor(y + this.ty));
+    const endX = Math.min(this.width, Math.ceil(x + this.tx + w));
+    const endY = Math.min(this.height, Math.ceil(y + this.ty + h));
     for (let py = startY; py < endY; py++) {
       for (let px = startX; px < endX; px++) {
         const idx = (py * this.width + px) * 4;
@@ -103,9 +125,11 @@ class MockCanvasContext {
   }
 
   drawImage(source: any, ...args: number[]) {
-    // Basic drawImage simulation
-    let sx = 0, sy = 0, sw = this.width, sh = this.height;
-    let dx = 0, dy = 0, dw = this.width, dh = this.height;
+    const srcCtx = source.getContext ? source.getContext('2d') : null;
+    if (!srcCtx) return;
+
+    let sx = 0, sy = 0, sw = srcCtx.width, sh = srcCtx.height;
+    let dx = 0, dy = 0, dw = srcCtx.width, dh = srcCtx.height;
 
     if (args.length === 2) {
       dx = args[0]; dy = args[1];
@@ -116,13 +140,10 @@ class MockCanvasContext {
       dx = args[4]; dy = args[5]; dw = args[6]; dh = args[7];
     }
 
-    const srcCtx = source.getContext ? source.getContext('2d') : null;
-    if (!srcCtx) return;
-
     for (let y = 0; y < dh; y++) {
       for (let x = 0; x < dw; x++) {
-        const targetX = Math.round(dx + x);
-        const targetY = Math.round(dy + y);
+        const targetX = Math.round(dx + this.tx + x);
+        const targetY = Math.round(dy + this.ty + y);
         if (targetX < 0 || targetX >= this.width || targetY < 0 || targetY >= this.height) continue;
 
         const srcX = Math.round(sx + (x / Math.max(1, dw)) * sw);
@@ -223,6 +244,93 @@ describe('Harmonic Inpainting & Watermark Removal Engine', () => {
     expect(b).toBeLessThan(40);
     // Crucial: No destination-out hole punching (alpha must remain 255)
     expect(a).toBe(255);
+  });
+
+  it('unblends semi-transparent white (#FFFFFF) watermark strokes while keeping clean pixels between letters 100% untouched', () => {
+    const W = 200;
+    const H = 200;
+    // Deep ocean blue background: (20, 80, 180)
+    const bgR = 20, bgG = 80, bgB = 180;
+    const ctx = new MockCanvasContext(W, H, [bgR, bgG, bgB, 255]);
+
+    // Draw a thin semi-transparent white letter stroke at x = 98..102, y = 90..110 (alpha = 0.50)
+    // While x = 85, y = 100 is inside the marked box (75..125) and represents a clean pixel between letters
+    const wmAlpha = 0.50;
+    for (let y = 90; y <= 110; y++) {
+      for (let x = 98; x <= 102; x++) {
+        const idx = (y * W + x) * 4;
+        ctx.data[idx] = Math.round(wmAlpha * 255 + (1 - wmAlpha) * bgR);     // ~138
+        ctx.data[idx + 1] = Math.round(wmAlpha * 255 + (1 - wmAlpha) * bgG); // ~168
+        ctx.data[idx + 2] = Math.round(wmAlpha * 255 + (1 - wmAlpha) * bgB); // ~218
+      }
+    }
+
+    const settings: ClipObjectRemovalSettings = {
+      enabled: true,
+      mode: 'content_aware',
+      shape: 'rectangle',
+      x: 50,
+      y: 50,
+      width: 25,
+      height: 25,
+      rotation: 0,
+      feather: 6,
+      opacity: 100,
+      stretchStrength: 80,
+      watermarkProfile: 'semi_white',
+      targetColor: '#FFFFFF',
+      colorTolerance: 38,
+      alphaUnblend: true,
+    };
+
+    applyObjectRemoval(
+      ctx as any,
+      W,
+      H,
+      settings,
+      0,
+      0,
+      ctx.canvas as any,
+      undefined,
+      false,
+      'semi_white_test'
+    );
+
+    // 1. Check that the semi-transparent white stroke at (100, 100) was unblended back to the ocean blue background
+    const strokeIdx = (100 * W + 100) * 4;
+    expect(ctx.data[strokeIdx]).toBeLessThan(45);     // Restored from ~138 back near 20
+    expect(ctx.data[strokeIdx + 1]).toBeLessThan(105); // Restored from ~168 back near 80
+    expect(ctx.data[strokeIdx + 2]).toBeGreaterThan(155); // Restored near 180
+
+    // 2. Check that the clean video pixel between letters at (85, 100) inside the box remained 100% untouched!
+    const cleanBetweenLettersIdx = (100 * W + 85) * 4;
+    expect(ctx.data[cleanBetweenLettersIdx]).toBe(bgR);
+    expect(ctx.data[cleanBetweenLettersIdx + 1]).toBe(bgG);
+    expect(ctx.data[cleanBetweenLettersIdx + 2]).toBe(bgB);
+  });
+
+  it('scanWatermarkColorInBox detects semi-transparent white and famous watermark brand profiles', () => {
+    expect(FAMOUS_WATERMARK_COLOR_PROFILES.length).toBeGreaterThanOrEqual(9);
+
+    const W = 200;
+    const H = 200;
+    const ctx = new MockCanvasContext(W, H, [30, 40, 50, 255]);
+
+    // Stamp semi-transparent white text inside bottom-right box (x=80%, y=80%)
+    for (let y = 152; y <= 168; y++) {
+      for (let x = 152; x <= 168; x++) {
+        const idx = (y * W + x) * 4;
+        ctx.data[idx] = 210;
+        ctx.data[idx + 1] = 215;
+        ctx.data[idx + 2] = 220;
+      }
+    }
+
+    const scanResult = scanWatermarkColorInBox(ctx.canvas as any, 80, 80, 20, 20);
+    expect(scanResult.detectedHex).toBe('#FFFFFF');
+    expect(scanResult.matchedProfileId).toBe('semi_white');
+    expect(scanResult.estimatedOpacity).toBeGreaterThan(50);
+    expect(scanResult.watermarkPixelRatio).toBeGreaterThan(0.05);
   });
 
   it('generateObjectRemovalInpaint never returns empty or black frame in single-region mode', () => {

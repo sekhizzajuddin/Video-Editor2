@@ -96,10 +96,13 @@ This file outlines repository-specific domain knowledge, styling rules, and feat
   - **Zero Discontinuity**: $C^1$ tangency into surrounding video pixels along all 4 perimeter borders.
   - **Adaptive Film Grain Matching**: Samples border luminance variance $\sigma^2$ and synthesizes high-frequency coherent sensor noise so the patch never looks smudgy or plastic.
   - **Poisson Clone Stamp (`patch_replace`)**: Calculates boundary luminance/chrominance delta $\Delta RGB = \mu_{\text{target}} - \mu_{\text{source}}$ to color-calibrate clone sources against local scene exposure.
-  - **Watermark Text Pre-Neutralization (`blur_conceal`)**: Suppresses stark white text luminance spikes towards background mean before spatial blurring, preventing bright glowing halo smudges.
+  - **Selective Watermark Pixel Segmentation & Famous Brand Color Database**:
+    - Defined in `FAMOUS_WATERMARK_COLOR_PROFILES` inside [watermarkPresets.ts](file:///d:/Video-Editor/src/utils/watermarkPresets.ts): Semi-Transparent White (`#FFFFFF`, `#E8E8E8`, `#D4D4D8`), TikTok/Douyin (`#FFFFFF`, `#25F4EE`, `#EE1D51`, `#FE2C55`), KineMaster (`#FFFFFF`, `#E72229`), Wondershare Filmora (`#FFFFFF`, `#28D7C8`, `#FF5500`), Shutterstock/Stock (`#FFFFFF`, `#CCCCCC`, `#E31B23`), Bandicam (`#FFFFFF`, `#1A1A1A`), CapCut/InShot/Canva (`#FFFFFF`, `#FF6600`, `#00C4CC`), and Dark Logos (`#000000`–`#2C2C2C`).
+    - `scanWatermarkColorInBox` scans the user's marked region to automatically detect the watermark's exact Hex color, estimated opacity ($\hat{\alpha}$), and matching brand profile.
+  - **Mathematical Reverse Alpha Unblending & Local Clean-Pixel Telea Diffusion**:
+    - Instead of replacing 100% of the bounding box (which destroys the 70%+ of clean video pixels between watermark letters), the engine segments only the watermark-colored pixels (`wmMask > 0`) and leaves non-watermark pixels at `outAlpha = 0` (100% sharp, untouched original video).
+    - Confirmed clean pixels *inside* the box diffuse across the 2–5px letter strokes over 6 spatial relaxation passes (`localBG`).
+    - Semi-transparent watermark pixels ($\hat{\alpha} \in [0.05, 0.86]$) are unblended using the inverse alpha compositing equation (inspired by open-source tools `allenk/GeminiWatermarkTool`, `allenk/VeoWatermarkRemover`, and Dekel et al. CVPR *"On the Effectiveness of Visible Watermarks"*):
+      $$I_{\text{unblended}} = \frac{I_{\text{observed}} - \hat{\alpha} \cdot C_{\text{watermark}}}{1 - \hat{\alpha}}$$
   - **Clean Compositing**: Strictly eliminates all `destination-out` calls, using pure cubic Hermite alpha masks with `source-over` compositing so video frames are never hole-punched.
   - **WebGPU Compliance**: Matches top-down canvas coordinates, float uniform unpacking, and enforces 256-byte `bytesPerRow` row pitch alignment for universal multi-aspect-ratio (16:9, 9:16 vertical reels) GPU execution.
-
-
-
-
