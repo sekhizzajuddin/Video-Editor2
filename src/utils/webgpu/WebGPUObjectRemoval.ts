@@ -95,8 +95,10 @@ fn getMaskBlendWeight(uv: vec2<f32>) -> f32 {
   }
 }
 
-// Harmonic Dirichlet Coons Boundary Surface Interpolation + Reverse Alpha Unblending
-fn sampleHarmonicInfill(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
+// Multi-Directional Texture Synthesis + Boundary Coons Reference + Reverse Alpha Unblending
+// GPU-parallelizable approximation of PatchMatch: samples surrounding texture from 8 directions,
+// mirrors it inward, and weights by color continuity with Coons boundary estimate.
+fn sampleTextureInfill(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
   let cx = params.centerX / params.canvasWidth;
   let cy = params.centerY / params.canvasHeight;
   let halfW = (params.width / params.canvasWidth) * 0.5;
@@ -116,19 +118,17 @@ fn sampleHarmonicInfill(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
   let padX = (params.feather * 0.5 + 3.0) / params.canvasWidth;
   let padY = (params.feather * 0.5 + 3.0) / params.canvasHeight;
 
-  // Sample top, bottom, left, right in rotated box space
+  // ── Coons Boundary Surface (kept as reference for watermark mask detection) ──
   let topLocal = vec2<f32>(rx, -halfH - padY);
   let botLocal = vec2<f32>(rx, halfH + padY);
   let leftLocal = vec2<f32>(-halfW - padX, ry);
   let rightLocal = vec2<f32>(halfW + padX, ry);
 
-  // Convert local rotated points to world UV (inverse rotation)
   let uvTop = clamp(vec2<f32>(cx + topLocal.x * cosRot + topLocal.y * sinRot, cy - topLocal.x * sinRot + topLocal.y * cosRot), vec2<f32>(0.0), vec2<f32>(1.0));
   let uvBot = clamp(vec2<f32>(cx + botLocal.x * cosRot + botLocal.y * sinRot, cy - botLocal.x * sinRot + botLocal.y * cosRot), vec2<f32>(0.0), vec2<f32>(1.0));
   let uvLeft = clamp(vec2<f32>(cx + leftLocal.x * cosRot + leftLocal.y * sinRot, cy - leftLocal.x * sinRot + leftLocal.y * cosRot), vec2<f32>(0.0), vec2<f32>(1.0));
   let uvRight = clamp(vec2<f32>(cx + rightLocal.x * cosRot + rightLocal.y * sinRot, cy - rightLocal.x * sinRot + rightLocal.y * cosRot), vec2<f32>(0.0), vec2<f32>(1.0));
 
-  // Corner nodes
   let tlLocal = vec2<f32>(-halfW - padX, -halfH - padY);
   let trLocal = vec2<f32>(halfW + padX, -halfH - padY);
   let blLocal = vec2<f32>(-halfW - padX, halfH + padY);
@@ -139,39 +139,149 @@ fn sampleHarmonicInfill(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
   let uvBL = clamp(vec2<f32>(cx + blLocal.x * cosRot + blLocal.y * sinRot, cy - blLocal.x * sinRot + blLocal.y * cosRot), vec2<f32>(0.0), vec2<f32>(1.0));
   let uvBR = clamp(vec2<f32>(cx + brLocal.x * cosRot + brLocal.y * sinRot, cy - brLocal.x * sinRot + brLocal.y * cosRot), vec2<f32>(0.0), vec2<f32>(1.0));
 
-  let T = textureSample(inputTexture, textureSampler, uvTop);
-  let B = textureSample(inputTexture, textureSampler, uvBot);
-  let L = textureSample(inputTexture, textureSampler, uvLeft);
-  let R = textureSample(inputTexture, textureSampler, uvRight);
+  let sT = textureSample(inputTexture, textureSampler, uvTop);
+  let sB = textureSample(inputTexture, textureSampler, uvBot);
+  let sL = textureSample(inputTexture, textureSampler, uvLeft);
+  let sR = textureSample(inputTexture, textureSampler, uvRight);
 
   let CTL = textureSample(inputTexture, textureSampler, uvTL);
   let CTR = textureSample(inputTexture, textureSampler, uvTR);
   let CBL = textureSample(inputTexture, textureSampler, uvBL);
   let CBR = textureSample(inputTexture, textureSampler, uvBR);
 
-  // Cubic Hermite smoothstep
   let Su = u * u * (3.0 - 2.0 * u);
   let Sv = v * v * (3.0 - 2.0 * v);
 
-  // Coons Boundary Blending
-  let loftY = (1.0 - Sv) * T + Sv * B;
-  let loftX = (1.0 - Su) * L + Su * R;
+  let loftY = (1.0 - Sv) * sT + Sv * sB;
+  let loftX = (1.0 - Su) * sL + Su * sR;
   let loftXY = (1.0 - Su) * (1.0 - Sv) * CTL + Su * (1.0 - Sv) * CTR + (1.0 - Su) * Sv * CBL + Su * Sv * CBR;
-
   var macroBG = clamp(loftY + loftX - loftXY, vec4<f32>(0.0), vec4<f32>(1.0));
+
+  // ── Multi-Directional Texture Synthesis ──
+  // Sample texture from 8 directions outside the box, mirror inward, weight by color continuity
+  // This is a GPU-parallelizable approximation of PatchMatch NNF texture synthesis
+
+  // 8 directional rays in local rotated box space (N, NE, E, SE, S, SW, W, NW)
+  let dir0 = vec2<f32>( 0.0, -1.0);  // N
+  let dir1 = vec2<f32>( 0.707, -0.707); // NE
+  let dir2 = vec2<f32>( 1.0,  0.0);  // E
+  let dir3 = vec2<f32>( 0.707,  0.707); // SE
+  let dir4 = vec2<f32>( 0.0,  1.0);  // S
+  let dir5 = vec2<f32>(-0.707,  0.707); // SW
+  let dir6 = vec2<f32>(-1.0,  0.0);  // W
+  let dir7 = vec2<f32>(-0.707, -0.707); // NW
+
+  // Accumulate best 4 directional texture samples weighted by color continuity
+  var bestW = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+  var bestC = array<vec3<f32>, 4>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+
+  // Process each direction: find boundary intersection, sample mirrored texture, compute weight
+  let dirs = array<vec2<f32>, 8>(dir0, dir1, dir2, dir3, dir4, dir5, dir6, dir7);
+
+  for (var i = 0u; i < 8u; i++) {
+    let d = dirs[i];
+
+    // Ray-box intersection: find distance to box edge along direction d from pixel (rx, ry)
+    var tBound = 1e6;
+    if (abs(d.x) > 0.001) {
+      let tR = (halfW - rx) / d.x;
+      let tL = (-halfW - rx) / d.x;
+      let tX = select(tL, tR, d.x > 0.0);
+      if (tX > 0.0) { tBound = min(tBound, tX); }
+    }
+    if (abs(d.y) > 0.001) {
+      let tB = (halfH - ry) / d.y;
+      let tT = (-halfH - ry) / d.y;
+      let tY = select(tT, tB, d.y > 0.0);
+      if (tY > 0.0) { tBound = min(tBound, tY); }
+    }
+    if (tBound > 1e5) { continue; }
+
+    // Edge position where the ray exits the box (in local rotated space)
+    let edgeLocal = vec2<f32>(
+      clamp(rx + d.x * tBound, -halfW, halfW),
+      clamp(ry + d.y * tBound, -halfH, halfH)
+    );
+
+    // Sample border color just outside the box along this direction
+    let borderLocal = edgeLocal + d * vec2<f32>(padX, padY);
+    let borderUV = clamp(vec2<f32>(
+      cx + borderLocal.x * cosRot + borderLocal.y * sinRot,
+      cy - borderLocal.x * sinRot + borderLocal.y * cosRot
+    ), vec2<f32>(0.0), vec2<f32>(1.0));
+    let borderCol = textureSample(inputTexture, textureSampler, borderUV);
+
+    // Coons prediction at this edge point for color continuity check
+    let ub = clamp((edgeLocal.x + halfW) / max(0.0001, 2.0 * halfW), 0.0, 1.0);
+    let vb = clamp((edgeLocal.y + halfH) / max(0.0001, 2.0 * halfH), 0.0, 1.0);
+    let Sub = ub * ub * (3.0 - 2.0 * ub);
+    let Svb = vb * vb * (3.0 - 2.0 * vb);
+    let coonsPred = clamp(
+      (1.0 - Svb) * sT + Svb * sB + (1.0 - Sub) * sL + Sub * sR
+      - ((1.0 - Sub) * (1.0 - Svb) * CTL + Sub * (1.0 - Svb) * CTR + (1.0 - Sub) * Svb * CBL + Sub * Svb * CBR),
+      vec4<f32>(0.0), vec4<f32>(1.0)
+    );
+
+    // Color continuity: how well does the border color match the Coons prediction?
+    let colDiff = distance(borderCol.rgb, coonsPred.rgb);
+
+    // Mirror texture from outside box: sample at the reflected position across the boundary
+    let mirrorDist = tBound + padX * 2.0; // How far to sample outside
+    let mirrorLocal = edgeLocal + d * vec2<f32>(padX * 2.5, padY * 2.5);
+    let mirrorUV = clamp(vec2<f32>(
+      cx + mirrorLocal.x * cosRot + mirrorLocal.y * sinRot,
+      cy - mirrorLocal.x * sinRot + mirrorLocal.y * cosRot
+    ), vec2<f32>(0.0), vec2<f32>(1.0));
+    let texSample = textureSample(inputTexture, textureSampler, mirrorUV);
+
+    // Adjust sampled texture toward Coons prediction for color consistency
+    let candidate = mix(texSample.rgb, coonsPred.rgb, 0.25);
+
+    // Direction weight: prefer directions with low color difference (better continuity)
+    // and directions closer to the pixel (shorter boundary distance)
+    let continuityW = exp(-colDiff * colDiff * 25.0);
+    let proximityW = 1.0 / (1.0 + tBound * 3.0);
+    let dirWeight = continuityW * proximityW;
+
+    // Insert into sorted top-4 list
+    if (dirWeight > bestW[3]) {
+      if (dirWeight > bestW[0]) {
+        bestW[3] = bestW[2]; bestC[3] = bestC[2];
+        bestW[2] = bestW[1]; bestC[2] = bestC[1];
+        bestW[1] = bestW[0]; bestC[1] = bestC[0];
+        bestW[0] = dirWeight; bestC[0] = candidate;
+      } else if (dirWeight > bestW[1]) {
+        bestW[3] = bestW[2]; bestC[3] = bestC[2];
+        bestW[2] = bestW[1]; bestC[2] = bestC[1];
+        bestW[1] = dirWeight; bestC[1] = candidate;
+      } else if (dirWeight > bestW[2]) {
+        bestW[3] = bestW[2]; bestC[3] = bestC[2];
+        bestW[2] = dirWeight; bestC[2] = candidate;
+      } else {
+        bestW[3] = dirWeight; bestC[3] = candidate;
+      }
+    }
+  }
+
+  // Blend best directional samples weighted by their continuity scores
+  let totalW = bestW[0] + bestW[1] + bestW[2] + bestW[3];
+  var synthColor = macroBG.rgb; // Fallback to Coons if no direction found
+  if (totalW > 0.001) {
+    synthColor = (bestC[0] * bestW[0] + bestC[1] * bestW[1] + bestC[2] * bestW[2] + bestC[3] * bestW[3]) / totalW;
+  }
 
   // Add coherent camera sensor noise grain
   let grainSeed = uv * vec2<f32>(params.canvasWidth, params.canvasHeight);
   let n = fract(sin(dot(grainSeed, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   let grain = (n - 0.5) * 0.024 * params.stretchStrength;
-  let filledBG = clamp(macroBG.rgb + vec3<f32>(grain), vec3<f32>(0.0), vec3<f32>(1.0));
+  let filledBG = clamp(synthColor + vec3<f32>(grain), vec3<f32>(0.0), vec3<f32>(1.0));
 
-  // If full_box mode (colorTolerance <= 0.001), return full Coons infill
+  // If full_box mode (colorTolerance <= 0.001), return full synthesized infill
   if (params.colorTolerance <= 0.001) {
     return vec4<f32>(filledBG, 1.0);
   }
 
-  // Selective Watermark Pixel Detection & Reverse Alpha Unblending
+  // ── Selective Watermark Pixel Detection & Reverse Alpha Unblending ──
   let bgDiff = distance(obsColor.rgb, macroBG.rgb);
   let minBgDev = max(0.03, (1.0 - params.colorTolerance) * 0.14);
 
@@ -212,6 +322,11 @@ fn sampleHarmonicInfill(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
 
   let maskConfidence = clamp((bgDiff - minBgDev) / max(0.02, minBgDev * 1.5), 0.0, 1.0);
   return vec4<f32>(finalRGB, maskConfidence);
+}
+
+// Backward compatibility alias for applyBlur which calls sampleHarmonicInfill
+fn sampleHarmonicInfill(uv: vec2<f32>, obsColor: vec4<f32>) -> vec4<f32> {
+  return sampleTextureInfill(uv, obsColor);
 }
 
 // Color-calibrated patch replace (clone stamp)
@@ -299,8 +414,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   }
 
   var processedColor: vec4<f32>;
-  if (params.mode < 0.5) { // Content-aware Harmonic Coons + Selective Unblending
-    processedColor = sampleHarmonicInfill(uv, color);
+  if (params.mode < 0.5) { // Content-aware Texture Synthesis + Selective Unblending
+    processedColor = sampleTextureInfill(uv, color);
   } else if (params.mode < 1.5) { // Patch replace
     processedColor = samplePatch(uv);
   } else if (params.mode < 2.5) { // Blur

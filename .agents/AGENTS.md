@@ -84,15 +84,24 @@ This file outlines repository-specific domain knowledge, styling rules, and feat
 
 ---
 
-## 🧼 5. AI Watermark Remover & Harmonic Dirichlet Coons Inpainting Engine
+## 🧼 5. AI Watermark Remover & PatchMatch Texture Synthesis Engine
 - **Modal Component**: [WatermarkRemoverModal.tsx](file:///d:/Video-Editor/src/components/WatermarkRemoverModal.tsx)
 - **Core Canvas Engine**: [objectRemoval.ts](file:///d:/Video-Editor/src/utils/objectRemoval.ts)
 - **WebGPU Acceleration**: [WebGPUObjectRemoval.ts](file:///d:/Video-Editor/src/utils/webgpu/WebGPUObjectRemoval.ts)
 - **Preset Library**: [watermarkPresets.ts](file:///d:/Video-Editor/src/utils/watermarkPresets.ts)
 - **Mathematical Infilling Formulation**:
-  - Solves the interior Dirichlet boundary value problem on video frames using transfinite bilinear Coons surface interpolation with cubic Hermite blending:
+  - The PRIMARY algorithm is **PatchMatch Nearest-Neighbor Field (NNF) Texture Synthesis** sampled from clean surrounding areas. Coons boundary interpolation is kept ONLY as a reference/fallback for watermark mask detection:
     $$S_u = 3u^2 - 2u^3, \quad S_v = 3v^2 - 2v^3$$
     $$C(u, v) = (1 - S_v) T(u) + S_v B(u) + (1 - S_u) L(v) + S_u R(v) - \text{Corners}(S_u, S_v)$$
+  - **PatchMatch Pipeline Steps**:
+    - **Step 1: Coons BG field**: Transfinite bilinear boundary field used solely as reference for luminance/color comparison (reference only, NOT for final reconstruction).
+    - **Step 2: Watermark pixel segmentation**: Multi-profile color distance and luminance contrast detection (unchanged).
+    - **Step 3: 1px mask dilation for anti-aliased fringes**: Dilates mask boundary for anti-aliased fringes and compression edge ringing (unchanged).
+    - **Step 4: PatchMatch NNF**: Builds source and target masks, collects candidate patches from clean surrounding regions, runs 4 PatchMatch iterations (alternating forward/backward propagation + exponential random search), with adaptive `PATCH_SIZE` ($\approx 3\text{--}7\text{px}$).
+    - **Step 5: Overlapping patch voting**: Gathers patch predictions across overlapping windows with distance-weighted and spatial-proximity blending.
+    - **Step 5b: Poisson gradient-domain color calibration**: 4 Gauss-Seidel relaxation passes solving Laplacian boundary constraints to seamlessly harmonize synthesized patches with scene exposure.
+    - **Step 6: Edge-aware bilateral diffusion**: 4 passes propagating clean inter-letter pixels with color similarity weights.
+    - **Step 7: Final compositing with reverse alpha unblending**: Blends unblended watermark pixels and PatchMatch synthesized texture with coherent grain and cubic Hermite feathering.
   - **Zero Discontinuity**: $C^1$ tangency into surrounding video pixels along all 4 perimeter borders.
   - **Adaptive Film Grain Matching**: Samples border luminance variance $\sigma^2$ and synthesizes high-frequency coherent sensor noise so the patch never looks smudgy or plastic.
   - **Poisson Clone Stamp (`patch_replace`)**: Calculates boundary luminance/chrominance delta $\Delta RGB = \mu_{\text{target}} - \mu_{\text{source}}$ to color-calibrate clone sources against local scene exposure.

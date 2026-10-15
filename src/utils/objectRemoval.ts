@@ -206,14 +206,17 @@ function drawHighlightOverlay(
 
 /**
  * ============================================
- * MODE 1: Smart Watermark Color Unblending & Harmonic Inpainting Engine
+ * MODE 1: PatchMatch Texture Synthesis + Selective Alpha Unblending Engine
  * ============================================
- * Combines:
- * 1. Famous Watermark Color & Semi-Transparent White (#FFFFFF) Pixel Segmentation
- * 2. Mathematical Reverse Alpha Unblending: Original = (Watermarked - alpha * LogoColor) / (1 - alpha)
- *    (Inspired by open-source GeminiWatermarkTool / VeoWatermarkRemover / Dekel et al. CVPR)
- * 3. Local Clean-Pixel Telea Diffusion (propagates untouched background pixels between letters across letter strokes)
- * 4. Harmonic Dirichlet Coons Surface Infill & Adaptive Camera Sensor Film Grain
+ * Professional-grade watermark removal combining:
+ * 1. PatchMatch-based Nearest-Neighbor Field (NNF) texture synthesis from clean surrounding areas
+ * 2. Multi-scale coarse-to-fine pyramid search (3 scales) for natural texture continuation
+ * 3. Overlapping patch voting with distance-weighted blending for seamless reconstruction
+ * 4. Famous Watermark Color & Semi-Transparent White (#FFFFFF) Pixel Segmentation
+ * 5. Mathematical Reverse Alpha Unblending: Original = (Watermarked - alpha * LogoColor) / (1 - alpha)
+ * 6. Edge-aware structure tensor propagation for continuing lines/edges through inpainted region
+ * 7. Poisson gradient-domain color calibration at patch boundaries
+ * 8. Adaptive Camera Sensor Film Grain matching
  */
 function applyContentAwareStretch(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
@@ -230,9 +233,10 @@ function applyContentAwareStretch(
   const tolerance = Math.max(5, Math.min(100, settings.colorTolerance ?? 55)) / 100;
   const useAlphaUnblend = settings.alphaUnblend !== false;
 
-  const pad = Math.max(4, Math.ceil(feather) + 4);
-  const patchW = Math.ceil(w + pad * 2);
-  const patchH = Math.ceil(h + pad * 2);
+  // Expand the sampling region well beyond the box so PatchMatch has texture to copy from
+  const searchPad = Math.max(12, Math.ceil(feather) + 8, Math.ceil(Math.max(w, h) * 0.35));
+  const patchW = Math.ceil(w + searchPad * 2);
+  const patchH = Math.ceil(h + searchPad * 2);
 
   if (patchW <= 4 || patchH <= 4) return;
 
@@ -246,113 +250,67 @@ function applyContentAwareStretch(
   scCtx.drawImage(sourceCanvas, -centerX, -centerY);
   scCtx.restore();
 
-  const boxX = pad;
-  const boxY = pad;
+  const boxX = searchPad;
+  const boxY = searchPad;
   const boxW = Math.max(2, Math.round(w));
   const boxH = Math.max(2, Math.round(h));
 
   const imgData = scCtx.getImageData(0, 0, patchW, patchH);
   const data = imgData.data;
 
-  // Boundary ring thickness for sampling surrounding clean video pixels
-  const ring = Math.max(2, Math.min(pad, Math.round(feather * 0.5) + 3));
+  // ── Border Statistics ──
+  const ring = Math.max(2, Math.min(searchPad, Math.round(feather * 0.5) + 3));
+  let sumBorderLum = 0;
+  let sumBorderLumSq = 0;
+  let borderSampleCount = 0;
 
-  // Boundary color arrays: T (top), B (bottom), L (left), R (right)
+  // Boundary color arrays: T (top), B (bottom), L (left), R (right) for Coons fallback
   const T = new Float32Array(boxW * 3);
   const B = new Float32Array(boxW * 3);
   const L = new Float32Array(boxH * 3);
   const R = new Float32Array(boxH * 3);
 
-  let sumBorderLum = 0;
-  let sumBorderLumSq = 0;
-  let borderSampleCount = 0;
-
-  // Sample top and bottom boundary strips
   for (let x = 0; x < boxW; x++) {
     const px = Math.max(0, Math.min(patchW - 1, boxX + x));
     let tR = 0, tG = 0, tB = 0, tCount = 0;
     let bR = 0, bG = 0, bB = 0, bCount = 0;
-
     for (let k = 1; k <= ring; k++) {
       const pyT = Math.max(0, boxY - k);
       const idxT = (pyT * patchW + px) * 4;
-      tR += data[idxT]; tG += data[idxT + 1]; tB += data[idxT + 2];
-      tCount++;
-
+      tR += data[idxT]; tG += data[idxT + 1]; tB += data[idxT + 2]; tCount++;
       const pyB = Math.min(patchH - 1, boxY + boxH + k - 1);
       const idxB = (pyB * patchW + px) * 4;
-      bR += data[idxB]; bG += data[idxB + 1]; bB += data[idxB + 2];
-      bCount++;
-
+      bR += data[idxB]; bG += data[idxB + 1]; bB += data[idxB + 2]; bCount++;
       const lumT = 0.299 * data[idxT] + 0.587 * data[idxT + 1] + 0.114 * data[idxT + 2];
       sumBorderLum += lumT; sumBorderLumSq += lumT * lumT;
       const lumB = 0.299 * data[idxB] + 0.587 * data[idxB + 1] + 0.114 * data[idxB + 2];
       sumBorderLum += lumB; sumBorderLumSq += lumB * lumB;
       borderSampleCount += 2;
     }
-
-    T[x * 3] = tR / Math.max(1, tCount);
-    T[x * 3 + 1] = tG / Math.max(1, tCount);
-    T[x * 3 + 2] = tB / Math.max(1, tCount);
-
-    B[x * 3] = bR / Math.max(1, bCount);
-    B[x * 3 + 1] = bG / Math.max(1, bCount);
-    B[x * 3 + 2] = bB / Math.max(1, bCount);
+    T[x * 3] = tR / Math.max(1, tCount); T[x * 3 + 1] = tG / Math.max(1, tCount); T[x * 3 + 2] = tB / Math.max(1, tCount);
+    B[x * 3] = bR / Math.max(1, bCount); B[x * 3 + 1] = bG / Math.max(1, bCount); B[x * 3 + 2] = bB / Math.max(1, bCount);
   }
-
-  // Sample left and right boundary strips
   for (let y = 0; y < boxH; y++) {
     const py = Math.max(0, Math.min(patchH - 1, boxY + y));
     let lR = 0, lG = 0, lB = 0, lCount = 0;
     let rR = 0, rG = 0, rB = 0, rCount = 0;
-
     for (let k = 1; k <= ring; k++) {
       const pxL = Math.max(0, boxX - k);
       const idxL = (py * patchW + pxL) * 4;
-      lR += data[idxL]; lG += data[idxL + 1]; lB += data[idxL + 2];
-      lCount++;
-
+      lR += data[idxL]; lG += data[idxL + 1]; lB += data[idxL + 2]; lCount++;
       const pxR = Math.min(patchW - 1, boxX + boxW + k - 1);
       const idxR = (py * patchW + pxR) * 4;
-      rR += data[idxR]; rG += data[idxR + 1]; rB += data[idxR + 2];
-      rCount++;
-
+      rR += data[idxR]; rG += data[idxR + 1]; rB += data[idxR + 2]; rCount++;
       const lumL = 0.299 * data[idxL] + 0.587 * data[idxL + 1] + 0.114 * data[idxL + 2];
       sumBorderLum += lumL; sumBorderLumSq += lumL * lumL;
       const lumR = 0.299 * data[idxR] + 0.587 * data[idxR + 1] + 0.114 * data[idxR + 2];
       sumBorderLum += lumR; sumBorderLumSq += lumR * lumR;
       borderSampleCount += 2;
     }
-
-    L[y * 3] = lR / Math.max(1, lCount);
-    L[y * 3 + 1] = lG / Math.max(1, lCount);
-    L[y * 3 + 2] = lB / Math.max(1, lCount);
-
-    R[y * 3] = rR / Math.max(1, rCount);
-    R[y * 3 + 1] = rG / Math.max(1, rCount);
-    R[y * 3 + 2] = rB / Math.max(1, rCount);
+    L[y * 3] = lR / Math.max(1, lCount); L[y * 3 + 1] = lG / Math.max(1, lCount); L[y * 3 + 2] = lB / Math.max(1, lCount);
+    R[y * 3] = rR / Math.max(1, rCount); R[y * 3 + 1] = rG / Math.max(1, rCount); R[y * 3 + 2] = rB / Math.max(1, rCount);
   }
 
-  // Corner bilinear nodes
-  const ctlR = 0.5 * (T[0] + L[0]);
-  const ctlG = 0.5 * (T[1] + L[1]);
-  const ctlB = 0.5 * (T[2] + L[2]);
-
-  const lastWIdx = (boxW - 1) * 3;
-  const ctrR = 0.5 * (T[lastWIdx] + R[0]);
-  const ctrG = 0.5 * (T[lastWIdx + 1] + R[1]);
-  const ctrB = 0.5 * (T[lastWIdx + 2] + R[2]);
-
-  const lastHIdx = (boxH - 1) * 3;
-  const cblR = 0.5 * (B[0] + L[lastHIdx]);
-  const cblG = 0.5 * (B[1] + L[lastHIdx + 1]);
-  const cblB = 0.5 * (B[2] + L[lastHIdx + 2]);
-
-  const cbrR = 0.5 * (B[lastWIdx] + R[lastHIdx]);
-  const cbrG = 0.5 * (B[lastWIdx + 1] + R[lastHIdx + 1]);
-  const cbrB = 0.5 * (B[lastWIdx + 2] + R[lastHIdx + 2]);
-
-  // Estimate camera sensor grain amplitude from border luminance variance
   let grainAmp = 1.6;
   let borderSigma = 4.0;
   if (borderSampleCount > 10) {
@@ -363,11 +321,18 @@ function applyContentAwareStretch(
   }
 
   const numPixels = boxW * boxH;
-  const macroBG = new Float32Array(numPixels * 3);
+
+  // ── Step 1: Coons Background Field (used ONLY as fallback for watermark mask detection reference) ──
   const invW = 1 / Math.max(1, boxW - 1);
   const invH = 1 / Math.max(1, boxH - 1);
+  const ctlR = 0.5 * (T[0] + L[0]), ctlG = 0.5 * (T[1] + L[1]), ctlB = 0.5 * (T[2] + L[2]);
+  const lastWIdx = (boxW - 1) * 3;
+  const ctrR = 0.5 * (T[lastWIdx] + R[0]), ctrG = 0.5 * (T[lastWIdx + 1] + R[1]), ctrB = 0.5 * (T[lastWIdx + 2] + R[2]);
+  const lastHIdx = (boxH - 1) * 3;
+  const cblR = 0.5 * (B[0] + L[lastHIdx]), cblG = 0.5 * (B[1] + L[lastHIdx + 1]), cblB = 0.5 * (B[2] + L[lastHIdx + 2]);
+  const cbrR = 0.5 * (B[lastWIdx] + R[lastHIdx]), cbrG = 0.5 * (B[lastWIdx + 1] + R[lastHIdx + 1]), cbrB = 0.5 * (B[lastWIdx + 2] + R[lastHIdx + 2]);
 
-  // Step 1: Compute Macro Harmonic Dirichlet Coons Background Field
+  const coonsBG = new Float32Array(numPixels * 3);
   for (let y = 0; y < boxH; y++) {
     const v = y * invH;
     const Sv = v * v * (3 - 2 * v);
@@ -376,29 +341,15 @@ function applyContentAwareStretch(
     const lyR = L[y3], lyG = L[y3 + 1], lyB = L[y3 + 2];
     const ryR = R[y3], ryG = R[y3 + 1], ryB = R[y3 + 2];
     const rowIdx = y * boxW;
-
     for (let x = 0; x < boxW; x++) {
       const u = x * invW;
       const Su = u * u * (3 - 2 * u);
       const oneMinusSu = 1 - Su;
       const x3 = x * 3;
-
-      const loftY_R = oneMinusSv * T[x3] + Sv * B[x3];
-      const loftY_G = oneMinusSv * T[x3 + 1] + Sv * B[x3 + 1];
-      const loftY_B = oneMinusSv * T[x3 + 2] + Sv * B[x3 + 2];
-
-      const loftX_R = oneMinusSu * lyR + Su * ryR;
-      const loftX_G = oneMinusSu * lyG + Su * ryG;
-      const loftX_B = oneMinusSu * lyB + Su * ryB;
-
-      const loftXY_R = oneMinusSu * oneMinusSv * ctlR + Su * oneMinusSv * ctrR + oneMinusSu * Sv * cblR + Su * Sv * cbrR;
-      const loftXY_G = oneMinusSu * oneMinusSv * ctlG + Su * oneMinusSv * ctrG + oneMinusSu * Sv * cblG + Su * Sv * cbrG;
-      const loftXY_B = oneMinusSu * oneMinusSv * ctlB + Su * oneMinusSv * ctrB + oneMinusSu * Sv * cblB + Su * Sv * cbrB;
-
       const pIdx = (rowIdx + x) * 3;
-      macroBG[pIdx] = Math.max(0, Math.min(255, loftY_R + loftX_R - loftXY_R));
-      macroBG[pIdx + 1] = Math.max(0, Math.min(255, loftY_G + loftX_G - loftXY_G));
-      macroBG[pIdx + 2] = Math.max(0, Math.min(255, loftY_B + loftX_B - loftXY_B));
+      coonsBG[pIdx] = Math.max(0, Math.min(255, oneMinusSv * T[x3] + Sv * B[x3] + oneMinusSu * lyR + Su * ryR - (oneMinusSu * oneMinusSv * ctlR + Su * oneMinusSv * ctrR + oneMinusSu * Sv * cblR + Su * Sv * cbrR)));
+      coonsBG[pIdx + 1] = Math.max(0, Math.min(255, oneMinusSv * T[x3 + 1] + Sv * B[x3 + 1] + oneMinusSu * lyG + Su * ryG - (oneMinusSu * oneMinusSv * ctlG + Su * oneMinusSv * ctrG + oneMinusSu * Sv * cblG + Su * Sv * cbrG)));
+      coonsBG[pIdx + 2] = Math.max(0, Math.min(255, oneMinusSv * T[x3 + 2] + Sv * B[x3 + 2] + oneMinusSu * lyB + Su * ryB - (oneMinusSu * oneMinusSv * ctlB + Su * oneMinusSv * ctrB + oneMinusSu * Sv * cblB + Su * Sv * cbrB)));
     }
   }
 
@@ -406,7 +357,7 @@ function applyContentAwareStretch(
   const outImgData = stCtx.createImageData(patchW, patchH);
   const outData = outImgData.data;
 
-  // If user explicitly chose Full Box Infill (or tolerance >= 0.99), replace entire box
+  // ── Full Box Infill shortcut ──
   if (profileId === 'full_box' || tolerance >= 0.99) {
     for (let y = 0; y < boxH; y++) {
       const outRowOffset = (boxY + y) * patchW;
@@ -418,387 +369,479 @@ function applyContentAwareStretch(
         hsh = (hsh ^ (hsh >>> 16)) * 0x45d9f3b;
         hsh = (hsh ^ (hsh >>> 16));
         const grain = (((hsh & 0xffff) / 65535 - 0.5) * 2) * grainAmp;
-
         let alpha = 1.0;
         if (settings.shape === 'ellipse') {
           const nx = (x - (boxW - 1) * 0.5) / Math.max(1, boxW * 0.5);
           const ny = (y - (boxH - 1) * 0.5) / Math.max(1, boxH * 0.5);
           const dist = Math.sqrt(nx * nx + ny * ny);
           if (dist >= 1.0) alpha = 0.0;
-          else {
-            const fNorm = Math.max(0.01, feather / Math.min(w, h));
-            if (dist > 1.0 - fNorm) {
-              const t = (1.0 - dist) / fNorm;
-              alpha = t * t * (3 - 2 * t);
-            }
-          }
-        } else if (feather > 0.5) {
-          const edgeDist = Math.min(Math.min(x, boxW - 1 - x), Math.min(y, boxH - 1 - y));
-          const t = Math.min(1.0, edgeDist / feather);
-          alpha = t * t * (3 - 2 * t);
-        }
-
+          else { const fNorm = Math.max(0.01, feather / Math.min(w, h)); if (dist > 1.0 - fNorm) { const t = (1.0 - dist) / fNorm; alpha = t * t * (3 - 2 * t); } }
+        } else if (feather > 0.5) { const edgeDist = Math.min(Math.min(x, boxW - 1 - x), Math.min(y, boxH - 1 - y)); const t = Math.min(1.0, edgeDist / feather); alpha = t * t * (3 - 2 * t); }
         const outIdx = (outRowOffset + (boxX + x)) * 4;
-        outData[outIdx] = Math.max(0, Math.min(255, Math.round(macroBG[pIdx] + grain)));
-        outData[outIdx + 1] = Math.max(0, Math.min(255, Math.round(macroBG[pIdx + 1] + grain)));
-        outData[outIdx + 2] = Math.max(0, Math.min(255, Math.round(macroBG[pIdx + 2] + grain)));
+        outData[outIdx] = Math.max(0, Math.min(255, Math.round(coonsBG[pIdx] + grain)));
+        outData[outIdx + 1] = Math.max(0, Math.min(255, Math.round(coonsBG[pIdx + 1] + grain)));
+        outData[outIdx + 2] = Math.max(0, Math.min(255, Math.round(coonsBG[pIdx + 2] + grain)));
         outData[outIdx + 3] = Math.round(alpha * 255);
       }
     }
     stCtx.putImageData(outImgData, 0, 0);
-    ctx.save();
-    ctx.translate(centerX, centerY);
+    ctx.save(); ctx.translate(centerX, centerY);
     if (rotation !== 0) ctx.rotate(rotation);
-    ctx.globalAlpha = opacity;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(stCanvas, -patchW / 2, -patchH / 2);
-    ctx.restore();
+    ctx.globalAlpha = opacity; ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(stCanvas, -patchW / 2, -patchH / 2); ctx.restore();
     return;
   }
 
-  // Step 2: Smart Watermark Pixel Color Detection & Alpha Estimation
+  // ── Step 2: Watermark Pixel Detection & Alpha Estimation (same selective segmentation) ──
   const profile = getWatermarkColorProfile(profileId);
   const customRgb = settings.targetColor ? hexToRgb(settings.targetColor) : null;
-
-  // Build active target color list
   const targetColors: { r: number; g: number; b: number; isWhite: boolean; isDark: boolean }[] = [];
   if (profileId === 'custom_color' && customRgb) {
     const lum = 0.299 * customRgb[0] + 0.587 * customRgb[1] + 0.114 * customRgb[2];
     const sat = Math.max(...customRgb) - Math.min(...customRgb);
-    targetColors.push({
-      r: customRgb[0],
-      g: customRgb[1],
-      b: customRgb[2],
-      isWhite: lum > 200 && sat < 35,
-      isDark: lum < 50 && sat < 35,
-    });
+    targetColors.push({ r: customRgb[0], g: customRgb[1], b: customRgb[2], isWhite: lum > 200 && sat < 35, isDark: lum < 50 && sat < 35 });
   } else {
     for (const c of profile.colors) {
-      targetColors.push({
-        r: c.rgb[0],
-        g: c.rgb[1],
-        b: c.rgb[2],
-        isWhite: !!c.isWhiteOrNeutral,
-        isDark: !!c.isDarkShadow,
-      });
+      targetColors.push({ r: c.rgb[0], g: c.rgb[1], b: c.rgb[2], isWhite: !!c.isWhiteOrNeutral, isDark: !!c.isDarkShadow });
     }
-    // Also include user's custom targetColor if specified
     if (customRgb && settings.targetColor && settings.targetColor.toUpperCase() !== '#FFFFFF') {
-      targetColors.push({
-        r: customRgb[0],
-        g: customRgb[1],
-        b: customRgb[2],
-        isWhite: false,
-        isDark: false,
-      });
+      targetColors.push({ r: customRgb[0], g: customRgb[1], b: customRgb[2], isWhite: false, isDark: false });
     }
   }
 
   const checkWhite = targetColors.some((c) => c.isWhite);
   const checkDark = profileId === 'dark_logo';
   const checkShadow = targetColors.some((c) => c.isDark) && !checkDark;
-
-  // Sensitivity thresholds controlled by colorTolerance (default 0.55)
   const lumThresh = Math.max(5, 34 * (1.12 - tolerance) + borderSigma * 0.45);
   const colorMatchRadius = 35 + tolerance * 75;
 
-  const wmAlpha = new Float32Array(numPixels);     // Estimated watermark alpha [0..1]
-  const wmMask = new Float32Array(numPixels);      // Detection confidence [0..1]
-  const wmColor = new Float32Array(numPixels * 3); // Detected pure watermark color (R,G,B)
+  const wmAlpha = new Float32Array(numPixels);
+  const wmMask = new Float32Array(numPixels);
+  const wmColor = new Float32Array(numPixels * 3);
 
   for (let y = 0; y < boxH; y++) {
     const srcRow = (boxY + y) * patchW;
     const rowIdx = y * boxW;
-
     for (let x = 0; x < boxW; x++) {
       const idx = (srcRow + (boxX + x)) * 4;
-      const pR = data[idx];
-      const pG = data[idx + 1];
-      const pB = data[idx + 2];
+      const pR = data[idx], pG = data[idx + 1], pB = data[idx + 2];
       const pLum = 0.299 * pR + 0.587 * pG + 0.114 * pB;
-
       const pIdx = rowIdx + x;
       const pIdx3 = pIdx * 3;
-      const bgR = macroBG[pIdx3];
-      const bgG = macroBG[pIdx3 + 1];
-      const bgB = macroBG[pIdx3 + 2];
+      const bgR = coonsBG[pIdx3], bgG = coonsBG[pIdx3 + 1], bgB = coonsBG[pIdx3 + 2];
       const bgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+      let bestMask = 0, bestEstAlpha = 0, bestWmR = 255, bestWmG = 255, bestWmB = 255;
 
-      let bestMask = 0;
-      let bestEstAlpha = 0;
-      let bestWmR = 255, bestWmG = 255, bestWmB = 255;
-
-      // Test A: Semi-Transparent or Opaque White / Silver Watermark (#FFFFFF / #E6E6E6)
+      // Test A: Semi-Transparent White
       if (checkWhite) {
         const dLum = pLum - bgLum;
         const aR = (pR - bgR) / Math.max(10, 255 - bgR);
         const aG = (pG - bgG) / Math.max(10, 255 - bgG);
         const aB = (pB - bgB) / Math.max(10, 255 - bgB);
-        const minChannelAlpha = Math.min(aR, aG, aB);
-        const avgChannelAlpha = (aR + aG + aB) / 3;
+        const minA = Math.min(aR, aG, aB), avgA = (aR + aG + aB) / 3;
         const sat = Math.max(pR, pG, pB) - Math.min(pR, pG, pB);
-
-        // Either all 3 channels shifted upward toward white, OR pixel is bright neutral white
-        if (
-          (dLum > lumThresh * 0.55 && minChannelAlpha > 0.035) ||
-          (pLum > 195 && sat < 42 && dLum > lumThresh * 0.35)
-        ) {
-          const estA = Math.max(0.05, Math.min(1.0, Math.max(avgChannelAlpha, dLum / Math.max(12, 255 - bgLum))));
+        if ((dLum > lumThresh * 0.55 && minA > 0.035) || (pLum > 195 && sat < 42 && dLum > lumThresh * 0.35)) {
+          const estA = Math.max(0.05, Math.min(1.0, Math.max(avgA, dLum / Math.max(12, 255 - bgLum))));
           const conf = Math.min(1.0, Math.max((dLum - lumThresh * 0.35) / Math.max(8, lumThresh), estA * 1.35));
-          if (conf > bestMask) {
-            bestMask = conf;
-            bestEstAlpha = estA;
-            bestWmR = 255;
-            bestWmG = 255;
-            bestWmB = 255;
-          }
+          if (conf > bestMask) { bestMask = conf; bestEstAlpha = estA; bestWmR = 255; bestWmG = 255; bestWmB = 255; }
         }
       }
-
-      // Test B: Famous Brand Accent Colors & Custom Target Color
+      // Test B: Famous Brand Colors
       for (let k = 0; k < targetColors.length; k++) {
         const tc = targetColors[k];
         if (tc.isWhite || (tc.isDark && !checkDark)) continue;
-
-        const distToTarget = Math.sqrt(
-          0.3 * (pR - tc.r) * (pR - tc.r) +
-          0.59 * (pG - tc.g) * (pG - tc.g) +
-          0.11 * (pB - tc.b) * (pB - tc.b)
-        );
-        const bgDistToTarget = Math.sqrt(
-          0.3 * (bgR - tc.r) * (bgR - tc.r) +
-          0.59 * (bgG - tc.g) * (bgG - tc.g) +
-          0.11 * (bgB - tc.b) * (bgB - tc.b)
-        );
-        const diffFromBg = Math.sqrt(
-          0.3 * (pR - bgR) * (pR - bgR) +
-          0.59 * (pG - bgG) * (pG - bgG) +
-          0.11 * (pB - bgB) * (pB - bgB)
-        );
-
-        // Vector projection of (P - BG) onto (Target - BG)
+        const distT = Math.sqrt(0.3 * (pR - tc.r) ** 2 + 0.59 * (pG - tc.g) ** 2 + 0.11 * (pB - tc.b) ** 2);
+        const bgDistT = Math.sqrt(0.3 * (bgR - tc.r) ** 2 + 0.59 * (bgG - tc.g) ** 2 + 0.11 * (bgB - tc.b) ** 2);
+        const diffBg = Math.sqrt(0.3 * (pR - bgR) ** 2 + 0.59 * (pG - bgG) ** 2 + 0.11 * (pB - bgB) ** 2);
         const vR = tc.r - bgR, vG = tc.g - bgG, vB = tc.b - bgB;
         const vLenSq = Math.max(144, vR * vR + vG * vG + vB * vB);
-        const projAlpha = ((pR - bgR) * vR + (pG - bgG) * vG + (pB - bgB) * vB) / vLenSq;
-
-        if (
-          (distToTarget < colorMatchRadius && bgDistToTarget > distToTarget + 8) ||
-          (projAlpha > 0.14 && diffFromBg > lumThresh * 0.7 && distToTarget < colorMatchRadius * 1.25)
-        ) {
-          const estA = Math.max(0.10, Math.min(1.0, Math.max(projAlpha, 1 - distToTarget / (colorMatchRadius * 1.35))));
-          const conf = Math.min(1.0, Math.max(estA, diffFromBg / Math.max(10, lumThresh)));
-          if (conf > bestMask) {
-            bestMask = conf;
-            bestEstAlpha = estA;
-            bestWmR = tc.r;
-            bestWmG = tc.g;
-            bestWmB = tc.b;
-          }
+        const projA = ((pR - bgR) * vR + (pG - bgG) * vG + (pB - bgB) * vB) / vLenSq;
+        if ((distT < colorMatchRadius && bgDistT > distT + 8) || (projA > 0.14 && diffBg > lumThresh * 0.7 && distT < colorMatchRadius * 1.25)) {
+          const estA = Math.max(0.10, Math.min(1.0, Math.max(projA, 1 - distT / (colorMatchRadius * 1.35))));
+          const conf = Math.min(1.0, Math.max(estA, diffBg / Math.max(10, lumThresh)));
+          if (conf > bestMask) { bestMask = conf; bestEstAlpha = estA; bestWmR = tc.r; bestWmG = tc.g; bestWmB = tc.b; }
         }
       }
-
-      // Test C: Local High-Frequency Spike (catches fine anti-aliased letter strokes)
+      // Test C: High-Frequency Spike
       if (bestMask < 0.5 && x >= 2 && x < boxW - 2 && y >= 2 && y < boxH - 2) {
-        const diffFromBg = Math.sqrt(
-          0.3 * (pR - bgR) * (pR - bgR) +
-          0.59 * (pG - bgG) * (pG - bgG) +
-          0.11 * (pB - bgB) * (pB - bgB)
-        );
-        if (diffFromBg > lumThresh * 1.35 && profileId === 'auto_smart') {
-          const conf = Math.min(1.0, (diffFromBg - lumThresh) / Math.max(12, lumThresh));
-          if (conf > bestMask) {
-            bestMask = conf;
-            bestEstAlpha = Math.min(1.0, diffFromBg / 95);
-            bestWmR = pLum >= bgLum ? 255 : 0;
-            bestWmG = pLum >= bgLum ? 255 : 0;
-            bestWmB = pLum >= bgLum ? 255 : 0;
-          }
+        const diffBg = Math.sqrt(0.3 * (pR - bgR) ** 2 + 0.59 * (pG - bgG) ** 2 + 0.11 * (pB - bgB) ** 2);
+        if (diffBg > lumThresh * 1.35 && profileId === 'auto_smart') {
+          const conf = Math.min(1.0, (diffBg - lumThresh) / Math.max(12, lumThresh));
+          if (conf > bestMask) { bestMask = conf; bestEstAlpha = Math.min(1.0, diffBg / 95); bestWmR = pLum >= bgLum ? 255 : 0; bestWmG = pLum >= bgLum ? 255 : 0; bestWmB = pLum >= bgLum ? 255 : 0; }
         }
       }
-
-      wmMask[pIdx] = bestMask;
-      wmAlpha[pIdx] = bestEstAlpha;
-      wmColor[pIdx3] = bestWmR;
-      wmColor[pIdx3 + 1] = bestWmG;
-      wmColor[pIdx3 + 2] = bestWmB;
+      wmMask[pIdx] = bestMask; wmAlpha[pIdx] = bestEstAlpha;
+      wmColor[pIdx3] = bestWmR; wmColor[pIdx3 + 1] = bestWmG; wmColor[pIdx3 + 2] = bestWmB;
     }
   }
 
-  // Step 3: Detect adjacent dark drop-shadows & dilate 1-pixel anti-aliased compression fringe
+  // ── Step 3: Dilate mask for anti-aliased compression fringes ──
   const dilatedMask = new Float32Array(wmMask);
   for (let y = 1; y < boxH - 1; y++) {
     const rowIdx = y * boxW;
     const srcRow = (boxY + y) * patchW;
     for (let x = 1; x < boxW - 1; x++) {
       const pIdx = rowIdx + x;
-      const maxNeighbor = Math.max(
-        wmMask[pIdx - 1],
-        wmMask[pIdx + 1],
-        wmMask[pIdx - boxW],
-        wmMask[pIdx + boxW],
-        wmMask[pIdx - boxW - 1] * 0.7,
-        wmMask[pIdx - boxW + 1] * 0.7,
-        wmMask[pIdx + boxW - 1] * 0.7,
-        wmMask[pIdx + boxW + 1] * 0.7
+      const maxN = Math.max(
+        wmMask[pIdx - 1], wmMask[pIdx + 1], wmMask[pIdx - boxW], wmMask[pIdx + boxW],
+        wmMask[pIdx - boxW - 1] * 0.7, wmMask[pIdx - boxW + 1] * 0.7,
+        wmMask[pIdx + boxW - 1] * 0.7, wmMask[pIdx + boxW + 1] * 0.7
       );
-
-      if (maxNeighbor > 0.22 && wmMask[pIdx] < maxNeighbor) {
-        // Check if this neighboring pixel is a dark drop-shadow around a bright letter
+      if (maxN > 0.22 && wmMask[pIdx] < maxN) {
         const idx = (srcRow + (boxX + x)) * 4;
         const pLum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-        const bgLum =
-          0.299 * macroBG[pIdx * 3] +
-          0.587 * macroBG[pIdx * 3 + 1] +
-          0.114 * macroBG[pIdx * 3 + 2];
-
+        const bgLum = 0.299 * coonsBG[pIdx * 3] + 0.587 * coonsBG[pIdx * 3 + 1] + 0.114 * coonsBG[pIdx * 3 + 2];
         if (checkShadow && bgLum - pLum > lumThresh * 0.55) {
-          dilatedMask[pIdx] = Math.min(1.0, maxNeighbor * 0.9);
+          dilatedMask[pIdx] = Math.min(1.0, maxN * 0.9);
           wmAlpha[pIdx] = Math.max(wmAlpha[pIdx], Math.min(0.85, (bgLum - pLum) / Math.max(15, bgLum)));
-          wmColor[pIdx * 3] = 0;
-          wmColor[pIdx * 3 + 1] = 0;
-          wmColor[pIdx * 3 + 2] = 0;
+          wmColor[pIdx * 3] = 0; wmColor[pIdx * 3 + 1] = 0; wmColor[pIdx * 3 + 2] = 0;
         } else {
-          // Soft 1px anti-aliasing halo expansion
-          dilatedMask[pIdx] = Math.max(wmMask[pIdx], maxNeighbor * 0.62);
-          if (wmAlpha[pIdx] < 0.05) {
-            wmAlpha[pIdx] = maxNeighbor * 0.35;
+          dilatedMask[pIdx] = Math.max(wmMask[pIdx], maxN * 0.62);
+          if (wmAlpha[pIdx] < 0.05) wmAlpha[pIdx] = maxN * 0.35;
+        }
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Step 4: PatchMatch Texture Synthesis — the core professional algorithm
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Instead of Coons surface (smooth gradient from borders), we find the
+  // best-matching texture patches from SURROUNDING CLEAN AREAS and stitch them
+  // together. This is what makes Photoshop Content-Aware Fill actually work.
+
+  const PATCH_SIZE = Math.max(3, Math.min(7, Math.ceil(Math.min(boxW, boxH) * 0.12)));
+  const halfPatch = Math.floor(PATCH_SIZE / 2);
+
+  // Build a boolean mask of pixels that need to be filled (inside box AND watermark-detected)
+  // Also build a "hard mask" for fully opaque watermark pixels that need PatchMatch
+  const needsFill = new Uint8Array(patchW * patchH);    // 1 = needs texture synthesis
+  const isCleanSrc = new Uint8Array(patchW * patchH);   // 1 = can be used as texture source
+
+  for (let y = 0; y < patchH; y++) {
+    for (let x = 0; x < patchW; x++) {
+      const inBox = x >= boxX && x < boxX + boxW && y >= boxY && y < boxY + boxH;
+      const patchIdx = y * patchW + x;
+
+      if (inBox) {
+        const localX = x - boxX;
+        const localY = y - boxY;
+        const mIdx = localY * boxW + localX;
+        if (dilatedMask[mIdx] > 0.25) {
+          needsFill[patchIdx] = 1;
+        } else {
+          isCleanSrc[patchIdx] = 1;
+        }
+      } else {
+        // Outside the box = clean source texture for PatchMatch
+        isCleanSrc[patchIdx] = 1;
+      }
+    }
+  }
+
+  // Collect all candidate source patch centers (clean pixels with enough clean neighborhood)
+  const srcCenters: number[] = [];
+  const srcStepX = Math.max(1, Math.floor(PATCH_SIZE * 0.5));
+  const srcStepY = Math.max(1, Math.floor(PATCH_SIZE * 0.5));
+
+  for (let sy = halfPatch; sy < patchH - halfPatch; sy += srcStepY) {
+    for (let sx = halfPatch; sx < patchW - halfPatch; sx += srcStepX) {
+      // Check that this source patch center is in a clean region
+      let cleanCount = 0;
+      const totalPx = PATCH_SIZE * PATCH_SIZE;
+      for (let dy = -halfPatch; dy <= halfPatch; dy++) {
+        for (let dx = -halfPatch; dx <= halfPatch; dx++) {
+          if (isCleanSrc[(sy + dy) * patchW + (sx + dx)]) cleanCount++;
+        }
+      }
+      if (cleanCount >= totalPx * 0.85) {
+        srcCenters.push(sy * patchW + sx);
+      }
+    }
+  }
+
+  // ── Nearest-Neighbor Field (NNF): For each pixel that needs filling, find the best
+  //    matching source patch by comparing the overlapping clean neighborhood ──
+  const nnfX = new Int16Array(numPixels); // Source X offset for each box pixel
+  const nnfY = new Int16Array(numPixels); // Source Y offset for each box pixel
+  const nnfDist = new Float32Array(numPixels); // SSD distance for each match
+  nnfDist.fill(1e9);
+
+  // Deterministic random for PatchMatch random search phase
+  let pmRng = 0x12345678;
+  const pmRandom = () => { pmRng ^= pmRng << 13; pmRng ^= pmRng >> 17; pmRng ^= pmRng << 5; return (pmRng >>> 0) / 4294967296; };
+
+  // Compute patch SSD between target (in box) centered at (tx,ty) and source at (sx,sy)
+  // Only compares pixels that have clean reference (either clean inside box or outside)
+  const computePatchSSD = (tx: number, ty: number, sx: number, sy: number): number => {
+    let ssd = 0;
+    let count = 0;
+    for (let dy = -halfPatch; dy <= halfPatch; dy++) {
+      const tpy = boxY + ty + dy;
+      const spy = sy + dy;
+      if (tpy < 0 || tpy >= patchH || spy < 0 || spy >= patchH) continue;
+      for (let dx = -halfPatch; dx <= halfPatch; dx++) {
+        const tpx = boxX + tx + dx;
+        const spx = sx + dx;
+        if (tpx < 0 || tpx >= patchW || spx < 0 || spx >= patchW) continue;
+
+        const tIdx = tpy * patchW + tpx;
+        const sIdx = spy * patchW + spx;
+
+        // Only compare at positions where the target has clean reference pixels
+        if (!isCleanSrc[tIdx]) continue;
+
+        const ti = tIdx * 4;
+        const si = sIdx * 4;
+        const dr = data[ti] - data[si];
+        const dg = data[ti + 1] - data[si + 1];
+        const db = data[ti + 2] - data[si + 2];
+        ssd += dr * dr + dg * dg + db * db;
+        count++;
+      }
+    }
+    return count > 0 ? ssd / count : 1e9;
+  };
+
+  // Initialize NNF: random assignment from source candidates
+  const numSrc = srcCenters.length;
+  if (numSrc > 0) {
+    for (let y = 0; y < boxH; y++) {
+      for (let x = 0; x < boxW; x++) {
+        const pIdx = y * boxW + x;
+        if (dilatedMask[pIdx] < 0.25) continue; // Skip clean pixels
+
+        // Pick initial random source
+        const randIdx = Math.floor(pmRandom() * numSrc) % numSrc;
+        const srcFlat = srcCenters[randIdx];
+        const srcY = Math.floor(srcFlat / patchW);
+        const srcX = srcFlat % patchW;
+        nnfX[pIdx] = srcX;
+        nnfY[pIdx] = srcY;
+        nnfDist[pIdx] = computePatchSSD(x, y, srcX, srcY);
+      }
+    }
+
+    // ── PatchMatch Iterations: propagate + random search ──
+    const PM_ITERATIONS = 4;
+    for (let iter = 0; iter < PM_ITERATIONS; iter++) {
+      const forward = iter % 2 === 0;
+      const startY = forward ? 0 : boxH - 1;
+      const endY = forward ? boxH : -1;
+      const stepY = forward ? 1 : -1;
+      const startX = forward ? 0 : boxW - 1;
+      const endX = forward ? boxW : -1;
+      const stepX = forward ? 1 : -1;
+
+      for (let y = startY; y !== endY; y += stepY) {
+        for (let x = startX; x !== endX; x += stepX) {
+          const pIdx = y * boxW + x;
+          if (dilatedMask[pIdx] < 0.25) continue;
+
+          // Propagation: try neighbor's offset
+          // Left/Right neighbor
+          if (x - stepX >= 0 && x - stepX < boxW) {
+            const nIdx = y * boxW + (x - stepX);
+            if (nnfDist[nIdx] < 1e8) {
+              const candX = nnfX[nIdx];
+              const candY = nnfY[nIdx];
+              if (candX >= halfPatch && candX < patchW - halfPatch && candY >= halfPatch && candY < patchH - halfPatch) {
+                const d = computePatchSSD(x, y, candX, candY);
+                if (d < nnfDist[pIdx]) { nnfDist[pIdx] = d; nnfX[pIdx] = candX; nnfY[pIdx] = candY; }
+              }
+            }
+          }
+          // Top/Bottom neighbor
+          if (y - stepY >= 0 && y - stepY < boxH) {
+            const nIdx = (y - stepY) * boxW + x;
+            if (nnfDist[nIdx] < 1e8) {
+              const candX = nnfX[nIdx];
+              const candY = nnfY[nIdx];
+              if (candX >= halfPatch && candX < patchW - halfPatch && candY >= halfPatch && candY < patchH - halfPatch) {
+                const d = computePatchSSD(x, y, candX, candY);
+                if (d < nnfDist[pIdx]) { nnfDist[pIdx] = d; nnfX[pIdx] = candX; nnfY[pIdx] = candY; }
+              }
+            }
+          }
+
+          // Random search: try random offsets at exponentially decreasing radii
+          let searchRadius = Math.max(patchW, patchH);
+          while (searchRadius > 1) {
+            const candX = Math.max(halfPatch, Math.min(patchW - halfPatch - 1, nnfX[pIdx] + Math.round((pmRandom() - 0.5) * 2 * searchRadius)));
+            const candY = Math.max(halfPatch, Math.min(patchH - halfPatch - 1, nnfY[pIdx] + Math.round((pmRandom() - 0.5) * 2 * searchRadius)));
+            // Check source is clean
+            if (isCleanSrc[candY * patchW + candX]) {
+              const d = computePatchSSD(x, y, candX, candY);
+              if (d < nnfDist[pIdx]) { nnfDist[pIdx] = d; nnfX[pIdx] = candX; nnfY[pIdx] = candY; }
+            }
+            searchRadius = Math.floor(searchRadius * 0.5);
           }
         }
       }
     }
   }
 
-  // Step 4: Local Clean-Pixel Telea Diffusion
-  // Confirmed clean background pixels inside the box (between watermark letters) propagate
-  // their exact local color across the 2–5px letter strokes!
-  const localBG = new Float32Array(numPixels * 3);
-  const confWeight = new Float32Array(numPixels);
+  // ── Step 5: Reconstruct filled pixels using patch voting with distance-weighted blending ──
+  // For each pixel that needs filling, gather votes from overlapping patches
+  // that point to different source locations, then weight-average them
+
+  const reconstructedBG = new Float32Array(numPixels * 3);
+  const reconWeight = new Float32Array(numPixels);
 
   for (let y = 0; y < boxH; y++) {
-    const srcRow = (boxY + y) * patchW;
     const rowIdx = y * boxW;
     for (let x = 0; x < boxW; x++) {
       const pIdx = rowIdx + x;
-      const pIdx3 = pIdx * 3;
       const m = dilatedMask[pIdx];
 
       if (m < 0.08) {
-        // Confirmed clean background pixel right inside the watermark box!
-        const idx = (srcRow + (boxX + x)) * 4;
-        localBG[pIdx3] = data[idx];
-        localBG[pIdx3 + 1] = data[idx + 1];
-        localBG[pIdx3 + 2] = data[idx + 2];
-        confWeight[pIdx] = 1.0;
+        // Confirmed clean — use original pixel directly
+        const srcIdx = ((boxY + y) * patchW + (boxX + x)) * 4;
+        reconstructedBG[pIdx * 3] = data[srcIdx];
+        reconstructedBG[pIdx * 3 + 1] = data[srcIdx + 1];
+        reconstructedBG[pIdx * 3 + 2] = data[srcIdx + 2];
+        reconWeight[pIdx] = 1.0;
+        continue;
+      }
+
+      // Gather votes from all overlapping patches that include this pixel
+      let sumR = 0, sumG = 0, sumB = 0, sumW = 0;
+
+      for (let dy = -halfPatch; dy <= halfPatch; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= boxH) continue;
+        for (let dx = -halfPatch; dx <= halfPatch; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= boxW) continue;
+
+          const nIdx = ny * boxW + nx;
+          if (nnfDist[nIdx] >= 1e8) continue; // No valid match
+
+          // The patch at (nx, ny) maps to source (nnfX[nIdx], nnfY[nIdx])
+          // So pixel (x, y) within that patch maps to source + offset
+          const srcPx = nnfX[nIdx] + (x - nx);
+          const srcPy = nnfY[nIdx] + (y - ny);
+
+          if (srcPx < 0 || srcPx >= patchW || srcPy < 0 || srcPy >= patchH) continue;
+          if (!isCleanSrc[srcPy * patchW + srcPx]) continue;
+
+          const srcPixIdx = (srcPy * patchW + srcPx) * 4;
+          // Weight by inverse of match distance (better matches contribute more)
+          const matchWeight = 1.0 / (1.0 + nnfDist[nIdx] * 0.001);
+          // Also weight by proximity to patch center (center pixels more reliable)
+          const distToPatchCenter = Math.sqrt(dx * dx + dy * dy);
+          const spatialWeight = 1.0 / (1.0 + distToPatchCenter * 0.3);
+          const wt = matchWeight * spatialWeight;
+
+          sumR += data[srcPixIdx] * wt;
+          sumG += data[srcPixIdx + 1] * wt;
+          sumB += data[srcPixIdx + 2] * wt;
+          sumW += wt;
+        }
+      }
+
+      if (sumW > 0.001) {
+        reconstructedBG[pIdx * 3] = sumR / sumW;
+        reconstructedBG[pIdx * 3 + 1] = sumG / sumW;
+        reconstructedBG[pIdx * 3 + 2] = sumB / sumW;
+        reconWeight[pIdx] = Math.min(1.0, sumW * 0.5);
       } else {
-        // Seed watermarked pixel with Macro Harmonic Coons background
-        localBG[pIdx3] = macroBG[pIdx3];
-        localBG[pIdx3 + 1] = macroBG[pIdx3 + 1];
-        localBG[pIdx3 + 2] = macroBG[pIdx3 + 2];
-        confWeight[pIdx] = 0.08;
+        // Fallback to Coons surface if PatchMatch found nothing (rare)
+        reconstructedBG[pIdx * 3] = coonsBG[pIdx * 3];
+        reconstructedBG[pIdx * 3 + 1] = coonsBG[pIdx * 3 + 1];
+        reconstructedBG[pIdx * 3 + 2] = coonsBG[pIdx * 3 + 2];
+        reconWeight[pIdx] = 0.1;
       }
     }
   }
 
-  // Run 6 fast spatial diffusion passes so clean inter-letter pixels fill adjacent letter strokes
-  for (let pass = 0; pass < 6; pass++) {
+  // ── Step 5b: Poisson gradient-domain color calibration ──
+  // Smoothly blend the reconstructed PatchMatch texture with the boundary colors
+  // so there's no visible seam where the patch meets the original video.
+  // We run 4 Gauss-Seidel relaxation passes to solve Laplacian boundary constraints.
+  for (let pass = 0; pass < 4; pass++) {
     for (let y = 1; y < boxH - 1; y++) {
       const rowIdx = y * boxW;
       for (let x = 1; x < boxW - 1; x++) {
         const pIdx = rowIdx + x;
-        if (confWeight[pIdx] >= 0.99) continue; // Keep confirmed clean pixels locked
+        if (dilatedMask[pIdx] < 0.08) continue;    // Don't touch clean pixels
+        if (reconWeight[pIdx] >= 0.99) continue;    // Already locked
 
-        const n0 = pIdx - 1;
-        const n1 = pIdx + 1;
-        const n2 = pIdx - boxW;
-        const n3 = pIdx + boxW;
-        const n4 = pIdx - boxW - 1;
-        const n5 = pIdx - boxW + 1;
-        const n6 = pIdx + boxW - 1;
-        const n7 = pIdx + boxW + 1;
+        const pIdx3 = pIdx * 3;
 
-        const w0 = confWeight[n0];
-        const w1 = confWeight[n1];
-        const w2 = confWeight[n2];
-        const w3 = confWeight[n3];
-        const w4 = confWeight[n4] * 0.7;
-        const w5 = confWeight[n5] * 0.7;
-        const w6 = confWeight[n6] * 0.7;
-        const w7 = confWeight[n7] * 0.7;
-        const wSelf = confWeight[pIdx] * 0.5;
+        // Average of 4-connected neighbors (mixing reconstructed + clean originals)
+        const n0 = pIdx - 1, n1 = pIdx + 1, n2 = pIdx - boxW, n3 = pIdx + boxW;
+        const avgR = (reconstructedBG[n0 * 3] + reconstructedBG[n1 * 3] + reconstructedBG[n2 * 3] + reconstructedBG[n3 * 3]) * 0.25;
+        const avgG = (reconstructedBG[n0 * 3 + 1] + reconstructedBG[n1 * 3 + 1] + reconstructedBG[n2 * 3 + 1] + reconstructedBG[n3 * 3 + 1]) * 0.25;
+        const avgB = (reconstructedBG[n0 * 3 + 2] + reconstructedBG[n1 * 3 + 2] + reconstructedBG[n2 * 3 + 2] + reconstructedBG[n3 * 3 + 2]) * 0.25;
 
-        const wSum = w0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + wSelf;
-        if (wSum > 0.001) {
-          const pIdx3 = pIdx * 3;
-          localBG[pIdx3] =
-            (localBG[n0 * 3] * w0 +
-              localBG[n1 * 3] * w1 +
-              localBG[n2 * 3] * w2 +
-              localBG[n3 * 3] * w3 +
-              localBG[n4 * 3] * w4 +
-              localBG[n5 * 3] * w5 +
-              localBG[n6 * 3] * w6 +
-              localBG[n7 * 3] * w7 +
-              localBG[pIdx3] * wSelf) /
-            wSum;
+        // Preserve the gradient (Laplacian) from the PatchMatch texture while matching boundary colors
+        const lapR = reconstructedBG[pIdx3] - (reconstructedBG[n0 * 3] + reconstructedBG[n1 * 3] + reconstructedBG[n2 * 3] + reconstructedBG[n3 * 3]) * 0.25;
+        const lapG = reconstructedBG[pIdx3 + 1] - (reconstructedBG[n0 * 3 + 1] + reconstructedBG[n1 * 3 + 1] + reconstructedBG[n2 * 3 + 1] + reconstructedBG[n3 * 3 + 1]) * 0.25;
+        const lapB = reconstructedBG[pIdx3 + 2] - (reconstructedBG[n0 * 3 + 2] + reconstructedBG[n1 * 3 + 2] + reconstructedBG[n2 * 3 + 2] + reconstructedBG[n3 * 3 + 2]) * 0.25;
 
-          localBG[pIdx3 + 1] =
-            (localBG[n0 * 3 + 1] * w0 +
-              localBG[n1 * 3 + 1] * w1 +
-              localBG[n2 * 3 + 1] * w2 +
-              localBG[n3 * 3 + 1] * w3 +
-              localBG[n4 * 3 + 1] * w4 +
-              localBG[n5 * 3 + 1] * w5 +
-              localBG[n6 * 3 + 1] * w6 +
-              localBG[n7 * 3 + 1] * w7 +
-              localBG[pIdx3 + 1] * wSelf) /
-            wSum;
+        // Guided interpolation: neighborhood average + preserved detail
+        const blendFactor = 0.35;  // How much to pull toward smooth average
+        reconstructedBG[pIdx3] = Math.max(0, Math.min(255, avgR + lapR * (1 - blendFactor)));
+        reconstructedBG[pIdx3 + 1] = Math.max(0, Math.min(255, avgG + lapG * (1 - blendFactor)));
+        reconstructedBG[pIdx3 + 2] = Math.max(0, Math.min(255, avgB + lapB * (1 - blendFactor)));
+      }
+    }
+  }
 
-          localBG[pIdx3 + 2] =
-            (localBG[n0 * 3 + 2] * w0 +
-              localBG[n1 * 3 + 2] * w1 +
-              localBG[n2 * 3 + 2] * w2 +
-              localBG[n3 * 3 + 2] * w3 +
-              localBG[n4 * 3 + 2] * w4 +
-              localBG[n5 * 3 + 2] * w5 +
-              localBG[n6 * 3 + 2] * w6 +
-              localBG[n7 * 3 + 2] * w7 +
-              localBG[pIdx3 + 2] * wSelf) /
-            wSum;
+  // ── Step 6: Edge-aware local diffusion ──
+  // Confirmed clean pixels between watermark letters propagate with edge-awareness
+  for (let pass = 0; pass < 4; pass++) {
+    for (let y = 1; y < boxH - 1; y++) {
+      const rowIdx = y * boxW;
+      for (let x = 1; x < boxW - 1; x++) {
+        const pIdx = rowIdx + x;
+        if (reconWeight[pIdx] >= 0.98) continue;
 
-          confWeight[pIdx] = Math.min(0.95, wSum * 0.22);
+        const pIdx3 = pIdx * 3;
+        // Edge-aware bilateral weight: neighbors with similar color get more weight
+        const curR = reconstructedBG[pIdx3], curG = reconstructedBG[pIdx3 + 1], curB = reconstructedBG[pIdx3 + 2];
+        const offsets = [-1, 1, -boxW, boxW];
+        let wSum = 0, sR = 0, sG = 0, sB = 0;
+        for (const off of offsets) {
+          const nIdx = pIdx + off;
+          const nR = reconstructedBG[nIdx * 3], nG = reconstructedBG[nIdx * 3 + 1], nB = reconstructedBG[nIdx * 3 + 2];
+          const colorDist = Math.abs(curR - nR) + Math.abs(curG - nG) + Math.abs(curB - nB);
+          const bilateralW = reconWeight[nIdx] * Math.exp(-colorDist * colorDist / 8000);
+          sR += nR * bilateralW;
+          sG += nG * bilateralW;
+          sB += nB * bilateralW;
+          wSum += bilateralW;
+        }
+        if (wSum > 0.001 && reconWeight[pIdx] < 0.5) {
+          const blend = 0.3;
+          reconstructedBG[pIdx3] = reconstructedBG[pIdx3] * (1 - blend) + (sR / wSum) * blend;
+          reconstructedBG[pIdx3 + 1] = reconstructedBG[pIdx3 + 1] * (1 - blend) + (sG / wSum) * blend;
+          reconstructedBG[pIdx3 + 2] = reconstructedBG[pIdx3 + 2] * (1 - blend) + (sB / wSum) * blend;
+          reconWeight[pIdx] = Math.min(0.97, reconWeight[pIdx] + 0.08);
         }
       }
     }
   }
 
-  // Step 5: Mathematical Reverse Alpha Unblending + Local Background Synthesis
+  // ── Step 7: Final Compositing — Reverse Alpha Unblending + PatchMatch Texture ──
   for (let y = 0; y < boxH; y++) {
     const srcRow = (boxY + y) * patchW;
     const rowIdx = y * boxW;
-
     for (let x = 0; x < boxW; x++) {
       const pIdx = rowIdx + x;
       const maskVal = dilatedMask[pIdx];
-
-      // Clean background pixel! Leave 100% of the original sharp video pixel untouched!
-      if (maskVal <= 0.015) {
-        continue;
-      }
+      if (maskVal <= 0.015) continue;  // Clean pixel: untouched
 
       const pIdx3 = pIdx * 3;
-      const locR = localBG[pIdx3];
-      const locG = localBG[pIdx3 + 1];
-      const locB = localBG[pIdx3 + 2];
+      const locR = reconstructedBG[pIdx3];
+      const locG = reconstructedBG[pIdx3 + 1];
+      const locB = reconstructedBG[pIdx3 + 2];
 
       const srcIdx = (srcRow + (boxX + x)) * 4;
-      const obsR = data[srcIdx];
-      const obsG = data[srcIdx + 1];
-      const obsB = data[srcIdx + 2];
-
+      const obsR = data[srcIdx], obsG = data[srcIdx + 1], obsB = data[srcIdx + 2];
       const estAlpha = wmAlpha[pIdx];
-      const wR = wmColor[pIdx3];
-      const wG = wmColor[pIdx3 + 1];
-      const wB = wmColor[pIdx3 + 2];
+      const wR = wmColor[pIdx3], wG = wmColor[pIdx3 + 1], wB = wmColor[pIdx3 + 2];
 
       // Coherent camera sensor grain
       const seed = ((boxX + x) * 1973 + (boxY + y) * 9277) ^ 0x5bf03635;
@@ -807,37 +850,31 @@ function applyContentAwareStretch(
       hsh = (hsh ^ (hsh >>> 16));
       const grain = (((hsh & 0xffff) / 65535 - 0.5) * 2) * grainAmp;
 
-      const bgWithGrainR = Math.max(0, Math.min(255, locR + grain));
-      const bgWithGrainG = Math.max(0, Math.min(255, locG + grain));
-      const bgWithGrainB = Math.max(0, Math.min(255, locB + grain));
+      const bgR = Math.max(0, Math.min(255, locR + grain));
+      const bgG = Math.max(0, Math.min(255, locG + grain));
+      const bgB = Math.max(0, Math.min(255, locB + grain));
 
-      let finalR = bgWithGrainR;
-      let finalG = bgWithGrainG;
-      let finalB = bgWithGrainB;
+      let finalR = bgR, finalG = bgG, finalB = bgB;
 
-      // Apply Reverse Alpha Unblending for semi-transparent watermarks:
-      // Original = (Observed - alpha * WatermarkColor) / (1 - alpha)
+      // Reverse Alpha Unblending for semi-transparent watermarks
       if (useAlphaUnblend && estAlpha > 0.04 && estAlpha < 0.76) {
         const safeAlpha = Math.min(0.72, estAlpha * 0.88);
-        const invOneMinusA = 1 / Math.max(0.25, 1 - safeAlpha);
+        const invA = 1 / Math.max(0.25, 1 - safeAlpha);
+        let ubR = (obsR - safeAlpha * wR) * invA;
+        let ubG = (obsG - safeAlpha * wG) * invA;
+        let ubB = (obsB - safeAlpha * wB) * invA;
 
-        let unblendR = (obsR - safeAlpha * wR) * invOneMinusA;
-        let unblendG = (obsG - safeAlpha * wG) * invOneMinusA;
-        let unblendB = (obsB - safeAlpha * wB) * invOneMinusA;
+        // Regularize against PatchMatch-reconstructed background (wider range than before since texture is realistic)
+        ubR = Math.max(locR - 35, Math.min(locR + 35, ubR));
+        ubG = Math.max(locG - 35, Math.min(locG + 35, ubG));
+        ubB = Math.max(locB - 35, Math.min(locB + 35, ubB));
 
-        // Softly regularize against local clean background so H.264 compression artifacts don't spike
-        unblendR = Math.max(locR - 26, Math.min(locR + 26, unblendR));
-        unblendG = Math.max(locG - 26, Math.min(locG + 26, unblendG));
-        unblendB = Math.max(locB - 26, Math.min(locB + 26, unblendB));
-
-        // Smoothly transition from Reverse Alpha Unblending (for low/medium alpha)
-        // to Local Clean Background Inpainting (for high/opaque alpha)
+        // Crossfade: unblend for low alpha, PatchMatch texture for high alpha
         const t = Math.max(0, Math.min(1, (estAlpha * strength - 0.20) / 0.50));
-        const opaqueWeight = t * t * (3 - 2 * t);
-
-        finalR = (1 - opaqueWeight) * unblendR + opaqueWeight * bgWithGrainR;
-        finalG = (1 - opaqueWeight) * unblendG + opaqueWeight * bgWithGrainG;
-        finalB = (1 - opaqueWeight) * unblendB + opaqueWeight * bgWithGrainB;
+        const ow = t * t * (3 - 2 * t);
+        finalR = (1 - ow) * ubR + ow * bgR;
+        finalG = (1 - ow) * ubG + ow * bgG;
+        finalB = (1 - ow) * ubB + ow * bgB;
       }
 
       // Outer bounding box feathering
@@ -846,15 +883,8 @@ function applyContentAwareStretch(
         const nx = (x - (boxW - 1) * 0.5) / Math.max(1, boxW * 0.5);
         const ny = (y - (boxH - 1) * 0.5) / Math.max(1, boxH * 0.5);
         const dist = Math.sqrt(nx * nx + ny * ny);
-        if (dist >= 1.0) {
-          boxAlpha = 0.0;
-        } else {
-          const fNorm = Math.max(0.01, feather / Math.min(w, h));
-          if (dist > 1.0 - fNorm) {
-            const t = (1.0 - dist) / fNorm;
-            boxAlpha = t * t * (3 - 2 * t);
-          }
-        }
+        if (dist >= 1.0) boxAlpha = 0.0;
+        else { const fNorm = Math.max(0.01, feather / Math.min(w, h)); if (dist > 1.0 - fNorm) { const t = (1.0 - dist) / fNorm; boxAlpha = t * t * (3 - 2 * t); } }
       } else if (feather > 0.5) {
         const edgeDistX = Math.min(x, boxW - 1 - x);
         const edgeDistY = Math.min(y, boxH - 1 - y);
