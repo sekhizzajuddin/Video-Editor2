@@ -50,8 +50,12 @@ export const TimelineGridLines = React.memo(function TimelineGridLines({
   const [viewportWidth, setViewportWidth] = useState(1000);
 
   useEffect(() => {
+    let prev = useEditorStore.getState().scrollLeft;
     return useEditorStore.subscribe((state) => {
-      setScrollLeft(state.scrollLeft);
+      if (state.scrollLeft !== prev) {
+        prev = state.scrollLeft;
+        setScrollLeft(state.scrollLeft);
+      }
     });
   }, []);
 
@@ -182,8 +186,12 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   const [viewportWidth, setViewportWidth] = useState(1000);
 
   useEffect(() => {
+    let prev = useEditorStore.getState().scrollLeft;
     return useEditorStore.subscribe((state) => {
-      setScrollLeft(state.scrollLeft);
+      if (state.scrollLeft !== prev) {
+        prev = state.scrollLeft;
+        setScrollLeft(state.scrollLeft);
+      }
     });
   }, []);
 
@@ -467,9 +475,11 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   );
 });
 
+const EMPTY_EXPORT_REGIONS: any[] = [];
+
 function RulerExportRegions({ zoomLevel, seek }: { zoomLevel: number; seek: (t: number) => void }) {
   const windowDragCleanupRef = useWindowDragCleanup();
-  const exportRegions = useEditorStore((s) => s.exportRegions || []);
+  const exportRegions = useEditorStore((s) => s.exportRegions || EMPTY_EXPORT_REGIONS);
   const selectedExportRegionId = useEditorStore((s) => s.selectedExportRegionId);
   const selectExportRegion = useEditorStore((s) => s.selectExportRegion);
   const updateExportRegion = useEditorStore((s) => s.updateExportRegion);

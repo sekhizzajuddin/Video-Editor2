@@ -43,7 +43,7 @@ interface TimelineModalsProps {
   handleVoiceoverRecordingToggle: (trackId: string) => void;
 }
 
-export function TimelineModals({
+export const TimelineModals = React.memo(function TimelineModals({
   timelineState,
   tracks,
   markers,
@@ -903,4 +903,4 @@ export function TimelineModals({
       )}
     </>
   );
-}
+});

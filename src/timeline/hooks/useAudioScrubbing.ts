@@ -1,6 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { useEditorStore } from '@/store/editorStore';
-import { useShallow } from 'zustand/react/shallow';
 
 /**
  * During scrubbing, audio is muted (CapCut behavior).
@@ -8,8 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
  * from prior sessions. The real audio silence happens in useMediaPlayback,
  * which pauses media elements whenever `isScrubbing` is true.
  */
-export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null) {
-  const { tracks } = useEditorStore(useShallow((s) => ({ tracks: s.tracks })));
+export function useAudioScrubbing(isScrubbing: boolean, scrubTime?: number | null) {
   const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   useEffect(() => {
@@ -36,6 +33,5 @@ export function useAudioScrubbing(isScrubbing: boolean, scrubTime: number | null
     }
     // scrubTime intentionally unused — kept in signature for backwards compatibility.
     void scrubTime;
-    void tracks;
-  }, [isScrubbing, scrubTime, tracks]);
+  }, [isScrubbing, scrubTime]);
 }

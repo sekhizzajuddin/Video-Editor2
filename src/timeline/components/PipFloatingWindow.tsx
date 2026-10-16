@@ -560,7 +560,6 @@ export const PipFloatingWindow = React.memo(function PipFloatingWindow({
                         ) : (
                           <TimelineClipRow
                             track={track}
-                            tracks={pipWindow.tracks}
                             zoomLevel={zoomLevel}
                             selectedClipIds={selectedClipIds}
                             draggingClipId={draggingClipId}

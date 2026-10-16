@@ -15,7 +15,6 @@ interface UseTimelineDropDeps {
 
 export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
   const zoomLevel = useEditorStore((state) => state.zoomLevel);
-  const tracks = useEditorStore((state) => state.tracks);
 
   const {
     setHoveredTrackId,
@@ -637,7 +636,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const state = useEditorStore.getState();
-      let trackIdx = tracks.findIndex((t) => t.id === trackId);
+      let trackIdx = state.tracks.findIndex((t) => t.id === trackId);
       if (trackIdx === -1 && state.pipWindows) {
         for (const pip of Object.values(state.pipWindows)) {
           if (!pip) continue;
@@ -703,7 +702,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         setDropPreview({ time: dropTime, duration: approxDuration, trackIdx, mediaId, mediaType, mediaName });
         setHoveredTrackId(trackId);      }
     },
-    [tracks, zoomLevel, setDropPreview, setHoveredTrackId],
+    [zoomLevel, setDropPreview, setHoveredTrackId],
   );
 
   return {

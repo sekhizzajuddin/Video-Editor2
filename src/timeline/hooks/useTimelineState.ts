@@ -91,6 +91,7 @@ export function useTimelineState() {
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const trackHeadersRef = useRef<HTMLDivElement>(null);
   const rulerContainerRef = useRef<HTMLDivElement>(null);
+  const snapLineRef = useRef<HTMLDivElement | null>(null);
 
   // Drag and drop states
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -99,14 +100,22 @@ export function useTimelineState() {
   const [slideState, setSlideState] = useState<SlideState | null>(null);
   
 
-  const [snapLine, setSnapLine] = useState<number | null>(null);
+  const setSnapLine = useCallback((pos: number | null) => {
+    const el = snapLineRef.current;
+    if (!el) return;
+    if (pos !== null && pos !== undefined) {
+      el.style.display = 'block';
+      el.style.transform = `translateX(${pos}px)`;
+    } else {
+      el.style.display = 'none';
+    }
+  }, []);
+
   const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
 
   // Playhead scrubbing and cut tool states
   const [isScrubbingLocal, setIsScrubbingLocal] = useState(false);
-  const [scrubTime, setScrubTime] = useState<number | null>(null);
-  const [scrubMouseX, setScrubMouseX] = useState<number>(0);
   const [hoverCutClipId, setHoverCutClipId] = useState<string | null>(null);
   const [hoverCutX, setHoverCutX] = useState<number | null>(null);
 
@@ -219,15 +228,11 @@ export function useTimelineState() {
     setHoveredTrackId,
     dropPreview,
     setDropPreview,
-    snapLine,
+    snapLineRef,
     setSnapLine,
 
     isScrubbing,
     setIsScrubbing,
-    scrubTime,
-    setScrubTime,
-    scrubMouseX,
-    setScrubMouseX,
     hoverCutClipId,
     setHoverCutClipId,
     hoverCutX,

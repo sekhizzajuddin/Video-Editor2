@@ -44,14 +44,11 @@ export function Timeline() {
   const {
     tracks,
     zoomLevel,
-    selectedClipId,
     selectedClipIds,
     activeTool,
     selectedTrackId,
     draggingClipId,
     totalDuration,
-    play,
-    pause,
     selectClip,
     selectClips,
     selectTrack,
@@ -65,7 +62,6 @@ export function Timeline() {
     removeTrack,
     showTransitionLayer,
     selectedTransitionClipId,
-    setShowTransitionLayer,
     selectTransition,
     selectedKeyframeLines,
     toggleKeyframeLineSelection,
@@ -74,9 +70,7 @@ export function Timeline() {
     outPoint,
     markers,
     beatMarkers,
-    settings,
     enterCompoundClip,
-    setDragPreview,
     pipWindows,
     activePipWindowId,
     setActivePipWindow,
@@ -87,14 +81,11 @@ export function Timeline() {
   } = useEditorStore(useShallow(s => ({
     tracks: s.tracks,
     zoomLevel: s.zoomLevel,
-    selectedClipId: s.selectedClipId,
     selectedClipIds: s.selectedClipIds,
     activeTool: s.activeTool,
     selectedTrackId: s.selectedTrackId,
     draggingClipId: s.draggingClipId,
     totalDuration: s.totalDuration,
-    play: s.play,
-    pause: s.pause,
     selectClip: s.selectClip,
     selectClips: s.selectClips,
     selectTrack: s.selectTrack,
@@ -108,7 +99,6 @@ export function Timeline() {
     removeTrack: s.removeTrack,
     showTransitionLayer: s.showTransitionLayer,
     selectedTransitionClipId: s.selectedTransitionClipId,
-    setShowTransitionLayer: s.setShowTransitionLayer,
     selectTransition: s.selectTransition,
     selectedKeyframeLines: s.selectedKeyframeLines,
     toggleKeyframeLineSelection: s.toggleKeyframeLineSelection,
@@ -117,9 +107,7 @@ export function Timeline() {
     outPoint: s.outPoint,
     markers: s.markers,
     beatMarkers: s.beatMarkers,
-    settings: s.settings,
     enterCompoundClip: s.enterCompoundClip,
-    setDragPreview: s.setDragPreview,
     pipWindows: s.pipWindows,
     activePipWindowId: s.activePipWindowId,
     setActivePipWindow: s.setActivePipWindow,
@@ -144,7 +132,7 @@ export function Timeline() {
     setHoveredTrackId,
     dropPreview,
     setDropPreview,
-    snapLine,
+    snapLineRef,
     hoverCutClipId,
     setHoverCutClipId,
     hoverCutX,
@@ -168,7 +156,7 @@ export function Timeline() {
 
   const dropHandlers = useTimelineDrop({ timelineState });
 
-  useAudioScrubbing(timelineState.isScrubbing, timelineState.scrubTime);
+  useAudioScrubbing(timelineState.isScrubbing);
 
   // ── Ruler calculations ────────────────────────────────────────────────
 
@@ -377,7 +365,6 @@ export function Timeline() {
                     <TimelineClipRow
                       key={track.id}
                       track={track}
-                      tracks={tracks}
                       zoomLevel={zoomLevel}
                       selectedClipIds={selectedClipIds}
                       draggingClipId={draggingClipId}
@@ -462,12 +449,11 @@ export function Timeline() {
                 )}
 
                 {/* Snap indicator line */}
-                {snapLine !== null && (
-                  <div
-                    className="absolute top-0 bottom-0 w-px bg-yellow-400 z-50 pointer-events-none"
-                    style={{ left: `${snapLine}px` }}
-                  />
-                )}
+                <div
+                  ref={snapLineRef}
+                  className="absolute top-0 bottom-0 left-0 w-px bg-yellow-400 z-50 pointer-events-none"
+                  style={{ display: 'none' }}
+                />
 
                 {/* Export Regions Overlay */}
                 <ExportRegionOverlay zoomLevel={zoomLevel} />

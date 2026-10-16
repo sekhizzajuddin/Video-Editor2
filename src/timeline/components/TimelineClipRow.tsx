@@ -56,7 +56,6 @@ function hasAudiblePeaks(peaks: number[] | undefined): boolean {
 
 interface TimelineClipRowProps {
   track: TimelineTrack;
-  tracks: TimelineTrack[];
   zoomLevel: number;
   selectedClipIds: string[];
   draggingClipId: string | null;
@@ -205,6 +204,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
   const keyframeTimes = clipAnims.map((k: any) => k.time).sort((a: any, b: any) => a - b);
 
   const dragHandlersRef = useRef<{move: (e: any) => void, up: () => void, cancelRaf?: () => void} | null>(null);
+  const lastCutMoveRef = useRef<number>(0);
 
   // Scoped selector: only re-render this clip when its own speed frame is selected/deselected
   const selectedSpeedFrameId = useEditorStore(
@@ -348,6 +348,9 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       onPointerDown={(e) => handleClipMouseDown(e, clip)}
       onMouseMove={(e) => {
         if (activeTool === 'split') {
+          const now = performance.now();
+          if (now - (lastCutMoveRef.current || 0) < 32) return;
+          lastCutMoveRef.current = now;
           const rect = e.currentTarget.getBoundingClientRect();
           setHoverCutX(e.clientX - rect.left);
           setHoverCutClipId(clip.id);
@@ -355,6 +358,7 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
       }}
       onMouseLeave={() => {
         if (activeTool === 'split') {
+          lastCutMoveRef.current = 0;
           setHoverCutX(null);
           setHoverCutClipId(null);
         }
@@ -748,7 +752,6 @@ const TimelineClipItem = React.memo(function TimelineClipItem({
 // ─────────────────────────────────────────────────────────────────────────────
 export const TimelineClipRow = React.memo(function TimelineClipRow({
   track,
-  tracks,
   zoomLevel,
   selectedClipIds,
   draggingClipId,
@@ -778,11 +781,11 @@ export const TimelineClipRow = React.memo(function TimelineClipRow({
 }: TimelineClipRowProps) {
   const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
   const allPipWindows = useEditorStore((s) => s.pipWindows);
-  const scrollLeft = useEditorStore((s) => s.scrollLeft);
+  const scrollLeftChunk = useEditorStore((s) => Math.floor(s.scrollLeft / 500) * 500);
   const dragCounter = useRef(0);
 
-  const visibleMinX = Math.max(0, scrollLeft - 600);
-  const visibleMaxX = scrollLeft + (typeof window !== 'undefined' ? window.innerWidth : 1920) + 600;
+  const visibleMinX = Math.max(0, scrollLeftChunk - 600);
+  const visibleMaxX = scrollLeftChunk + (typeof window !== 'undefined' ? window.innerWidth : 1920) + 600;
 
   // ── P0 FIX: Build O(1) lookup maps instead of O(N) .find() per clip ──────
   const mediaMap = useMemo(

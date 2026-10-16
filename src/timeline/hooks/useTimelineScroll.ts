@@ -108,48 +108,62 @@ export function useTimelineScroll({
     const el = trackContainerRef.current;
     if (!el) return;
 
+    let wheelRafId: number | null = null;
+    let pendingZoom: number | null = null;
+    let pendingScrollLeft: number | null = null;
+    let pendingInnerWidth: number | null = null;
+    let pendingInnerDiv: HTMLElement | null = null;
+
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
-        // Pinch-to-zoom / Ctrl+Scroll → zoom timeline
         e.preventDefault();
         const store = useEditorStore.getState();
-        const currentZoom = store.zoomLevel;
-        // FIX: Use exponential scaling for smooth proportional zoom without decimals
-        const zoomFactor = Math.exp(-e.deltaY * 0.005); // Smooth scaling factor
+        const currentZoom = pendingZoom ?? store.zoomLevel;
+        const zoomFactor = Math.exp(-e.deltaY * 0.005);
         let newZoom = currentZoom * zoomFactor;
-        
-        // Remove decimal glitching
         newZoom = Math.round(newZoom);
-        
-        // P3 FIX: unify the clamp with the store boundary (0.05–400). The old
-        // 5–200 wheel range conflicted with the button range (20–400) and made
-        // long (5-hour) timelines impossible to zoom out to fit.
         newZoom = Math.min(Math.max(newZoom, 0.05), 400);
 
         const rect = el.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
-        
-        // Calculate the exact time under the mouse cursor right now
-        const timeUnderCursor = (store.scrollLeft + mouseX) / currentZoom;
-        
-        // Calculate the new scrollLeft so that timeUnderCursor stays at mouseX
+        const timeUnderCursor = ((pendingScrollLeft ?? store.scrollLeft) + mouseX) / currentZoom;
         const newScrollLeft = Math.max(0, timeUnderCursor * newZoom - mouseX);
 
-        // Preemptively update the inner container width to prevent the DOM
-        // from clamping the new scrollLeft before React can render the new zoom
+        pendingZoom = newZoom;
+        pendingScrollLeft = newScrollLeft;
+
+        // Preemptively update inner container width
         const innerDiv = el.firstElementChild as HTMLElement;
         if (innerDiv) {
-          const newWidth = (store.totalDuration + 30) * newZoom;
-          innerDiv.style.width = `${newWidth}px`;
+          pendingInnerDiv = innerDiv;
+          pendingInnerWidth = (store.totalDuration + 30) * newZoom;
         }
 
-        store.setZoomLevel(newZoom);
-        store.setScrollLeft(newScrollLeft);
+        if (wheelRafId === null) {
+          wheelRafId = requestAnimationFrame(() => {
+            wheelRafId = null;
+            if (pendingInnerDiv && pendingInnerWidth !== null) {
+              pendingInnerDiv.style.width = `${pendingInnerWidth}px`;
+            }
+            // Batch both updates into a single set() call
+            useEditorStore.setState({
+              ...(pendingZoom !== null ? { zoomLevel: pendingZoom } : {}),
+              ...(pendingScrollLeft !== null ? { scrollLeft: pendingScrollLeft } : {}),
+            });
+            pendingZoom = null;
+            pendingScrollLeft = null;
+            pendingInnerDiv = null;
+            pendingInnerWidth = null;
+          });
+        }
       }
     };
 
     el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      if (wheelRafId !== null) cancelAnimationFrame(wheelRafId);
+    };
   }, [trackContainerRef]);
 
   return {

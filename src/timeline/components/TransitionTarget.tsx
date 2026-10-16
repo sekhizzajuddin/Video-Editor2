@@ -192,7 +192,7 @@ function TransitionPreviewTooltipCanvas({ transitionName }: { transitionName: st
   );
 }
 
-export function TransitionTarget({
+export const TransitionTarget = React.memo(function TransitionTarget({
   clipId,
   trackId,
   position,
@@ -372,4 +372,4 @@ export function TransitionTarget({
       }`} />
     </div>
   );
-}
+});

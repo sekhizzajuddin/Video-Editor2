@@ -5,6 +5,8 @@ import { Bookmark, X, Repeat } from 'lucide-react';
 import type { ExportRegion } from '@/types';
 import { useWindowDragCleanup } from '../useWindowDragCleanup';
 
+const EMPTY_EXPORT_REGIONS: any[] = [];
+
 interface ExportRegionOverlayProps {
   zoomLevel: number;
 }
@@ -12,7 +14,7 @@ interface ExportRegionOverlayProps {
 export const ExportRegionOverlay = React.memo(function ExportRegionOverlay({
   zoomLevel,
 }: ExportRegionOverlayProps) {
-  const exportRegions = useEditorStore((s) => s.exportRegions || []);
+  const exportRegions = useEditorStore((s) => s.exportRegions || EMPTY_EXPORT_REGIONS);
   const selectedExportRegionId = useEditorStore((s) => s.selectedExportRegionId);
   const selectExportRegion = useEditorStore((s) => s.selectExportRegion);
   const updateExportRegion = useEditorStore((s) => s.updateExportRegion);

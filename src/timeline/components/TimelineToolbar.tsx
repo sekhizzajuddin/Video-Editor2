@@ -15,7 +15,7 @@ interface TimelineToolbarProps {
 
 const EMPTY_EXPORT_REGIONS: any[] = [];
 
-export function TimelineToolbar({
+export const TimelineToolbar = React.memo(function TimelineToolbar({
   zoomLevel,
   zoomIn,
   zoomOut,
@@ -286,5 +286,5 @@ export function TimelineToolbar({
       )}
     </div>
   );
-}
+});
 

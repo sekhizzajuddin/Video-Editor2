@@ -34,7 +34,7 @@ interface TimelineTrackHeaderProps {
   handleVoiceoverRecordingToggle: (id: string) => void;
 }
 
-export function TimelineTrackHeader({
+export const TimelineTrackHeader = React.memo(function TimelineTrackHeader({
   track,
   tracks,
   selectedTrackId,
@@ -250,4 +250,4 @@ export function TimelineTrackHeader({
       )}
     </div>
   );
-}
+});

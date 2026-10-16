@@ -13,11 +13,11 @@ interface UseTimelineDragDeps {
   timelineState: TimelineState;
 }
 
-const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime: number }[], tracks: any[]) => {
+const areClipsContiguousInTime = (draggedClips: { id: string; originalStartTime: number }[], tracks?: any[]) => {
   if (draggedClips.length <= 1) return true;
-  
+  const currentTracks = tracks || useEditorStore.getState().tracks;
   const clipsWithTime = draggedClips.map(dc => {
-     const c = findClipInTracks(tracks, dc.id, useEditorStore.getState().pipWindows || {});
+     const c = findClipInTracks(currentTracks, dc.id, useEditorStore.getState().pipWindows || {});
      return { start: dc.originalStartTime, end: dc.originalStartTime + (c?.duration || 0) };
   });
   
@@ -45,14 +45,9 @@ const getLatestTracks = (clipId: string | null): TimelineTrack[] => {
 };
 export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
   const {
-    tracks,
     zoomLevel,
     activeTool,
     settings,
-    selectedClipId,
-    selectedClipIds,
-    selectedTransitionClipId,
-    selectedTrackId,
     moveClip,
     moveClips,
     updateClip,
@@ -66,17 +61,11 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     seek,
     splitClip,
     setDragPreview,
-    selectedSpeedFrame,
     selectSpeedFrame,
   } = useEditorStore(useShallow(s => ({
-    tracks: s.tracks,
     zoomLevel: s.zoomLevel,
     activeTool: s.activeTool,
     settings: s.settings,
-    selectedClipId: s.selectedClipId,
-    selectedClipIds: s.selectedClipIds,
-    selectedTransitionClipId: s.selectedTransitionClipId,
-    selectedTrackId: s.selectedTrackId,
     moveClip: s.moveClip,
     moveClips: s.moveClips,
     updateClip: s.updateClip,
@@ -90,7 +79,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     seek: s.seek,
     splitClip: s.splitClip,
     setDragPreview: s.setDragPreview,
-    selectedSpeedFrame: s.selectedSpeedFrame,
     selectSpeedFrame: s.selectSpeedFrame,
   })));
 
@@ -118,14 +106,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     setSlipState,
     slideState,
     setSlideState,
-    snapLine,
     setSnapLine,
     isScrubbing,
     setIsScrubbing,
-    scrubTime,
-    setScrubTime,
-    scrubMouseX,
-    setScrubMouseX,
     transactionActiveRef,
     startTransactionSafe,
     endTransactionSafe,
@@ -138,16 +121,9 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     setDropPreview,
   } = timelineState;
 
-  const mediaLibrary = useEditorStore((s) => s.mediaLibrary);
-  const mediaMap = useRef(new Map<string, MediaItem>());
-  useEffect(() => {
-    const map = new Map<string, MediaItem>();
-    mediaLibrary.forEach((m) => map.set(m.id, m));
-    mediaMap.current = map;
-  }, [mediaLibrary]);
-
   const getMediaSafe = useCallback((clip: TimelineClip): MediaItem => {
-    return mediaMap.current.get(clip.mediaId) ?? ({
+    const media = useEditorStore.getState().mediaLibrary?.find((m) => m.id === clip.mediaId);
+    return media ?? ({
       id: clip.mediaId,
       name: 'Unknown',
       type: 'video' as const,
@@ -524,7 +500,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     (e: React.PointerEvent, clip: TimelineClip, edge: 'left' | 'right') => {
       e.stopPropagation();
       e.preventDefault();
-      let track = tracks.find((t) => t.id === clip.trackId);
+      const currentTracks = getLatestTracks(clip.id);
+      let track = currentTracks.find((t) => t.id === clip.trackId);
       if (!track) {
         const pipWindows = useEditorStore.getState().pipWindows || {};
         for (const pip of Object.values(pipWindows)) {
@@ -602,7 +579,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       setIsScrubbing(true);
       window.dispatchEvent(new Event('procut-frame-updated'));
     },
-    [tracks, activeTool, startTransactionSafe, setResizeState, setIsScrubbing],
+    [activeTool, startTransactionSafe, setResizeState, setIsScrubbing],
   );
 
   const handleClipMouseDown = useCallback(
@@ -615,7 +592,8 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       } catch {
         pointerCaptureFailedRef.current = true;
       }
-      let track = tracks.find((t) => t.id === clip.trackId);
+      const latestTracks = getLatestTracks(clip.id);
+      let track = latestTracks.find((t) => t.id === clip.trackId);
       if (!track) {
         const pipWindows = useEditorStore.getState().pipWindows || {};
         for (const pip of Object.values(pipWindows)) {
@@ -628,7 +606,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       // If clicking inside the clip body but not on a speed-frame-element, deselect any active speed frame
       const targetEl = e.target as HTMLElement | null;
       if (!targetEl?.closest?.('.speed-frame-element')) {
-        if (selectedSpeedFrame) {
+        if (useEditorStore.getState().selectedSpeedFrame) {
           selectSpeedFrame(null, null);
         }
       }
@@ -697,8 +675,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         }
         return;
       }
-
-      const latestTracks = getLatestTracks(clip.id);
 
       if (activeTool === 'trackSelect') {
         const clickTime = clip.startTime + relX / zoomLevel;
@@ -822,15 +798,16 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
         return;
       }
 
-      let currentSelectedIds = selectedClipIds;
+      const stateSelectedClipIds = useEditorStore.getState().selectedClipIds;
+      let currentSelectedIds = stateSelectedClipIds;
       if (e.ctrlKey || e.metaKey) {
-        const isAlreadySel = selectedClipIds.includes(clip.id);
+        const isAlreadySel = stateSelectedClipIds.includes(clip.id);
         currentSelectedIds = isAlreadySel
-          ? selectedClipIds.filter((id) => id !== clip.id)
-          : [...selectedClipIds, clip.id];
+          ? stateSelectedClipIds.filter((id) => id !== clip.id)
+          : [...stateSelectedClipIds, clip.id];
         selectClips(currentSelectedIds);
       } else {
-        const isAlreadySelected = selectedClipIds.includes(clip.id);
+        const isAlreadySelected = stateSelectedClipIds.includes(clip.id);
         if (!isAlreadySelected) {
           selectClip(clip.id);
           currentSelectedIds = [clip.id];
@@ -861,7 +838,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       e.stopPropagation();
     },
-    [tracks, activeTool, splitClip, zoomLevel, selectClip, selectClips, selectedClipIds, startTransactionSafe, startResize, setDragState, setDraggingClipId, setSlipState, setSlideState, selectedSpeedFrame, selectSpeedFrame],
+    [activeTool, splitClip, zoomLevel, selectClip, selectClips, startTransactionSafe, startResize, setDragState, setDraggingClipId, setSlipState, setSlideState, selectSpeedFrame],
   );
 
   const handleTimelineClick = useCallback(
@@ -871,12 +848,13 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       // onClick calls e.stopPropagation() so this handler fires only when
       // the user clicks on empty timeline space. We don't move the playhead
       // here (that's the ruler's job) — we just clear selection.
+      const st = useEditorStore.getState();
       const hasSelection =
-        selectedClipId !== null ||
-        selectedClipIds.length > 0 ||
-        selectedTransitionClipId !== null ||
-        selectedTrackId !== null ||
-        selectedSpeedFrame !== null;
+        st.selectedClipId !== null ||
+        st.selectedClipIds.length > 0 ||
+        st.selectedTransitionClipId !== null ||
+        st.selectedTrackId !== null ||
+        st.selectedSpeedFrame !== null;
       if (!hasSelection) return;
       selectClip(null);
       selectClips([]);
@@ -884,7 +862,7 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
       selectTrack(null);
       selectSpeedFrame(null, null);
     },
-    [activeTool, selectClip, selectClips, selectTransition, selectTrack, selectSpeedFrame, selectedClipId, selectedClipIds, selectedTransitionClipId, selectedTrackId, selectedSpeedFrame],
+    [activeTool, selectClip, selectClips, selectTransition, selectTrack, selectSpeedFrame],
   );
 
   const handleRulerPointerDown = useCallback(
@@ -1003,13 +981,11 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
       // Enable scrubbing tracking so dragging works seamlessly
       setIsScrubbing(true);
-      setScrubTime(time);
-      setScrubMouseX(e.clientX);
 
       e.preventDefault();
       e.stopPropagation();
     },
-    [zoomLevel, seek, setIsScrubbing, setScrubTime, setScrubMouseX, rulerContainerRef, trackContainerRef],
+    [zoomLevel, seek, setIsScrubbing, rulerContainerRef, trackContainerRef],
   );
 
   const handleSplit = useCallback(
@@ -1019,8 +995,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
     [splitClip],
   );
 
-  const lastScrubTimeRef = useRef<number>(0);
-  const lastScrubStateUpdateRef = useRef<number>(0);
   const latestClientXRef = useRef<number>(0);
   const wasPlayingOnRulerDownRef = useRef<boolean>(false);
   const rulerDownXRef = useRef<number>(0);
@@ -1081,13 +1055,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
                   container.scrollLeft + speed
                 );
               }
-            }
-
-            const scrubNow = performance.now();
-            if (scrubNow - lastScrubStateUpdateRef.current > 16) {
-              setScrubTime(time);
-              setScrubMouseX(clientX);
-              lastScrubStateUpdateRef.current = scrubNow;
             }
           }
         });
@@ -1653,7 +1620,6 @@ export function useTimelineDrag({ timelineState }: UseTimelineDragDeps) {
 
     if (isScrubbing) {
       setIsScrubbing(false);
-      setScrubTime(null);
       // CapCut-feel: dispatch one full-quality redraw event on release
       window.dispatchEvent(new CustomEvent('procut-scrub-finalize'));
 
