@@ -1025,6 +1025,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   // the warm-up seek runs once per split crossing instead of every sync tick.
   const preRolledBoundaryRef = useRef<number | null>(null);
   const triggeredTransitionsRef = useRef<Set<string>>(new Set());
+  const prevPlayingRef = useRef<boolean>(false);
 
   // Worker export uses independent decoders. A paused <video> still owns a
   // decoder and decoded surfaces, so pause() alone is not sufficient after a
@@ -1832,6 +1833,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     const isMobileSyncThrottle = isMobileDevice();
     const MOBILE_SYNC_INTERVAL = 1000 / 15; // ~67ms
     let lastSyncLoopTime = 0;
+    // SPEED FRAME FIX: consecutive-buffering-tick counter (hysteresis for the
+    // isBuffering flag — see the buffering detection section below).
+    // Declared outside syncLoop so it accurately accumulates across RAF ticks.
+    let bufferingTickCount = 0;
 
     const syncLoop = () => {
       if (!isRunning) return;
@@ -1867,6 +1872,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // During trim preview, getEffectivePreviewTime() returns the trim edge position.
       const ct = getEffectivePreviewTime();
       const playing = store.isPlaying;
+      const justStartedPlaying = playing && !prevPlayingRef.current;
+      prevPlayingRef.current = playing;
       const scrubbing = store.isScrubbing;
       const globalSpeed = store.playbackSpeed;
       const globalMuted = store.isMuted || !!store.muteTimelineAudio;
@@ -1889,16 +1896,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           for (const [, e] of pool) {
             if (e.type !== 'video' || !e.el) continue;
             if (e._shareKey) {
-              const gid = e._shareKey.split('::')[1];
-              if (gid && !splitGroupIdx.has(gid)) splitGroupIdx.set(gid, e);
+              const part = e._shareKey.split('::')[1] || '';
+              const cleanGid = part.replace(/^split:/, '').replace(/_\d+$/, '');
+              if (cleanGid && !splitGroupIdx.has(cleanGid)) splitGroupIdx.set(cleanGid, e);
+              if (part && !splitGroupIdx.has(part)) splitGroupIdx.set(part, e);
             }
           }
         }
         return splitGroupIdx.get(splitGroupId) ?? null;
       };
-      // SPEED FRAME FIX: consecutive-buffering-tick counter (hysteresis for the
-      // isBuffering flag — see the buffering detection section below).
-      let bufferingTickCount = 0;
 
       // PERF + BUG FIX: Cache active clips list with loop/seek-backward detection.
       // Bug: when playback loops (t=30 → t=0), nextClipBoundaryRef was still > 0, so
@@ -1914,20 +1920,21 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       const crossedBoundary = ct >= nextClipBoundaryRef.current || (nextClipBoundaryRef.current !== Infinity && ct < prevSyncCtRef.current);
       prevSyncCtRef.current = ct;
 
-      if (tracksChanged || crossedBoundary || isJump) {
+      if (tracksChanged || crossedBoundary || isJump || justStartedPlaying) {
         if (tracksChanged) {
           sortedTracksRef.current = storeTracks.map((t: any) => ({
             ...t,
             clips: [...t.clips].sort((a: any, b: any) => a.startTime - b.startTime)
           }));
         }
-        if (isJump) {
-          // Reset boundary so active clips and next boundary are fully re-evaluated at the new jump position
+        if (isJump || tracksChanged || justStartedPlaying) {
+          // Reset boundary so active clips and next boundary are fully re-evaluated at the new jump position / after edits / on play
           nextClipBoundaryRef.current = 0;
           // Clear lastActiveClipIds so ALL clips at the new position are treated as freshly activated,
           // which forces hard seeks to their exact target frame and resets accumulated drift
           lastActiveClipIdsRef.current = new Set();
           triggeredTransitionsRef.current.clear();
+          preRolledBoundaryRef.current = null;
         }
         cachedActiveClipsRef.current = getActiveClips();
         lastCachedStoreTracksRef.current = storeTracks;
@@ -2110,11 +2117,24 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (!entry) {
           entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
         }
+        // VIDEO FALLBACK: match any existing video element sharing this mediaId
+        if (!entry && (clip.trackType === 'video' || (clip.clip as any)?.type === 'video')) {
+          for (const [, e] of pool) {
+            if (e.type === 'video' && e.mediaId === clip.mediaId && e.el) {
+              entry = e;
+              // Self-heal: register this entry under clip.clipId so pool and videoMap have it immediately
+              pool.set(clip.clipId, { ...e, clipId: clip.clipId });
+              videoMapRef.current.set(clip.clipId, e.el as HTMLVideoElement);
+              break;
+            }
+          }
+        }
         // AUDIO SPLIT FALLBACK: match any existing audio element sharing this mediaId
         if (!entry && (clip.trackType === 'audio' || (clip.clip as any)?.type === 'audio')) {
           for (const [, e] of pool) {
             if (e.type === 'audio' && e.mediaId === clip.mediaId && e.el) {
               entry = e;
+              pool.set(clip.clipId, { ...e, clipId: clip.clipId });
               break;
             }
           }
@@ -2427,10 +2447,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const wasBuffering = store.isBuffering;
         if (anyBuffering) {
           bufferingTickCount++;
-          // FIX 5b: 3-tick hysteresis (~50ms) instead of 2 (~33ms). Split
-          // boundary seeks complete in 1-2 ticks; the extra tick filters
-          // transient buffering without perceptibly advancing the clock.
-          if (!wasBuffering && bufferingTickCount >= 3) {
+          // Hysteresis (~160ms at 60fps): normal keyframe seeks complete in 1-4 ticks (20-70ms).
+          // 10 consecutive ticks filter out transient seeking without freezing playback or flashing spinners.
+          if (!wasBuffering && bufferingTickCount >= 10) {
             store.setIsBuffering(true);
           }
         } else {
@@ -2451,7 +2470,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // another clip on the SAME element is still active — never pause the
       // shared element in that case, or the still-playing segment would freeze
       // for the rest of the tick.
-      if (!playing || store.isBuffering) {
+      // During transient buffering, do NOT pause video elements — the clock is already
+      // frozen in PreviewCanvasContainer. Keeping elements unpaused lets their decoders
+      // complete seeking and pre-buffering at full speed without interrupting pipeline.
+      if (!playing) {
         for (const [, entry] of pool) {
           if (entry.el && !entry.el.paused) {
             try { entry.el.pause(); } catch {}

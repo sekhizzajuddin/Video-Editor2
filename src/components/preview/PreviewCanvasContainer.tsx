@@ -45,6 +45,16 @@ import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
 import { isMobileDevice } from '@/hooks/useMediaPlayback';
 
+const PreviewBufferingOverlay = React.memo(() => {
+  const isBuffering = useEditorStore((s) => s.isBuffering);
+  if (!isBuffering) return null;
+  return (
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/10">
+      <Spinner className="w-12 h-12 text-white drop-shadow-md" />
+    </div>
+  );
+});
+
 export function PreviewCanvasContainer() {
   const currentTime = useEditorStore.getState().currentTime;
 
@@ -85,7 +95,6 @@ export function PreviewCanvasContainer() {
     progressBarColor,
     progressBarHeight,
     useProxies,
-    isBuffering,
   } = useEditorStore(
     useShallow((s) => ({
       isPlaying: s.isPlaying,
@@ -124,7 +133,6 @@ export function PreviewCanvasContainer() {
       progressBarColor: s.progressBarColor,
       progressBarHeight: s.progressBarHeight,
       useProxies: s.useProxies,
-      isBuffering: s.isBuffering,
     }))
   );
 
@@ -1061,11 +1069,7 @@ export function PreviewCanvasContainer() {
           containerRef={containerRef}
         />
         {mediaDebug && <MediaPoolDebugOverlay />}
-        {isBuffering && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/10">
-            <Spinner className="w-12 h-12 text-white drop-shadow-md" />
-          </div>
-        )}
+        <PreviewBufferingOverlay />
       </div>
 
       {/* Transport Controls Bar */}
