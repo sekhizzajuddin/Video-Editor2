@@ -427,14 +427,16 @@ export function getMediaTimeAtPosition(
 
 export function getMediaTimeForClip(
   clip: { id: string; startTime: number; duration: number; trimStart: number; speed: number; speedRamp?: SpeedRampKeyframe[]; speedFrames?: SpeedFrame[]; speedFrameSourceEnd?: number; isReversed?: boolean; freezeFrame?: number },
-  currentTime: number
+  currentTime: number,
+  clamp: boolean = true
 ): number {
   // FREEZE FRAME: ignore timeline position, always return the held frame
   if (clip.freezeFrame !== undefined) {
     return clip.freezeFrame;
   }
 
-  const elapsedTimeline = currentTime - clip.startTime;
+  const rawElapsed = currentTime - clip.startTime;
+  const elapsedTimeline = clamp ? Math.max(0, Math.min(clip.duration, rawElapsed)) : rawElapsed;
 
   if (clip.isReversed) {
     // REVERSE: map elapsed forward time → backward media time.
@@ -457,13 +459,11 @@ export function getMediaTimeForClip(
       }
     }
     if (segments.length > 0) {
-      if (elapsedTimeline < segments[0].startOffset) {
-        const val = segments[0].sourceStart + (elapsedTimeline - segments[0].startOffset) * segments[0].speed;
-        return Number.isFinite(val) ? val : clip.trimStart;
+      if (elapsedTimeline <= segments[0].startOffset) {
+        return segments[0].sourceStart;
       }
       const lastSeg = segments[segments.length - 1];
-      const val = lastSeg.sourceStart + (elapsedTimeline - lastSeg.startOffset) * lastSeg.speed;
-      return Number.isFinite(val) ? val : clip.trimStart;
+      return lastSeg.sourceStart + (lastSeg.endOffset - lastSeg.startOffset) * lastSeg.speed;
     }
   }
 

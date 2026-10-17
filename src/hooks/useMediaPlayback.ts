@@ -1987,14 +1987,28 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             preRolledBoundaryRef.current = boundary;
             let preRolled = false;
             for (const track of sortedTracksRef.current) {
-              for (const tc of track.clips) {
-                if (Math.abs(tc.startTime - boundary) > 0.001) continue;
+              for (let i = 0; i < track.clips.length; i++) {
+                const tc = track.clips[i];
+                let isIncomingTransition = false;
+                if (i > 0) {
+                  const prevClip = track.clips[i - 1];
+                  const transition = tc.transitionIn || prevClip.transitionOut;
+                  if (transition && transition.duration > 0) {
+                    const alignment = transition.params?.alignment || 'center';
+                    const win = getTransitionWindow(tc.startTime, transition.duration, alignment, prevClip, tc);
+                    if (Math.abs(win.start - boundary) <= 0.005) {
+                      isIncomingTransition = true;
+                    }
+                  }
+                }
+                if (!isIncomingTransition && Math.abs(tc.startTime - boundary) > 0.005) continue;
                 const entry = pool.get(tc.id); // own entry only — never the shared active element
                 if (!entry || entry.type !== 'video') break;
                 const el = entry.el as HTMLVideoElement;
                 if (el.seeking || el.readyState >= 2) break;
                 const mediaItem = mediaMapRef.current.get(tc.mediaId);
                 const maxDuration = mediaItem ? mediaItem.duration : 10000;
+                const targetPreRollTime = isIncomingTransition ? tc.startTime : boundary;
                 const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip(
                   {
                     id: tc.id,
@@ -2008,7 +2022,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                     isReversed: tc.isReversed,
                     freezeFrame: tc.freezeFrame,
                   },
-                  boundary
+                  targetPreRollTime
                 )));
                 if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.05) {
                   el.currentTime = mediaTime;
@@ -2386,7 +2400,25 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               const ae = pool.get(ac.clipId);
               if (ae && ae.el === el) { isSharedWithActive = true; break; }
             }
+
+            // Transition smoothing: If this clip is the incoming clip in an active transition
+            // and the outgoing clip is healthy (playing smoothly), do not stall the playback clock.
+            let isCoveredByTransition = false;
             if (!isSharedWithActive) {
+              for (const track of sortedTracksRef.current) {
+                if (track.type !== 'video') continue;
+                const trans = findActiveTransition(track.clips, ct);
+                if (trans && trans.to?.id === clip.clipId && trans.from) {
+                  const fromEntry = pool.get(trans.from.id);
+                  if (fromEntry && fromEntry.el && fromEntry.el.readyState >= 2 && !fromEntry.el.seeking) {
+                    isCoveredByTransition = true;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (!isSharedWithActive && !isCoveredByTransition) {
               anyBuffering = true;
               break;
             }

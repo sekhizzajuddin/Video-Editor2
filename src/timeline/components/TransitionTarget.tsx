@@ -9,6 +9,7 @@ interface TransitionTargetProps {
   position?: 'in' | 'out';
   clipId: string;
   trackId: string;
+  cutTime?: number;
   left: number;
   width: number;
   hasTransition: boolean;
@@ -196,6 +197,7 @@ export const TransitionTarget = React.memo(function TransitionTarget({
   clipId,
   trackId,
   position,
+  cutTime,
   left,
   width,
   hasTransition,
@@ -207,6 +209,20 @@ export const TransitionTarget = React.memo(function TransitionTarget({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  const buttonSize = 26; // 26px diameter matching standard timeline UI
+  let buttonLeft: number;
+  if (cutTime !== undefined) {
+    if (position === 'in' && cutTime <= 0.05) {
+      // Exactly at the start of the first clip (0:00), align comfortably at the edge
+      buttonLeft = Math.max(1, cutTime * zoomLevel);
+    } else {
+      // Centered directly on the cut line / boundary
+      buttonLeft = Math.round(cutTime * zoomLevel - buttonSize / 2);
+    }
+  } else {
+    buttonLeft = Math.round(left + width / 2 - buttonSize / 2);
+  }
 
   const handleDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('application/procut-transition')) {
@@ -266,51 +282,60 @@ export const TransitionTarget = React.memo(function TransitionTarget({
   };
 
   if (hasTransition) {
-    let TransitionIcon = Sparkles;
-    const nameLower = (transitionName || '').toLowerCase();
-    if (nameLower.includes('wipe')) {
-      TransitionIcon = ArrowLeftRight;
-    } else if (nameLower.includes('slide')) {
-      TransitionIcon = GripVertical;
-    } else if (nameLower.includes('zoom')) {
-      TransitionIcon = ZoomIn;
-    }
-
     return (
-      <div
-        className={`absolute top-2 bottom-2 rounded-sm z-30 flex items-center justify-center cursor-pointer text-white border transition-all group/trans ${
-          isSelected
-            ? 'bg-purple-600 border-purple-300 ring-1 ring-purple-300 shadow-lg'
-            : 'bg-purple-700/80 border-purple-600 hover:bg-purple-600 hover:border-purple-500'
-        }`}
-        style={{ left: `${left}px`, width: `${width}px` }}
-        onClick={handleClick}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseMove={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          setMousePos({
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-          });
-        }}
-        onMouseLeave={() => setIsHovered(false)}
-      >
-        <TransitionIcon className={`w-3.5 h-3.5 text-purple-200 group-hover/trans:scale-110 transition-transform ${isHovered ? 'animate-pulse' : ''}`} />
-
-        {isHovered && transitionName && (
+      <div className="contents">
+        {/* Subtle duration highlight behind the cut button */}
+        {width > 0 && (
           <div
-            className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-[#1a1a1a]/95 border border-purple-500 rounded p-1.5 shadow-2xl z-50 flex flex-col items-center gap-1.5 pointer-events-none animate-in fade-in zoom-in-95 duration-100"
-            style={{ minWidth: '130px' }}
-          >
-            <span className="text-[9px] text-white font-semibold capitalize whitespace-nowrap">
-              {transitionName}
-            </span>
-            <TransitionPreviewTooltipCanvas transitionName={transitionName} />
-          </div>
+            className={`absolute top-2 bottom-2 rounded pointer-events-none transition-all z-20 ${
+              isSelected
+                ? 'bg-purple-600/30 border border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                : 'bg-purple-700/20 border border-purple-500/30'
+            }`}
+            style={{ left: `${left}px`, width: `${width}px` }}
+          />
         )}
+
+        {/* Circular Transition Button: centered on the cut line, matching CapCut style */}
+        <div
+          className={`absolute top-1/2 -translate-y-1/2 z-30 w-[26px] h-[26px] rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 shadow-md ${
+            isSelected
+              ? 'bg-white text-purple-700 ring-2 ring-purple-500 ring-offset-2 ring-offset-zinc-950 scale-105'
+              : 'bg-white text-zinc-900 border border-zinc-200 hover:scale-115 hover:shadow-lg hover:border-zinc-400 active:scale-95'
+          }`}
+          style={{ left: `${buttonLeft}px` }}
+          onClick={handleClick}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMousePos({
+              x: e.clientX - rect.left,
+              y: e.clientY - rect.top,
+            });
+          }}
+          onMouseLeave={() => setIsHovered(false)}
+          title={transitionName ? `Transition: ${transitionName} (Click to edit)` : 'Transition (Click to edit)'}
+        >
+          {/* Crisp Bowtie transition icon (⋈) */}
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5 text-zinc-900 pointer-events-none">
+            <path d="M4 6.5v11l8-5.5-8-5.5zm16 0l-8 5.5 8 5.5v-11z" />
+          </svg>
+
+          {isHovered && transitionName && (
+            <div
+              className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-[#1a1a1a]/95 border border-purple-500 rounded p-1.5 shadow-2xl z-50 flex flex-col items-center gap-1.5 pointer-events-none animate-in fade-in zoom-in-95 duration-100"
+              style={{ minWidth: '130px' }}
+            >
+              <span className="text-[9px] text-white font-semibold capitalize whitespace-nowrap">
+                {transitionName}
+              </span>
+              <TransitionPreviewTooltipCanvas transitionName={transitionName} />
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -349,27 +374,16 @@ export const TransitionTarget = React.memo(function TransitionTarget({
         toast.success(`Added ${newTransition.name} (${defaultAlignment === 'left' ? 'Start at Cut' : defaultAlignment === 'right' ? 'End at Cut' : 'Center at Cut'})`);
       }}
       title={position === 'in' ? "Click to add In-Transition (Start at Cut)" : position === 'out' ? "Click to add Out-Transition (End at Cut)" : "Click to add Cut Transition"}
-      className="absolute top-0 bottom-0 z-30 flex flex-col items-center justify-center pointer-events-auto group cursor-pointer"
+      className={`absolute top-1/2 -translate-y-1/2 z-30 w-[26px] h-[26px] rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 shadow-md ${
+        isDragOver
+          ? 'bg-purple-600 border-2 border-purple-300 text-white scale-125 shadow-xl ring-2 ring-purple-400'
+          : 'bg-white text-zinc-900 border border-zinc-200 hover:scale-115 hover:bg-zinc-50 hover:shadow-lg active:scale-95'
+      }`}
       style={{
-        left: `${left + width / 2 - 12}px`,
-        width: '24px',
+        left: `${buttonLeft}px`,
       }}
     >
-      <div className={`w-0.5 flex-1 border-l border-dashed transition-colors ${
-        isDragOver ? 'border-purple-400' : 'border-purple-500/40 group-hover:border-purple-500/70'
-      }`} />
-      
-      <div className={`w-5 h-5 rounded-full border flex items-center justify-center shadow-md transition-all ${
-        isDragOver
-          ? 'bg-purple-600 border-purple-300 text-white scale-125'
-          : 'bg-[#252525] border-purple-500/60 text-purple-400 hover:text-white hover:scale-110 hover:border-purple-500 hover:bg-purple-600'
-      }`}>
-        <Plus className="w-3.5 h-3.5" />
-      </div>
-      
-      <div className={`w-0.5 flex-1 border-l border-dashed transition-colors ${
-        isDragOver ? 'border-purple-400' : 'border-purple-500/40 group-hover:border-purple-500/70'
-      }`} />
+      <Plus className={`w-4 h-4 stroke-[2.5] ${isDragOver ? 'text-white' : 'text-zinc-900'}`} />
     </div>
   );
 });

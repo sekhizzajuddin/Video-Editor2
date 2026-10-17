@@ -62,819 +62,553 @@ export function audioBufferToWav(buffer: AudioBuffer): Blob {
   return new Blob([bufferWav], { type: 'audio/wav' });
 }
 
+// ── Studio DSP Sound Helpers ──────────────────────────────────────────────────
+
+/**
+ * Generates natural pink noise (1/f spectral curve) with decorrelated left and
+ * right channels. Unlike harsh white static, pink noise mimics real-world
+ * acoustic air displacement, wind rush, and fluid dynamics.
+ */
+function createStereoPinkNoise(offlineCtx: OfflineAudioContext, duration: number, sampleRate: number): AudioBufferSourceNode {
+  const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
+  const noiseBuffer = offlineCtx.createBuffer(2, bufferSize, sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const output = noiseBuffer.getChannelData(ch);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      b3 = 0.86650 * b3 + white * 0.3104856;
+      b4 = 0.55000 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.0168980;
+      output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.14;
+      b6 = white * 0.115926;
+    }
+  }
+  const source = offlineCtx.createBufferSource();
+  source.buffer = noiseBuffer;
+  return source;
+}
+
+/**
+ * Creates an analog-style soft-saturation curve [tanh(x)] to round off sharp
+ * digital peaks, produce rich warm harmonics, and prevent clipping.
+ */
+function createSoftSaturator(offlineCtx: OfflineAudioContext): WaveShaperNode {
+  const shaper = offlineCtx.createWaveShaper();
+  const n_samples = 512;
+  const curve = new Float32Array(n_samples);
+  for (let i = 0; i < n_samples; ++i) {
+    const x = (i * 2) / n_samples - 1;
+    curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6);
+  }
+  shaper.curve = curve;
+  shaper.oversample = '2x';
+  return shaper;
+}
+
+/**
+ * Generates a clean sub-bass transient punch (30Hz - 90Hz sweep) that gives
+ * transitions tactile, cinematic weight in headphones and subwoofers.
+ */
+function addSubBassHit(
+  offlineCtx: OfflineAudioContext,
+  startFreq: number,
+  endFreq: number,
+  startTime: number,
+  peakTime: number,
+  duration: number,
+  peakGain: number,
+  dest: AudioNode
+) {
+  const osc = offlineCtx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(startFreq, startTime);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), startTime + duration);
+
+  const gain = offlineCtx.createGain();
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.linearRampToValueAtTime(peakGain, startTime + peakTime);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+  osc.connect(gain);
+  gain.connect(dest);
+  osc.start(startTime);
+  osc.stop(startTime + duration);
+}
+
+/**
+ * Synthesizes studio-grade procedural transition and interface sound effects
+ * in true 2-channel stereo with multi-layered sub-bass, formant filtering,
+ * decorrelated stereo noise, and soft-knee analog saturation.
+ */
 export function synthesizeProceduralSFX(category: string, duration: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     (async () => {
       const sampleRate = 44100;
-      const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
+      // High-definition 2-channel stereo context
+      const offlineCtx = new OfflineAudioContext(2, Math.max(1, Math.floor(sampleRate * duration)), sampleRate);
 
-      if (category === 'explosion') {
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
+      const saturator = createSoftSaturator(offlineCtx);
+      saturator.connect(offlineCtx.destination);
 
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(800, 0);
-        filter.frequency.exponentialRampToValueAtTime(10, duration);
+      if (category === 'swoosh') {
+        // ── Smooth Cinematic Whoosh ──────────────────────────────────────────
+        // Layer 1: Sub-bass body sweep (55Hz -> 90Hz -> 38Hz)
+        addSubBassHit(offlineCtx, 55, 38, 0, duration * 0.38, duration, 0.45, saturator);
 
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(1.0, 0);
-        gain.gain.exponentialRampToValueAtTime(0.01, duration);
+        // Layer 2: Stereo pink noise swept through 2-stage resonant bandpass
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const bp1 = offlineCtx.createBiquadFilter();
+        bp1.type = 'bandpass';
+        bp1.Q.setValueAtTime(2.8, 0);
+        bp1.frequency.setValueAtTime(180, 0);
+        bp1.frequency.exponentialRampToValueAtTime(2800, duration * 0.4);
+        bp1.frequency.exponentialRampToValueAtTime(160, duration);
 
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-      } else if (category === 'laser') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(1800, 0);
-        osc.frequency.exponentialRampToValueAtTime(80, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.8, 0);
-        gain.gain.exponentialRampToValueAtTime(0.01, duration);
-
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
-      } else if (category === 'swoosh') {
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.Q.setValueAtTime(5, 0);
-        filter.frequency.setValueAtTime(100, 0);
-        filter.frequency.exponentialRampToValueAtTime(1200, duration * 0.4);
-        filter.frequency.exponentialRampToValueAtTime(100, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.01, 0);
-        gain.gain.linearRampToValueAtTime(0.8, duration * 0.4);
-        gain.gain.exponentialRampToValueAtTime(0.01, duration);
-
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-      } else if (category === 'jump') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(150, 0);
-        osc.frequency.exponentialRampToValueAtTime(800, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.6, 0);
-        gain.gain.exponentialRampToValueAtTime(0.01, duration);
-
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
-      } else if (category === 'bubble') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(100, 0);
-        osc.frequency.exponentialRampToValueAtTime(1200, duration * 0.7);
-        osc.frequency.exponentialRampToValueAtTime(80, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.01, 0);
-        gain.gain.linearRampToValueAtTime(0.7, duration * 0.2);
-        gain.gain.exponentialRampToValueAtTime(0.01, duration);
-
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
-      } else if (category === 'alarm') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'square';
-        const pulseCount = Math.max(1, Math.floor(duration * 4));
-        for (let i = 0; i < pulseCount; i++) {
-          const time = (duration / pulseCount) * i;
-          osc.frequency.setValueAtTime(900, time);
-          osc.frequency.setValueAtTime(700, time + (duration / pulseCount) * 0.5);
-        }
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.5, 0);
-        for (let i = 0; i < pulseCount; i++) {
-          const time = (duration / pulseCount) * i;
-          const interval = duration / pulseCount;
-          gain.gain.setValueAtTime(0.5, time);
-          gain.gain.setValueAtTime(0.5, time + interval * 0.7);
-          gain.gain.linearRampToValueAtTime(0.01, time + interval * 0.95);
-        }
-
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
-      } else if (category === 'click') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(3000, 0);
-        osc.frequency.exponentialRampToValueAtTime(400, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.8, 0);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
-      } else if (category === 'ambient') {
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.Q.setValueAtTime(1, 0);
-        filter.frequency.setValueAtTime(300, 0);
-
-        const modCount = 10;
-        for (let i = 0; i < modCount; i++) {
-          const time = (duration / modCount) * i;
-          const targetFreq = 150 + Math.random() * 250;
-          filter.frequency.linearRampToValueAtTime(targetFreq, time + (duration / modCount) * 0.5);
-        }
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.3, 0);
-
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-      } else if (category === 'waves') {
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.Q.setValueAtTime(1, 0);
-
-        const wavePeriod = 4.0;
-        for (let time = 0; time < duration; time += 0.05) {
-          const cycle = (time / wavePeriod) * 2 * Math.PI;
-          const mod = Math.sin(cycle);
-          const targetFreq = 200 + (mod + 1) * 300;
-          filter.frequency.linearRampToValueAtTime(targetFreq, time);
-        }
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.05, 0);
-        for (let time = 0; time < duration; time += 0.05) {
-          const cycle = (time / wavePeriod) * 2 * Math.PI;
-          const mod = Math.sin(cycle);
-          const targetGain = 0.05 + (mod + 1) * 0.25;
-          gain.gain.linearRampToValueAtTime(targetGain, time);
-        }
-        gain.gain.setValueAtTime(gain.gain.value, duration - 0.2);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-      } else if (category === 'flying') {
-        const osc1 = offlineCtx.createOscillator();
-        osc1.type = 'sawtooth';
-        osc1.frequency.setValueAtTime(80, 0);
-
-        const osc2 = offlineCtx.createOscillator();
-        osc2.type = 'triangle';
-        osc2.frequency.setValueAtTime(120, 0);
-
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(150, 0);
+        const bp2 = offlineCtx.createBiquadFilter();
+        bp2.type = 'bandpass';
+        bp2.Q.setValueAtTime(1.8, 0);
+        bp2.frequency.setValueAtTime(240, 0);
+        bp2.frequency.exponentialRampToValueAtTime(3200, duration * 0.42);
+        bp2.frequency.exponentialRampToValueAtTime(200, duration);
 
         const noiseGain = offlineCtx.createGain();
-        noiseGain.gain.setValueAtTime(0.1, 0);
+        noiseGain.gain.setValueAtTime(0.0001, 0);
+        noiseGain.gain.linearRampToValueAtTime(0.85, duration * 0.38);
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, duration);
 
-        const lfo = offlineCtx.createOscillator();
-        lfo.type = 'sine';
-        lfo.frequency.setValueAtTime(6, 0);
+        noise.connect(bp1);
+        bp1.connect(bp2);
+        bp2.connect(noiseGain);
+        noiseGain.connect(saturator);
+        noise.start(0);
 
-        const lfoGain = offlineCtx.createGain();
-        lfoGain.gain.setValueAtTime(5, 0);
-
-        lfo.connect(lfoGain);
-        lfoGain.connect(osc1.frequency);
-        lfoGain.connect(osc2.frequency);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.4, 0);
-        gain.gain.setValueAtTime(0.4, duration - 0.1);
-        gain.gain.linearRampToValueAtTime(0.001, duration);
-
-        osc1.connect(gain);
-        osc2.connect(gain);
-
-        noiseSource.connect(filter);
-        filter.connect(noiseGain);
-        noiseGain.connect(offlineCtx.destination);
-
-        gain.connect(offlineCtx.destination);
-
-        osc1.start(0);
-        osc2.start(0);
-        lfo.start(0);
-        noiseSource.start(0);
-      } else if (category === 'magic') {
-        const chimeCount = Math.max(3, Math.floor(duration * 6));
-        for (let i = 0; i < chimeCount; i++) {
-          const noteTime = (duration / chimeCount) * i;
-          const osc = offlineCtx.createOscillator();
-          osc.type = 'sine';
-
-          const baseFreq = 800 + i * 150;
-          osc.frequency.setValueAtTime(baseFreq, noteTime);
-          osc.frequency.linearRampToValueAtTime(baseFreq * 1.5, noteTime + 0.15);
-
-          const gain = offlineCtx.createGain();
-          gain.gain.setValueAtTime(0.001, noteTime);
-          gain.gain.linearRampToValueAtTime(0.2, noteTime + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.001, noteTime + 0.25);
-
-          osc.connect(gain);
-          gain.connect(offlineCtx.destination);
-          osc.start(noteTime);
-          osc.stop(noteTime + 0.26);
-        }
-      } else if (category === 'punch') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(220, 0);
-        osc.frequency.exponentialRampToValueAtTime(40, 0.08);
-
-        const popOsc = offlineCtx.createOscillator();
-        popOsc.type = 'sine';
-        popOsc.frequency.setValueAtTime(800, 0);
-        popOsc.frequency.exponentialRampToValueAtTime(100, 0.02);
-
-        const thudGain = offlineCtx.createGain();
-        thudGain.gain.setValueAtTime(0.8, 0);
-        thudGain.gain.exponentialRampToValueAtTime(0.01, 0.15);
-
-        const popGain = offlineCtx.createGain();
-        popGain.gain.setValueAtTime(0.5, 0);
-        popGain.gain.exponentialRampToValueAtTime(0.001, 0.03);
-
-        osc.connect(thudGain);
-        thudGain.connect(offlineCtx.destination);
-        popOsc.connect(popGain);
-        popGain.connect(offlineCtx.destination);
-
-        osc.start(0);
-        popOsc.start(0);
-      } else if (category === 'footsteps') {
-        const stepCount = Math.max(1, Math.floor(duration * 2.5));
-        for (let i = 0; i < stepCount; i++) {
-          const stepTime = (duration / stepCount) * i;
-          const osc = offlineCtx.createOscillator();
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(100, stepTime);
-          osc.frequency.exponentialRampToValueAtTime(40, stepTime + 0.06);
-
-          const filter = offlineCtx.createBiquadFilter();
-          filter.type = 'lowpass';
-          filter.frequency.setValueAtTime(200, stepTime);
-
-          const gain = offlineCtx.createGain();
-          gain.gain.setValueAtTime(0.001, stepTime);
-          gain.gain.linearRampToValueAtTime(0.6, stepTime + 0.01);
-          gain.gain.exponentialRampToValueAtTime(0.001, stepTime + 0.08);
-
-          osc.connect(filter);
-          filter.connect(gain);
-          gain.connect(offlineCtx.destination);
-
-          osc.start(stepTime);
-          osc.stop(stepTime + 0.09);
-        }
-      } else if (category === 'gunshot') {
-        const bufferSize = sampleRate * 0.1;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const noiseFilter = offlineCtx.createBiquadFilter();
-        noiseFilter.type = 'bandpass';
-        noiseFilter.frequency.setValueAtTime(1000, 0);
-
-        const noiseGain = offlineCtx.createGain();
-        noiseGain.gain.setValueAtTime(0.5, 0);
-        noiseGain.gain.exponentialRampToValueAtTime(0.01, 0.08);
-
-        noiseSource.connect(noiseFilter);
-        noiseFilter.connect(noiseGain);
-        noiseGain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(180, 0);
-        osc.frequency.exponentialRampToValueAtTime(50, 0.15);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(1.0, 0);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
-      } else if (category === 'spark') {
-        const crackleCount = Math.max(10, Math.floor(duration * 40));
-        for (let i = 0; i < crackleCount; i++) {
-          const crackleTime = Math.random() * duration;
-          const osc = offlineCtx.createOscillator();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(5000 + Math.random() * 4000, crackleTime);
-
-          const gain = offlineCtx.createGain();
-          gain.gain.setValueAtTime(0.001, crackleTime);
-          gain.gain.linearRampToValueAtTime(0.3, crackleTime + 0.002);
-          gain.gain.exponentialRampToValueAtTime(0.001, crackleTime + 0.015);
-
-          osc.connect(gain);
-          gain.connect(offlineCtx.destination);
-          osc.start(crackleTime);
-          osc.stop(crackleTime + 0.02);
-        }
       } else if (category === 'fast_whoosh') {
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
+        // ── Snappy Whip-Pan Whoosh ───────────────────────────────────────────
+        // Layer 1: Snappy sub thump (85Hz -> 42Hz)
+        addSubBassHit(offlineCtx, 85, 42, 0, duration * 0.25, duration * 0.7, 0.4, saturator);
 
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.Q.setValueAtTime(6, 0);
-        filter.frequency.setValueAtTime(250, 0);
-        filter.frequency.exponentialRampToValueAtTime(3400, duration * 0.35);
-        filter.frequency.exponentialRampToValueAtTime(150, duration);
+        // Layer 2: Fast stereo sweep
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const bp = offlineCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.setValueAtTime(4.2, 0);
+        bp.frequency.setValueAtTime(320, 0);
+        bp.frequency.exponentialRampToValueAtTime(4600, duration * 0.3);
+        bp.frequency.exponentialRampToValueAtTime(220, duration);
+
+        const airHigh = offlineCtx.createBiquadFilter();
+        airHigh.type = 'highshelf';
+        airHigh.frequency.setValueAtTime(4500, 0);
+        airHigh.gain.setValueAtTime(4.0, 0);
 
         const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.001, 0);
-        gain.gain.linearRampToValueAtTime(0.85, duration * 0.35);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+        gain.gain.setValueAtTime(0.0001, 0);
+        gain.gain.linearRampToValueAtTime(0.9, duration * 0.28);
+        gain.gain.exponentialRampToValueAtTime(0.0001, duration);
 
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
+        noise.connect(bp);
+        bp.connect(airHigh);
+        airHigh.connect(gain);
+        gain.connect(saturator);
+        noise.start(0);
+
       } else if (category === 'deep_whoosh') {
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
+        // ── Cinematic Low-End Braam Whoosh ───────────────────────────────────
+        // Layer 1: Heavy sub sweep (42Hz -> 76Hz -> 30Hz)
+        addSubBassHit(offlineCtx, 42, 30, 0, duration * 0.42, duration, 0.65, saturator);
 
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(80, 0);
-        filter.frequency.exponentialRampToValueAtTime(550, duration * 0.45);
-        filter.frequency.exponentialRampToValueAtTime(60, duration);
+        // Layer 2: Deep low-pass noise rumble
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const lp = offlineCtx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.Q.setValueAtTime(3.2, 0);
+        lp.frequency.setValueAtTime(80, 0);
+        lp.frequency.exponentialRampToValueAtTime(700, duration * 0.42);
+        lp.frequency.exponentialRampToValueAtTime(55, duration);
 
         const noiseGain = offlineCtx.createGain();
-        noiseGain.gain.setValueAtTime(0.001, 0);
-        noiseGain.gain.linearRampToValueAtTime(0.5, duration * 0.45);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, duration);
+        noiseGain.gain.setValueAtTime(0.0001, 0);
+        noiseGain.gain.linearRampToValueAtTime(0.65, duration * 0.4);
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, duration);
 
-        const subOsc = offlineCtx.createOscillator();
-        subOsc.type = 'sine';
-        subOsc.frequency.setValueAtTime(55, 0);
-        subOsc.frequency.linearRampToValueAtTime(95, duration * 0.45);
-        subOsc.frequency.exponentialRampToValueAtTime(40, duration);
+        noise.connect(lp);
+        lp.connect(noiseGain);
+        noiseGain.connect(saturator);
+        noise.start(0);
 
-        const subGain = offlineCtx.createGain();
-        subGain.gain.setValueAtTime(0.001, 0);
-        subGain.gain.linearRampToValueAtTime(0.65, duration * 0.45);
-        subGain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        noiseSource.connect(filter);
-        filter.connect(noiseGain);
-        noiseGain.connect(offlineCtx.destination);
-        subOsc.connect(subGain);
-        subGain.connect(offlineCtx.destination);
-
-        noiseSource.start(0);
-        subOsc.start(0);
-      } else if (category === 'whip') {
-        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.Q.setValueAtTime(8, 0);
-        filter.frequency.setValueAtTime(2400, 0);
-        filter.frequency.exponentialRampToValueAtTime(150, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.9, 0);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-      } else if (category === 'glitch') {
-        const burstCount = Math.max(4, Math.floor(duration * 18));
-        for (let i = 0; i < burstCount; i++) {
-          const bTime = (duration / burstCount) * i;
-          const bDur = (duration / burstCount) * 0.8;
-          const osc = offlineCtx.createOscillator();
-          osc.type = i % 2 === 0 ? 'square' : 'sawtooth';
-          const f = 200 + Math.random() * 1800;
-          osc.frequency.setValueAtTime(f, bTime);
-
-          const gain = offlineCtx.createGain();
-          gain.gain.setValueAtTime(0.35, bTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, bTime + bDur);
-
-          osc.connect(gain);
-          gain.connect(offlineCtx.destination);
-          osc.start(bTime);
-          osc.stop(bTime + bDur);
-        }
-      } else if (category === 'shutter') {
-        const clicks = [0, 0.045];
-        for (const cTime of clicks) {
-          const osc = offlineCtx.createOscillator();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(3200, cTime);
-          osc.frequency.exponentialRampToValueAtTime(280, cTime + 0.025);
-
-          const g = offlineCtx.createGain();
-          g.gain.setValueAtTime(0.7, cTime);
-          g.gain.exponentialRampToValueAtTime(0.001, cTime + 0.035);
-
-          osc.connect(g);
-          g.connect(offlineCtx.destination);
-          osc.start(cTime);
-          osc.stop(cTime + 0.04);
-        }
       } else if (category === 'impact') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(150, 0);
-        osc.frequency.exponentialRampToValueAtTime(36, 0.12);
+        // ── Cinematic Trailer Impact ─────────────────────────────────────────
+        // Layer 1: Sub drop (120Hz -> 32Hz)
+        addSubBassHit(offlineCtx, 120, 32, 0, 0.015, duration, 0.85, saturator);
+
+        // Layer 2: Mid punch transient
+        const punchOsc = offlineCtx.createOscillator();
+        punchOsc.type = 'triangle';
+        punchOsc.frequency.setValueAtTime(260, 0);
+        punchOsc.frequency.exponentialRampToValueAtTime(60, 0.08);
+
+        const punchGain = offlineCtx.createGain();
+        punchGain.gain.setValueAtTime(0.6, 0);
+        punchGain.gain.exponentialRampToValueAtTime(0.0001, 0.12);
+        punchOsc.connect(punchGain);
+        punchGain.connect(saturator);
+        punchOsc.start(0);
+
+        // Layer 3: Stereo acoustic room crack & rumble
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const bp = offlineCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.setValueAtTime(2.0, 0);
+        bp.frequency.setValueAtTime(900, 0);
+        bp.frequency.exponentialRampToValueAtTime(140, duration);
+
+        const noiseGain = offlineCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.55, 0);
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, duration * 0.6);
+
+        noise.connect(bp);
+        bp.connect(noiseGain);
+        noiseGain.connect(saturator);
+        noise.start(0);
+
+      } else if (category === 'whip') {
+        // ── Sharp Whip Snap ──────────────────────────────────────────────────
+        // Layer 1: Low-end snap
+        addSubBassHit(offlineCtx, 160, 48, 0, 0.01, duration * 0.4, 0.45, saturator);
+
+        // Layer 2: High-velocity noise zip
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const bp = offlineCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.setValueAtTime(6.5, 0);
+        bp.frequency.setValueAtTime(3600, 0);
+        bp.frequency.exponentialRampToValueAtTime(180, duration);
 
         const gain = offlineCtx.createGain();
         gain.gain.setValueAtTime(0.85, 0);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+        gain.gain.exponentialRampToValueAtTime(0.0001, duration);
 
-        const bufferSize = Math.max(1, Math.floor(sampleRate * 0.08));
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-        const noiseFilter = offlineCtx.createBiquadFilter();
-        noiseFilter.type = 'bandpass';
-        noiseFilter.frequency.setValueAtTime(800, 0);
-        const noiseGain = offlineCtx.createGain();
-        noiseGain.gain.setValueAtTime(0.4, 0);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, 0.08);
+        noise.connect(bp);
+        bp.connect(gain);
+        gain.connect(saturator);
+        noise.start(0);
 
-        noiseSource.connect(noiseFilter);
-        noiseFilter.connect(noiseGain);
-        noiseGain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
       } else if (category === 'riser') {
-        // Cinematic riser: band-passed noise climbing upward with a sine sweep
-        // underneath, resolving abruptly at the cut (classic trailer tension).
-        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
+        // ── Tension Riser ───────────────────────────────────────────────────
+        // Layer 1: Ascending dual oscillators (sawtooth + triangle)
+        const sweepSaw = offlineCtx.createOscillator();
+        sweepSaw.type = 'sawtooth';
+        sweepSaw.frequency.setValueAtTime(70, 0);
+        sweepSaw.frequency.exponentialRampToValueAtTime(780, duration * 0.92);
 
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.Q.setValueAtTime(2.5, 0);
-        filter.frequency.setValueAtTime(400, 0);
-        filter.frequency.exponentialRampToValueAtTime(4200, duration * 0.9);
+        const sweepTri = offlineCtx.createOscillator();
+        sweepTri.type = 'triangle';
+        sweepTri.frequency.setValueAtTime(70.5, 0);
+        sweepTri.frequency.exponentialRampToValueAtTime(785, duration * 0.92);
 
-        const noiseGain = offlineCtx.createGain();
-        noiseGain.gain.setValueAtTime(0.001, 0);
-        noiseGain.gain.exponentialRampToValueAtTime(0.55, duration * 0.9);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, duration);
+        const sawFilter = offlineCtx.createBiquadFilter();
+        sawFilter.type = 'lowpass';
+        sawFilter.frequency.setValueAtTime(300, 0);
+        sawFilter.frequency.exponentialRampToValueAtTime(1800, duration * 0.92);
 
-        const sweep = offlineCtx.createOscillator();
-        sweep.type = 'sawtooth';
-        sweep.frequency.setValueAtTime(80, 0);
-        sweep.frequency.exponentialRampToValueAtTime(660, duration * 0.9);
-        const sweepFilter = offlineCtx.createBiquadFilter();
-        sweepFilter.type = 'lowpass';
-        sweepFilter.frequency.setValueAtTime(900, 0);
-        const sweepGain = offlineCtx.createGain();
-        sweepGain.gain.setValueAtTime(0.001, 0);
-        sweepGain.gain.exponentialRampToValueAtTime(0.25, duration * 0.9);
-        sweepGain.gain.exponentialRampToValueAtTime(0.001, duration);
+        const oscGain = offlineCtx.createGain();
+        oscGain.gain.setValueAtTime(0.0001, 0);
+        oscGain.gain.exponentialRampToValueAtTime(0.35, duration * 0.92);
+        oscGain.gain.setValueAtTime(0.0001, duration * 0.93);
 
-        noiseSource.connect(filter);
-        filter.connect(noiseGain);
-        noiseGain.connect(offlineCtx.destination);
-        sweep.connect(sweepFilter);
-        sweepFilter.connect(sweepGain);
-        sweepGain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-        sweep.start(0);
-      } else if (category === 'suck_reverse') {
-        // Reverse cymbal / suck-back: noise swelling INTO the cut, with the
-        // spectral shape opening up as it approaches (reversed decay illusion).
-        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
+        sweepSaw.connect(sawFilter);
+        sweepTri.connect(sawFilter);
+        sawFilter.connect(oscGain);
+        oscGain.connect(saturator);
+        sweepSaw.start(0);
+        sweepTri.start(0);
 
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'highpass';
-        filter.frequency.setValueAtTime(4500, 0);
-        filter.frequency.exponentialRampToValueAtTime(900, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.001, 0);
-        gain.gain.exponentialRampToValueAtTime(0.7, duration * 0.92);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-      } else if (category === 'camera_servo') {
-        // Precision lens/iris motor: a short band-limited whirr with two audible
-        // step bursts (start & stop), like a servo engaging.
-        const bufferSize = Math.max(1, Math.floor(sampleRate * duration));
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.Q.setValueAtTime(9, 0);
-        filter.frequency.setValueAtTime(1800, 0);
-        filter.frequency.linearRampToValueAtTime(2600, duration * 0.5);
-        filter.frequency.linearRampToValueAtTime(1400, duration);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.001, 0);
-        gain.gain.exponentialRampToValueAtTime(0.28, 0.03);
-        gain.gain.setValueAtTime(0.18, duration * 0.85);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        // Start/stop mechanical ticks
-        for (const tickTime of [0, Math.max(0.04, duration - 0.05)]) {
-          const tick = offlineCtx.createOscillator();
-          tick.type = 'square';
-          tick.frequency.setValueAtTime(2400, tickTime);
-          const tickGain = offlineCtx.createGain();
-          tickGain.gain.setValueAtTime(0.18, tickTime);
-          tickGain.gain.exponentialRampToValueAtTime(0.001, tickTime + 0.03);
-          tick.connect(tickGain);
-          tickGain.connect(offlineCtx.destination);
-          tick.start(tickTime);
-          tick.stop(tickTime + 0.04);
-        }
-
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
-      } else if (category === 'shimmer') {
-        // Magic shimmer: bright comb of shimmering sine partials over soft noise,
-        // spectral centre sweeping upward — reads as particles glittering.
-        const partials = [880, 1320, 1980, 2640];
-        for (let pi = 0; pi < partials.length; pi++) {
-          const osc = offlineCtx.createOscillator();
-          osc.type = 'sine';
-          const f0 = partials[pi];
-          osc.frequency.setValueAtTime(f0, 0);
-          osc.frequency.exponentialRampToValueAtTime(f0 * 1.8, duration);
-          const og = offlineCtx.createGain();
-          const amp = 0.22 / (pi + 1);
-          og.gain.setValueAtTime(0.001, 0);
-          og.gain.linearRampToValueAtTime(amp, duration * (0.25 + pi * 0.1));
-          og.gain.exponentialRampToValueAtTime(0.001, duration);
-          osc.connect(og);
-          og.connect(offlineCtx.destination);
-          osc.start(0);
-        }
-        const nSize = Math.max(1, Math.floor(sampleRate * duration));
-        const nBuf = offlineCtx.createBuffer(1, nSize, sampleRate);
-        const nOut = nBuf.getChannelData(0);
-        for (let i = 0; i < nSize; i++) nOut[i] = Math.random() * 2 - 1;
-        const ns = offlineCtx.createBufferSource();
-        ns.buffer = nBuf;
-        const hp = offlineCtx.createBiquadFilter();
-        hp.type = 'highpass';
-        hp.frequency.setValueAtTime(6000, 0);
-        hp.frequency.exponentialRampToValueAtTime(9000, duration);
-        const ng = offlineCtx.createGain();
-        ng.gain.setValueAtTime(0.001, 0);
-        ng.gain.linearRampToValueAtTime(0.16, duration * 0.5);
-        ng.gain.exponentialRampToValueAtTime(0.001, duration);
-        ns.connect(hp); hp.connect(ng); ng.connect(offlineCtx.destination);
-        ns.start(0);
-      } else if (category === 'paper_sweep') {
-        // Paper fold: mid-band rustle (card drag) that lands with a soft thud.
-        const nSize = Math.max(1, Math.floor(sampleRate * duration));
-        const nBuf = offlineCtx.createBuffer(1, nSize, sampleRate);
-        const nOut = nBuf.getChannelData(0);
-        for (let i = 0; i < nSize; i++) nOut[i] = Math.random() * 2 - 1;
-        const ns = offlineCtx.createBufferSource();
-        ns.buffer = nBuf;
+        // Layer 2: Climbing noise riser with sharp cutoff at cut
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
         const bp = offlineCtx.createBiquadFilter();
         bp.type = 'bandpass';
-        bp.Q.setValueAtTime(1.2, 0);
-        bp.frequency.setValueAtTime(700, 0);
-        bp.frequency.linearRampToValueAtTime(1600, duration * 0.8);
+        bp.Q.setValueAtTime(2.2, 0);
+        bp.frequency.setValueAtTime(350, 0);
+        bp.frequency.exponentialRampToValueAtTime(5400, duration * 0.92);
+
+        const noiseGain = offlineCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.0001, 0);
+        noiseGain.gain.exponentialRampToValueAtTime(0.65, duration * 0.92);
+        noiseGain.gain.setValueAtTime(0.0001, duration * 0.93);
+
+        noise.connect(bp);
+        bp.connect(noiseGain);
+        noiseGain.connect(saturator);
+        noise.start(0);
+
+      } else if (category === 'glitch') {
+        // ── Cyber / Digital Glitch ──────────────────────────────────────────
+        const burstCount = Math.max(6, Math.floor(duration * 20));
+        for (let i = 0; i < burstCount; i++) {
+          const bTime = (duration / burstCount) * i;
+          const bDur = (duration / burstCount) * 0.75;
+          const osc = offlineCtx.createOscillator();
+          osc.type = i % 3 === 0 ? 'square' : i % 3 === 1 ? 'sawtooth' : 'sine';
+          const f = 250 + ((i * 383) % 2400);
+          osc.frequency.setValueAtTime(f, bTime);
+
+          const gain = offlineCtx.createGain();
+          gain.gain.setValueAtTime(0.28, bTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, bTime + bDur);
+
+          osc.connect(gain);
+          gain.connect(saturator);
+          osc.start(bTime);
+          osc.stop(bTime + bDur);
+        }
+
+      } else if (category === 'flash') {
+        // ── Luminous Sparkle Flash ──────────────────────────────────────────
+        // Bright bell chord
+        const freqs = [1046, 1318, 1568, 2093];
+        freqs.forEach((f, idx) => {
+          const osc = offlineCtx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f, 0);
+          osc.frequency.exponentialRampToValueAtTime(f * 1.5, duration * 0.4);
+
+          const g = offlineCtx.createGain();
+          g.gain.setValueAtTime(0.0001, 0);
+          g.gain.linearRampToValueAtTime(0.18 / (idx + 1), 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, duration * 0.8);
+
+          osc.connect(g);
+          g.connect(saturator);
+          osc.start(0);
+          osc.stop(duration);
+        });
+
+        // Air flare
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const hp = offlineCtx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.setValueAtTime(4500, 0);
         const ng = offlineCtx.createGain();
-        ng.gain.setValueAtTime(0.001, 0);
-        ng.gain.linearRampToValueAtTime(0.4, duration * 0.25);
-        ng.gain.setValueAtTime(0.32, duration * 0.8);
-        ng.gain.exponentialRampToValueAtTime(0.001, duration);
-        ns.connect(bp); bp.connect(ng); ng.connect(offlineCtx.destination);
-        ns.start(0);
-        // Soft landing thud at the close of the fold
-        const th = offlineCtx.createOscillator();
-        th.type = 'sine';
-        th.frequency.setValueAtTime(130, duration * 0.82);
-        th.frequency.exponentialRampToValueAtTime(55, duration);
-        const thg = offlineCtx.createGain();
-        thg.gain.setValueAtTime(0.001, duration * 0.82);
-        thg.gain.exponentialRampToValueAtTime(0.45, duration * 0.85);
-        thg.gain.exponentialRampToValueAtTime(0.001, duration);
-        th.connect(thg); thg.connect(offlineCtx.destination);
-        th.start(duration * 0.82);
-        th.stop(duration);
+        ng.gain.setValueAtTime(0.0001, 0);
+        ng.gain.linearRampToValueAtTime(0.35, 0.03);
+        ng.gain.exponentialRampToValueAtTime(0.0001, duration);
+
+        noise.connect(hp);
+        hp.connect(ng);
+        ng.connect(saturator);
+        noise.start(0);
+
+      } else if (category === 'shutter') {
+        // ── Authentic Mechanical DSLR Shutter ────────────────────────────────
+        // Dual curtain click-clack with mechanical resonance
+        const clicks = [0, 0.042];
+        clicks.forEach((cTime, idx) => {
+          const osc = offlineCtx.createOscillator();
+          osc.type = 'sine';
+          const f0 = idx === 0 ? 3200 : 2600;
+          osc.frequency.setValueAtTime(f0, cTime);
+          osc.frequency.exponentialRampToValueAtTime(180, cTime + 0.025);
+
+          const g = offlineCtx.createGain();
+          g.gain.setValueAtTime(0.65, cTime);
+          g.gain.exponentialRampToValueAtTime(0.0001, cTime + 0.035);
+
+          osc.connect(g);
+          g.connect(saturator);
+          osc.start(cTime);
+          osc.stop(cTime + 0.04);
+        });
+
+        // Mechanical body thud
+        addSubBassHit(offlineCtx, 140, 50, 0.03, 0.008, 0.06, 0.35, saturator);
+
+      } else if (category === 'shimmer') {
+        // ── Magical Harmonic Shimmer ─────────────────────────────────────────
+        const partials = [880, 1174, 1320, 1760, 2640];
+        partials.forEach((f0, pi) => {
+          const osc = offlineCtx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f0, 0);
+          osc.frequency.exponentialRampToValueAtTime(f0 * 1.6, duration);
+
+          const og = offlineCtx.createGain();
+          const amp = 0.2 / (pi + 1);
+          og.gain.setValueAtTime(0.0001, 0);
+          og.gain.linearRampToValueAtTime(amp, duration * (0.15 + pi * 0.08));
+          og.gain.exponentialRampToValueAtTime(0.0001, duration);
+
+          osc.connect(og);
+          og.connect(saturator);
+          osc.start(0);
+          osc.stop(duration);
+        });
+
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const hp = offlineCtx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.setValueAtTime(6500, 0);
+        hp.frequency.exponentialRampToValueAtTime(9500, duration);
+        const ng = offlineCtx.createGain();
+        ng.gain.setValueAtTime(0.0001, 0);
+        ng.gain.linearRampToValueAtTime(0.18, duration * 0.4);
+        ng.gain.exponentialRampToValueAtTime(0.0001, duration);
+        noise.connect(hp);
+        hp.connect(ng);
+        ng.connect(saturator);
+        noise.start(0);
+
+      } else if (category === 'suck_reverse') {
+        // ── Cinematic Reverse Vacuum Suck ────────────────────────────────────
+        // Sub suction rising into the cut
+        const subOsc = offlineCtx.createOscillator();
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(32, 0);
+        subOsc.frequency.exponentialRampToValueAtTime(95, duration * 0.94);
+
+        const subGain = offlineCtx.createGain();
+        subGain.gain.setValueAtTime(0.0001, 0);
+        subGain.gain.exponentialRampToValueAtTime(0.55, duration * 0.94);
+        subGain.gain.setValueAtTime(0.0001, duration * 0.95);
+
+        subOsc.connect(subGain);
+        subGain.connect(saturator);
+        subOsc.start(0);
+
+        // Reverse air swell opening into the cut
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const hp = offlineCtx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.setValueAtTime(5500, 0);
+        hp.frequency.exponentialRampToValueAtTime(700, duration * 0.94);
+
+        const noiseGain = offlineCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.0001, 0);
+        noiseGain.gain.exponentialRampToValueAtTime(0.75, duration * 0.94);
+        noiseGain.gain.setValueAtTime(0.0001, duration * 0.95);
+
+        noise.connect(hp);
+        hp.connect(noiseGain);
+        noiseGain.connect(saturator);
+        noise.start(0);
+
+      } else if (category === 'camera_servo') {
+        // ── Precision Cine-Servo Motor ───────────────────────────────────────
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const bp = offlineCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.setValueAtTime(8, 0);
+        bp.frequency.setValueAtTime(1700, 0);
+        bp.frequency.linearRampToValueAtTime(2400, duration * 0.5);
+        bp.frequency.linearRampToValueAtTime(1300, duration);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.0001, 0);
+        gain.gain.exponentialRampToValueAtTime(0.25, 0.03);
+        gain.gain.setValueAtTime(0.18, duration * 0.85);
+        gain.gain.exponentialRampToValueAtTime(0.0001, duration);
+
+        // Mechanical start/stop detents
+        [0, Math.max(0.04, duration - 0.04)].forEach((t) => {
+          const tick = offlineCtx.createOscillator();
+          tick.type = 'square';
+          tick.frequency.setValueAtTime(2200, t);
+          const tg = offlineCtx.createGain();
+          tg.gain.setValueAtTime(0.15, t);
+          tg.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
+          tick.connect(tg);
+          tg.connect(saturator);
+          tick.start(t);
+          tick.stop(t + 0.03);
+        });
+
+        noise.connect(bp);
+        bp.connect(gain);
+        gain.connect(saturator);
+        noise.start(0);
+
+      } else if (category === 'paper_sweep') {
+        // ── Tactile Paper Fold / Turn ────────────────────────────────────────
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const bp = offlineCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.setValueAtTime(1.4, 0);
+        bp.frequency.setValueAtTime(650, 0);
+        bp.frequency.linearRampToValueAtTime(1700, duration * 0.8);
+
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.0001, 0);
+        gain.gain.linearRampToValueAtTime(0.42, duration * 0.25);
+        gain.gain.setValueAtTime(0.35, duration * 0.8);
+        gain.gain.exponentialRampToValueAtTime(0.0001, duration);
+
+        noise.connect(bp);
+        bp.connect(gain);
+        gain.connect(saturator);
+        noise.start(0);
+
+        // Soft landing tap
+        addSubBassHit(offlineCtx, 120, 50, duration * 0.82, 0.015, duration * 0.18, 0.35, saturator);
+
       } else if (category === 'shatter_hit') {
-        // Shatter burst: crackle of short filtered noise packets over the window
-        // plus a low sine impact at the midpoint.
-        const packets = Math.max(3, Math.round(duration * 14));
+        // ── Shatter / Glass Particle Burst ───────────────────────────────────
+        const packets = Math.max(4, Math.round(duration * 16));
         for (let k = 0; k < packets; k++) {
           const t0 = (k / packets) * duration;
-          const pSize = Math.max(16, Math.floor(sampleRate * 0.03));
-          const pBuf = offlineCtx.createBuffer(1, pSize, sampleRate);
-          const pOut = pBuf.getChannelData(0);
-          for (let i = 0; i < pSize; i++) pOut[i] = Math.random() * 2 - 1;
-          const ps = offlineCtx.createBufferSource();
-          ps.buffer = pBuf;
-          const bf = offlineCtx.createBiquadFilter();
-          bf.type = 'bandpass';
-          bf.Q.setValueAtTime(3, 0);
-          bf.frequency.setValueAtTime(1200 + (k * 977) % 3400, t0);
+          const pOsc = offlineCtx.createOscillator();
+          pOsc.type = 'sine';
+          pOsc.frequency.setValueAtTime(1400 + (k * 787) % 3600, t0);
+
           const pg = offlineCtx.createGain();
-          const env = Math.sin(Math.PI * (k / packets)); // loudest at the middle
-          pg.gain.setValueAtTime(0.001, t0);
-          pg.gain.exponentialRampToValueAtTime(0.12 + 0.3 * env, t0 + 0.012);
-          pg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.03);
-          ps.connect(bf); bf.connect(pg); pg.connect(offlineCtx.destination);
-          ps.start(t0);
-          ps.stop(t0 + 0.03);
+          const env = Math.sin(Math.PI * (k / packets));
+          pg.gain.setValueAtTime(0.0001, t0);
+          pg.gain.linearRampToValueAtTime(0.12 + 0.25 * env, t0 + 0.008);
+          pg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
+
+          pOsc.connect(pg);
+          pg.connect(saturator);
+          pOsc.start(t0);
+          pOsc.stop(t0 + 0.035);
         }
-        const boom = offlineCtx.createOscillator();
-        boom.type = 'sine';
-        const mid = duration * 0.5;
-        boom.frequency.setValueAtTime(160, mid);
-        boom.frequency.exponentialRampToValueAtTime(48, Math.min(duration, mid + 0.18));
-        const bg = offlineCtx.createGain();
-        bg.gain.setValueAtTime(0.001, mid);
-        bg.gain.exponentialRampToValueAtTime(0.6, mid + 0.02);
-        bg.gain.exponentialRampToValueAtTime(0.001, Math.min(duration, mid + 0.18));
-        boom.connect(bg); bg.connect(offlineCtx.destination);
-        boom.start(mid);
-        boom.stop(Math.min(duration, mid + 0.18));
-      } else if (category === 'flash') {
-        const osc = offlineCtx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(300, 0);
-        osc.frequency.exponentialRampToValueAtTime(2400, duration * 0.4);
-        osc.frequency.exponentialRampToValueAtTime(400, duration);
 
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.001, 0);
-        gain.gain.linearRampToValueAtTime(0.7, duration * 0.35);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
+        // Sub blast
+        addSubBassHit(offlineCtx, 150, 42, duration * 0.35, 0.02, duration * 0.5, 0.65, saturator);
 
-        osc.connect(gain);
-        gain.connect(offlineCtx.destination);
-        osc.start(0);
-      } else if (category === 'page_turn') {
-        const bufferSize = sampleRate * duration;
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
-
-        const filter = offlineCtx.createBiquadFilter();
-        filter.type = 'highpass';
-        filter.frequency.setValueAtTime(1200, 0);
-        filter.frequency.linearRampToValueAtTime(2600, duration * 0.5);
-
-        const gain = offlineCtx.createGain();
-        gain.gain.setValueAtTime(0.001, 0);
-        gain.gain.linearRampToValueAtTime(0.4, duration * 0.3);
-        gain.gain.exponentialRampToValueAtTime(0.001, duration);
-
-        noiseSource.connect(filter);
-        filter.connect(gain);
-        gain.connect(offlineCtx.destination);
-        noiseSource.start(0);
       } else if (category === 'pop') {
         const osc = offlineCtx.createOscillator();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(1200, 0);
-        osc.frequency.exponentialRampToValueAtTime(100, Math.min(0.06, duration));
+        osc.frequency.exponentialRampToValueAtTime(90, Math.min(0.06, duration));
 
         const gain = offlineCtx.createGain();
         gain.gain.setValueAtTime(0.75, 0);
-        gain.gain.exponentialRampToValueAtTime(0.001, Math.min(0.08, duration));
+        gain.gain.exponentialRampToValueAtTime(0.0001, Math.min(0.08, duration));
 
         osc.connect(gain);
-        gain.connect(offlineCtx.destination);
+        gain.connect(saturator);
         osc.start(0);
+
       } else {
-        // Fall back to a generic swoosh
-        const bufferSize = Math.max(1, sampleRate * duration);
-        const noiseBuffer = offlineCtx.createBuffer(1, bufferSize, sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const noiseSource = offlineCtx.createBufferSource();
-        noiseSource.buffer = noiseBuffer;
+        // Fallback smooth stereo whoosh
+        addSubBassHit(offlineCtx, 60, 40, 0, duration * 0.35, duration, 0.4, saturator);
+        const noise = createStereoPinkNoise(offlineCtx, duration, sampleRate);
+        const bp = offlineCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.setValueAtTime(1200, 0);
+        bp.Q.setValueAtTime(1.2, 0);
 
-        const noiseFilter = offlineCtx.createBiquadFilter();
-        noiseFilter.type = 'bandpass';
-        noiseFilter.frequency.setValueAtTime(1400, 0);
-        noiseFilter.Q.setValueAtTime(0.8, 0);
+        const gain = offlineCtx.createGain();
+        gain.gain.setValueAtTime(0.0001, 0);
+        gain.gain.linearRampToValueAtTime(0.6, duration * 0.3);
+        gain.gain.exponentialRampToValueAtTime(0.0001, duration);
 
-        const noiseGain = offlineCtx.createGain();
-        noiseGain.gain.setValueAtTime(0.001, 0);
-        noiseGain.gain.linearRampToValueAtTime(0.5, duration * 0.2);
-        noiseGain.gain.exponentialRampToValueAtTime(0.01, duration);
-
-        noiseSource.connect(noiseFilter);
-        noiseFilter.connect(noiseGain);
-        noiseGain.connect(offlineCtx.destination);
-        noiseSource.start(0);
+        noise.connect(bp);
+        bp.connect(gain);
+        gain.connect(saturator);
+        noise.start(0);
       }
 
       const renderedBuffer = await offlineCtx.startRendering();
@@ -884,8 +618,27 @@ export function synthesizeProceduralSFX(category: string, duration: number): Pro
   });
 }
 
+// ── Preview & Playback Engine ─────────────────────────────────────────────────
+
+// In-memory buffer cache: guarantees 0ms latency on repeated transition previews
+const previewAudioBufferCache = new Map<string, AudioBuffer>();
+let sharedPreviewAudioCtx: AudioContext | null = null;
+
+function getSharedPreviewContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!sharedPreviewAudioCtx || sharedPreviewAudioCtx.state === 'closed') {
+    sharedPreviewAudioCtx = new AudioContextClass();
+  }
+  if (sharedPreviewAudioCtx && sharedPreviewAudioCtx.state === 'suspended') {
+    sharedPreviewAudioCtx.resume().catch(() => {});
+  }
+  return sharedPreviewAudioCtx;
+}
+
 /**
- * Play a transition sound preview directly through Web Audio.
+ * Play a transition sound preview directly through Web Audio with 0ms latency.
  * Supports procedural SFX categories as well as custom media URLs.
  */
 export async function playTransitionSoundPreview(
@@ -895,11 +648,6 @@ export async function playTransitionSoundPreview(
 ): Promise<void> {
   if (!soundId || soundId === 'none') return;
 
-  const AudioContextClass = typeof window !== 'undefined'
-    ? ((window as any).AudioContext || (window as any).webkitAudioContext)
-    : null;
-  if (!AudioContextClass) return;
-
   if (customAudioUrl || soundId.startsWith('media:')) {
     const url = customAudioUrl || soundId.replace(/^media:/, '');
     const audio = new Audio(url);
@@ -908,15 +656,19 @@ export async function playTransitionSoundPreview(
     return;
   }
 
-  const ctx = new AudioContextClass();
-  if (ctx.state === 'suspended') {
-    await ctx.resume().catch(() => {});
-  }
+  const ctx = getSharedPreviewContext();
+  if (!ctx) return;
 
-  const duration = 0.5;
-  const blob = await synthesizeProceduralSFX(soundId, duration);
-  const arrayBuffer = await blob.arrayBuffer();
-  const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+  const cacheKey = `${soundId}_v1`;
+  let audioBuffer = previewAudioBufferCache.get(cacheKey);
+
+  if (!audioBuffer) {
+    const duration = 0.55;
+    const blob = await synthesizeProceduralSFX(soundId, duration);
+    const arrayBuffer = await blob.arrayBuffer();
+    audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    previewAudioBufferCache.set(cacheKey, audioBuffer);
+  }
 
   const source = ctx.createBufferSource();
   source.buffer = audioBuffer;
@@ -928,9 +680,6 @@ export async function playTransitionSoundPreview(
   gain.connect(ctx.destination);
 
   source.start(0);
-  source.onended = () => {
-    ctx.close().catch(() => {});
-  };
 }
 
 /**

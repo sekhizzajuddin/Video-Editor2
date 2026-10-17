@@ -1542,8 +1542,11 @@ export async function renderCanvasEngine({
           // Sibling fallback (multi-split fix): O(1) lookup via the per-render
           // indexes built above — was a full videoElements iteration plus a
           // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
+          // Guard: NEVER fallback to split sibling if rendering inside a transition layer,
+          // because the sibling is the other half of the transition! Falling back to it
+          // would draw the identical frame on both sides (causing dual repeat / freeze).
           videoEl =
-            (clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
+            (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
             null;
           // FIX 4: Do NOT cache the sibling element into videoElements.set().
           // The sibling is a temporary stand-in currently positioned at a
@@ -2920,7 +2923,8 @@ export async function renderCanvasEngine({
     // exactly, so the clip lands where it normally would.
     bctx.save();
     bctx.scale(bufScale, bufScale);
-    await drawSingleClip(clipToDraw, 1, undefined, bctx);
+    const layerClip = clipToDraw ? { ...clipToDraw, __isTransitionLayer: true } : clipToDraw;
+    await drawSingleClip(layerClip, 1, undefined, bctx);
     bctx.restore();
 
     // ── Layer-local post passes (buffer holds ONLY this layer, so they are safe) ──
