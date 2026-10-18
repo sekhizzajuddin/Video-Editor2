@@ -36,6 +36,7 @@ import { findActiveTransition, getTransitionAudioGains, getTransitionWindow, nor
 import { playTransitionSoundPreview } from '@/timeline/sfxSynth';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
 import { isPreviewSuspendedForExport, subscribePreviewSuspension } from '@/utils/previewSuspension';
+import { playbackDiagnostics } from '@/utils/playbackDiagnostics';
 
 // ---------------------------------------------------------------------------
 // Global Master Audio Context
@@ -1943,6 +1944,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           lastActiveClipIdsRef.current = new Set();
           triggeredTransitionsRef.current.clear();
           preRolledBoundaryRef.current = null;
+          if (justStartedPlaying) {
+            playbackDiagnostics.recordEvent('state', `Playback started at ${ct.toFixed(2)}s`);
+          } else if (isJump) {
+            playbackDiagnostics.recordEvent('seek', `Seek jump detected to ${ct.toFixed(2)}s`);
+          }
+        } else if (crossedBoundary) {
+          playbackDiagnostics.recordEvent('boundary', `Timeline boundary crossed at ${ct.toFixed(2)}s`);
         }
         cachedActiveClipsRef.current = getActiveClips();
         lastCachedStoreTracksRef.current = storeTracks;
@@ -2463,11 +2471,23 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // 10 consecutive ticks filter out transient seeking without freezing playback or flashing spinners.
           if (!wasBuffering && bufferingTickCount >= 10) {
             store.setIsBuffering(true);
+            playbackDiagnostics.recordIncident(
+              'BUFFERING_STARTED',
+              `Video decoder seeking or waiting for data over 10 consecutive frames at timeline ${ct.toFixed(2)}s`,
+              { bufferingTickCount, currentTime: ct }
+            );
+          } else if (wasBuffering && bufferingTickCount === 120) {
+            playbackDiagnostics.recordIncident(
+              'SUSTAINED_BUFFERING',
+              `Playback struggling / stalled for > 2 seconds waiting for video decoder at timeline ${ct.toFixed(2)}s`,
+              { bufferingTickCount, currentTime: ct }
+            );
           }
         } else {
           bufferingTickCount = 0;
           if (wasBuffering) {
             store.setIsBuffering(false);
+            playbackDiagnostics.recordEvent('buffer', `Buffering resolved at ${ct.toFixed(2)}s`);
           }
         }
       } else if (store.isBuffering) {
@@ -3220,6 +3240,73 @@ export function getMediaPoolDebugSnapshot(): MediaPoolDebugSnapshot {
     entries,
   };
 }
+
+export interface PlaybackDecoderDetail {
+  clipId: string;
+  mediaId: string;
+  type: 'video' | 'audio';
+  shareKey?: string;
+  readyState: number;
+  readyStateText: string;
+  seeking: boolean;
+  paused: boolean;
+  currentTime: number;
+  playbackRate: number;
+  networkState: number;
+  networkStateText: string;
+  videoWidth: number;
+  videoHeight: number;
+  bufferedRanges: { start: number; end: number }[];
+  error: string | null;
+  inDOM: boolean;
+  hasAudioGraph: boolean;
+}
+
+export function getPlaybackDecodersDetail(): PlaybackDecoderDetail[] {
+  const READY_STATE_NAMES = ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'];
+  const NETWORK_STATE_NAMES = ['NETWORK_EMPTY', 'NETWORK_IDLE', 'NETWORK_LOADING', 'NETWORK_NO_SOURCE'];
+  const result: PlaybackDecoderDetail[] = [];
+  for (const [clipId, entry] of globalMediaPool) {
+    const el = entry.el;
+    const ranges: { start: number; end: number }[] = [];
+    try {
+      if (el && el.buffered) {
+        for (let i = 0; i < el.buffered.length; i++) {
+          ranges.push({
+            start: +el.buffered.start(i).toFixed(3),
+            end: +el.buffered.end(i).toFixed(3),
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    result.push({
+      clipId,
+      mediaId: entry.mediaId,
+      type: entry.type,
+      shareKey: entry._shareKey,
+      readyState: el ? el.readyState : 0,
+      readyStateText: el ? (READY_STATE_NAMES[el.readyState] || `UNKNOWN(${el.readyState})`) : 'NO_ELEMENT',
+      seeking: el ? el.seeking : false,
+      paused: el ? el.paused : true,
+      currentTime: el ? +el.currentTime.toFixed(3) : 0,
+      playbackRate: el ? el.playbackRate : 1,
+      networkState: el ? el.networkState : 0,
+      networkStateText: el ? (NETWORK_STATE_NAMES[el.networkState] || `UNKNOWN(${el.networkState})`) : 'NO_ELEMENT',
+      videoWidth: (el as HTMLVideoElement)?.videoWidth || 0,
+      videoHeight: (el as HTMLVideoElement)?.videoHeight || 0,
+      bufferedRanges: ranges,
+      error: el?.error ? `code=${el.error.code} ${el.error.message || ''}`.trim() : null,
+      inDOM: el ? document.contains(el) : false,
+      hasAudioGraph: !!entry._isGraphConnected,
+    });
+  }
+  return result;
+}
+
+playbackDiagnostics.registerDecodersDetailProvider(getPlaybackDecodersDetail);
 
 // ---------------------------------------------------------------------------
 // getLiveAudioStream

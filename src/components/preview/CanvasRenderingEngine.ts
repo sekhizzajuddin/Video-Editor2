@@ -49,6 +49,25 @@ import { resolveBlendPlan } from '@/utils/blendCompositor';
 import { applyMotionEffect } from '@/utils/motionEffects';
 import { drawTextBackground } from '@/utils/textBackgrounds';
 import { calculateElementAnimation, renderElement } from '@/utils/elementRenderer';
+import { playbackDiagnostics } from '@/utils/playbackDiagnostics';
+
+let _diagLastFrameDurationMs = 0;
+let _diagLastDrawQueueCount = 0;
+let _diagLastOffscreenPoolCount = 0;
+let _diagLastCanvasWidth = 1920;
+let _diagLastCanvasHeight = 1080;
+
+export function getCanvasEngineDiagnostics() {
+  return {
+    lastFrameDurationMs: _diagLastFrameDurationMs,
+    lastDrawQueueCount: _diagLastDrawQueueCount,
+    offscreenPoolCount: _diagLastOffscreenPoolCount,
+    canvasWidth: _diagLastCanvasWidth,
+    canvasHeight: _diagLastCanvasHeight,
+  };
+}
+
+playbackDiagnostics.registerCanvasEngineDiagnosticsProvider(getCanvasEngineDiagnostics);
 import {
   findActiveTransition,
   buildTransitionPlan,
@@ -276,6 +295,7 @@ export async function renderCanvasEngine({
   isScrubbing: isScrubbingParam,
   renderDeps
 }: RenderCanvasParams) {
+  const _renderStart = performance.now();
   try {
     const currentTime = renderDeps.currentTime;
   const {
@@ -3525,8 +3545,15 @@ export async function renderCanvasEngine({
       snapCtx.drawImage(composite, 0, 0);
     }
   }
+
+  _diagLastFrameDurationMs = performance.now() - _renderStart;
+  _diagLastDrawQueueCount = typeof drawQueue !== 'undefined' ? drawQueue.length : 0;
+  _diagLastOffscreenPoolCount = offscreenCanvasPool?.current?.size ?? 0;
+  _diagLastCanvasWidth = canvas.width;
+  _diagLastCanvasHeight = canvas.height;
   } catch (err) {
     console.error('Error in renderCanvasEngine:', err);
+    playbackDiagnostics.recordIncident('RENDER_CRASH', `CanvasRenderingEngine threw error: ${String(err)}`, { err });
     return;
   }
 }

@@ -27,7 +27,8 @@ import {
   X,
   Zap,
   SlidersHorizontal,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Bug
 } from 'lucide-react';
 import { useEditorStore } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -54,6 +55,8 @@ interface PreviewCanvasToolbarHeaderProps {
   onToggleThumbnailModal: () => void;
   showSettingsPanel: boolean;
   setShowSettingsPanel: (show: boolean) => void;
+  showDiagnosticsModal?: boolean;
+  onToggleDiagnostics?: () => void;
 }
 
 export function PreviewCanvasHeaderToolbar({
@@ -76,6 +79,8 @@ export function PreviewCanvasHeaderToolbar({
   onToggleThumbnailModal,
   showSettingsPanel,
   setShowSettingsPanel,
+  showDiagnosticsModal,
+  onToggleDiagnostics,
 }: PreviewCanvasToolbarHeaderProps) {
   const { 
     settings, 
@@ -246,6 +251,21 @@ export function PreviewCanvasHeaderToolbar({
           <ImageIcon className="w-3 h-3" />
           Cover
         </button>
+
+        {onToggleDiagnostics && (
+          <button
+            onClick={onToggleDiagnostics}
+            title="Playback Diagnostics & Health Monitor"
+            className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-all flex items-center gap-1.5 ${
+              showDiagnosticsModal
+                ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400 border-amber-500/40 shadow-sm'
+                : 'bg-[var(--theme-bg-card)] text-[var(--theme-text-muted)] border-[var(--theme-border)] hover:text-amber-400 hover:border-amber-500/30'
+            }`}
+          >
+            <Bug className="w-3 h-3 text-amber-400" />
+            Diagnostics
+          </button>
+        )}
 
         <button
           onClick={onToggleFullscreen}

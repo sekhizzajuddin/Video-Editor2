@@ -44,13 +44,24 @@ import { getOverlayMapping } from './previewMath';
 import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
 import { isMobileDevice } from '@/hooks/useMediaPlayback';
+import { PlaybackDiagnosticsModal } from './PlaybackDiagnosticsModal';
+import { Bug } from 'lucide-react';
 
-const PreviewBufferingOverlay = React.memo(() => {
+const PreviewBufferingOverlay = React.memo(({ onOpenDiagnostics }: { onOpenDiagnostics: () => void }) => {
   const isBuffering = useEditorStore((s) => s.isBuffering);
   if (!isBuffering) return null;
   return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/10">
+    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/25 backdrop-blur-[1px] z-30">
       <Spinner className="w-12 h-12 text-white drop-shadow-md" />
+      <div className="mt-3 pointer-events-auto">
+        <button
+          onClick={onOpenDiagnostics}
+          className="px-3.5 py-1.5 text-xs font-semibold rounded-full bg-black/90 hover:bg-black text-amber-300 hover:text-amber-200 border border-amber-500/50 shadow-2xl flex items-center gap-1.5 transition-all cursor-pointer hover:scale-105 active:scale-95"
+        >
+          <Bug className="w-3.5 h-3.5 text-amber-400" />
+          Player Buffering? View Diagnostics & Export Log
+        </button>
+      </div>
     </div>
   );
 });
@@ -161,6 +172,7 @@ export function PreviewCanvasContainer() {
   const [adaptiveQuality, setAdaptiveQuality] = useState<'high' | 'medium' | 'low'>('high');
   // On-device media diagnostics (Android remote debugging): ?mediadebug=1
   const [mediaDebug] = useState(() => isMediaDebugEnabled());
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const lastScrubTimeRef = useRef<number>(0);
 
   useEffect(() => {
@@ -1022,6 +1034,8 @@ export function PreviewCanvasContainer() {
         onToggleThumbnailModal={handleToggleThumbnailModal}
         showSettingsPanel={showSettingsPanel}
         setShowSettingsPanel={setShowSettingsPanel}
+        showDiagnosticsModal={showDiagnosticsModal}
+        onToggleDiagnostics={() => setShowDiagnosticsModal((v) => !v)}
       />
 
       {/* Canvas Viewport */}
@@ -1069,7 +1083,7 @@ export function PreviewCanvasContainer() {
           containerRef={containerRef}
         />
         {mediaDebug && <MediaPoolDebugOverlay />}
-        <PreviewBufferingOverlay />
+        <PreviewBufferingOverlay onOpenDiagnostics={() => setShowDiagnosticsModal(true)} />
       </div>
 
       {/* Transport Controls Bar */}
@@ -1100,6 +1114,10 @@ export function PreviewCanvasContainer() {
           imageData={thumbnailImageData}
         />
       )}
+      <PlaybackDiagnosticsModal
+        isOpen={showDiagnosticsModal}
+        onClose={() => setShowDiagnosticsModal(false)}
+      />
     </div>
   );
 }
