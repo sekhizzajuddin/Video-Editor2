@@ -406,6 +406,9 @@ export async function renderCanvasEngine({
       if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
       const oc = clipsById.get(otherId);
       if (!oc) continue;
+      // Guard: do not use an element as a generic fallback if it is actively rendering for another clip at this exact moment
+      const isOcActive = currentTime >= oc.startTime && currentTime < oc.startTime + oc.duration + 0.001;
+      if (isOcActive) continue;
       if (oc.splitGroupId && !splitSiblingEl.has(oc.splitGroupId)) {
         splitSiblingEl.set(oc.splitGroupId, otherEl);
       }
@@ -1627,14 +1630,27 @@ export async function renderCanvasEngine({
               ctx.drawImage(sourceElement, dx, dy, dw, dh);
             }
           } else {
-            const offCanvasKey = `clip_${clip.id}_${Math.round(dw)}x${Math.round(dh)}`;
+            let targetOffW = Math.max(1, Math.round(dw));
+            let targetOffH = Math.max(1, Math.round(dh));
+            // PERF: During interactive playback with CPU-bound pixel effects (curves, color wheels, applyFxEffect),
+            // cap the offscreen buffer dimension to max 960px. This reduces CPU pixel buffer transfers (getImageData)
+            // from 8.3 MB down to ~2 MB (75% savings), easily maintaining smooth 60fps without stalling decoders.
+            if (isPlaying && !isExporting && (hasColorWheels || hasCurves || hasFx)) {
+              const maxDim = 960;
+              if (targetOffW > maxDim || targetOffH > maxDim) {
+                const scale = Math.min(maxDim / targetOffW, maxDim / targetOffH);
+                targetOffW = Math.max(1, Math.round(targetOffW * scale));
+                targetOffH = Math.max(1, Math.round(targetOffH * scale));
+              }
+            }
+            const offCanvasKey = `clip_${clip.id}_${targetOffW}x${targetOffH}`;
             const prefix = `clip_${clip.id}_`;
             for (const k of offscreenCanvasPool.current.keys()) {
               if (k.startsWith(prefix) && k !== offCanvasKey) {
                 offscreenCanvasPool.current.delete(k);
               }
             }
-            const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, Math.max(1, Math.round(dw)), Math.max(1, Math.round(dh)));
+            const offCanvas = getOrCreateCanvas(offscreenCanvasPool.current, offCanvasKey, targetOffW, targetOffH);
             const oCtx = offCanvas.getContext('2d')!;
             oCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
 
@@ -3382,6 +3398,8 @@ export async function renderCanvasEngine({
   // the full canvas — matching the export Compositor's full-frame FX pass.
   if (!skipExpensiveFX) {
     // 1. Clips on visual tracks with attached FX sub-tracks (clip.fxSettings)
+    // NOTE: Pixel shaders (applyFxEffect) are ALREADY applied to the clip's local buffer in drawSingleClip.
+    // Only full-frame custom HTML/CSS overlays attached to visual clips are rendered here across the composite.
     for (const track of tracks) {
       if (track.type === 'fx' || track.hidden || track.muted) continue;
       for (const clip of track.clips) {
@@ -3390,7 +3408,6 @@ export async function renderCanvasEngine({
         if ((clip.fxSettings.intensity ?? 100) <= 0) continue;
         if (currentTime < clip.startTime || currentTime >= clip.startTime + clip.duration + 0.001) continue;
 
-        const fxIntensity = clip.fxSettings.intensity ?? 100;
         const fxRelTime = Math.max(0, currentTime - clip.startTime);
 
         // Custom HTML/CSS FX: render via cached SceneStage pipeline
@@ -3416,8 +3433,6 @@ export async function renderCanvasEngine({
               console.warn('[CanvasRenderingEngine] Custom FX render error:', e);
             }
           }
-        } else {
-          applyFxEffect(ctx, composite.width, composite.height, clip.fxSettings.type, fxIntensity, fxRelTime, isPlaying, clip.fxSettings);
         }
       }
     }

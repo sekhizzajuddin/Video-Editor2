@@ -1203,6 +1203,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     const neededClips = new Map<string, { mediaId: string; type: 'video' | 'audio'; shareKey: string; start: number; end: number }>();
     const pipWindows = useEditorStore.getState().pipWindows || {};
 
+    // Synchronize sortedTracksRef directly from tracks so newly added tracks or split clips are reflected immediately
+    sortedTracksRef.current = (tracks || []).map((t: any) => ({
+      ...t,
+      clips: [...(t.clips || [])].sort((a: any, b: any) => a.startTime - b.startTime),
+    }));
+
     for (const track of sortedTracksRef.current) {
       if (track.hidden) continue;
       for (const clip of track.clips) {
@@ -1895,6 +1901,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           splitGroupIdx = new Map();
           for (const [, e] of pool) {
             if (e.type !== 'video' || !e.el) continue;
+            // CRITICAL GUARD: Never share an element that is actively playing another clip in this frame!
+            if (playingIds.has(e.clipId)) continue;
             if (e._shareKey) {
               const part = e._shareKey.split('::')[1] || '';
               const cleanGid = part.replace(/^split:/, '').replace(/_\d+$/, '');
@@ -2120,6 +2128,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // VIDEO FALLBACK: match any existing video element sharing this mediaId
         if (!entry && (clip.trackType === 'video' || (clip.clip as any)?.type === 'video')) {
           for (const [, e] of pool) {
+            // CRITICAL GUARD: Never steal an element that is actively playing another clip in this frame!
+            if (playingIds.has(e.clipId) && e.clipId !== clip.clipId) continue;
             if (e.type === 'video' && e.mediaId === clip.mediaId && e.el) {
               entry = e;
               // Self-heal: register this entry under clip.clipId so pool and videoMap have it immediately
@@ -2132,6 +2142,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         // AUDIO SPLIT FALLBACK: match any existing audio element sharing this mediaId
         if (!entry && (clip.trackType === 'audio' || (clip.clip as any)?.type === 'audio')) {
           for (const [, e] of pool) {
+            // CRITICAL GUARD: Never steal an element that is actively playing another clip in this frame!
+            if (playingIds.has(e.clipId) && e.clipId !== clip.clipId) continue;
             if (e.type === 'audio' && e.mediaId === clip.mediaId && e.el) {
               entry = e;
               pool.set(clip.clipId, { ...e, clipId: clip.clipId });
