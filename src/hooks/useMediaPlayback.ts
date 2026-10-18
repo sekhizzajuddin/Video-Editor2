@@ -1007,6 +1007,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   const audioParamTime = usePlaybackTime(25);
 
   const pendingSeeksRef = useRef<Map<string, number>>(new Map());
+  const seekStartTimeRef = useRef<Map<string, number>>(new Map());
   const lastActiveClipIdsRef = useRef<Set<string>>(new Set());
   const sortedTracksRef = useRef<any[]>([]);
   const mediaMapRef = useRef<Map<string, any>>(new Map());
@@ -1036,6 +1037,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     if (!isPrimary) return;
     const onSuspensionChange = () => {
       pendingSeeksRef.current.clear();
+      seekStartTimeRef.current.clear();
       lastActiveClipIdsRef.current.clear();
       nextClipBoundaryRef.current = 0;
       prevSyncCtRef.current = -1;
@@ -1490,6 +1492,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             mediaVideoRefCount.set(key, (mediaVideoRefCount.get(key) ?? 0) + 1);
 
         const handleSeeked = () => {
+          seekStartTimeRef.current.delete(clipId);
           if (isPreviewSuspendedForExport() || useEditorStore.getState().isPlaying) {
             pendingSeeksRef.current.delete(clipId);
             return;
@@ -1501,6 +1504,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // queued target often already matches after a drag has settled.
           if (pendingTime !== undefined && Math.abs(el!.currentTime - pendingTime) > 0.005) {
             el!.currentTime = pendingTime;
+            seekStartTimeRef.current.set(clipId, performance.now());
           }
         };
         const entry: MediaElement = { el, clipId, mediaId: info.mediaId, type: 'video' };
@@ -1633,6 +1637,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           pool.delete(clipId);
           videoMap.delete(clipId);
           pendingSeeksRef.current.delete(clipId);
+          seekStartTimeRef.current.delete(clipId);
           continue;
         }
 
@@ -1671,6 +1676,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         pool.delete(clipId);
         videoMap.delete(clipId);
         pendingSeeksRef.current.delete(clipId);
+        seekStartTimeRef.current.delete(clipId);
       }
     }
   }, [tracks, mediaLibrary, ctBucket, seekRevision, triggerRedraw, isPrimary, previewSuspended]);
@@ -2319,11 +2325,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const speedScale = Math.max(1, currentSegmentSpeed);
           const VIDEO_HARD_SEEK_THRESHOLD = hasSpeedFramesOnly
             ? Math.max(0.35, 0.40 * speedScale)
-            : (isRamped ? Math.max(0.45, 0.75 * speedScale) : 0.45);
+            : (isRamped ? Math.max(0.65, 0.90 * speedScale) : Math.max(0.85, 1.20 * speedScale));
           const VIDEO_PLL_THRESHOLD = hasSpeedFramesOnly
             ? Math.max(0.02, 0.03 * speedScale)
             : Math.max(0.025, 0.05 * speedScale);
-          const VIDEO_MAX_PLL_ADJUST = isRamped ? 0.35 : 0.10;       // Dynamic playback rate modulation
+          const VIDEO_MAX_PLL_ADJUST = isRamped ? 0.35 : 0.15;       // Dynamic playback rate modulation
 
           // REVERSE / FREEZE FRAME: browsers can't play <video> backward, so we
           // keep the element paused and manually seek each sync tick.
@@ -2338,6 +2344,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               } else {
                 el.currentTime = mediaTime;
               }
+              seekStartTimeRef.current.set(clip.clipId, performance.now());
             }
           } else if (playing && !isReversing) {
             // Immediate resume if suspended (ensures video internal audio plays via Web Audio)
@@ -2345,7 +2352,18 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               entry.audioCtx.resume().catch(() => {});
             }
 
-            if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
+            if (el.seeking) {
+              // Decoder is actively in-flight seeking a keyframe.
+              // CRITICAL: NEVER mutate el.playbackRate or call el.play() while el.seeking === true.
+              // In Chromium, modifying playbackRate or issuing play() while seeking interrupts
+              // the hardware decoder pipeline, keeping seeking=true and readyState=1 indefinitely.
+              // Watchdog: recover zombie seeks (> 450ms without 'seeked' event)
+              const seekStart = seekStartTimeRef.current.get(clip.clipId);
+              if (seekStart && (performance.now() - seekStart > 450)) {
+                seekStartTimeRef.current.delete(clip.clipId);
+                if (el.paused) el.play().catch(() => {});
+              }
+            } else if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
               // Skip the hard seek if the element is ALREADY at (or very near)
               // the target — e.g. after a scrub-seek that positioned it, then
               // playback resumed and the clip re-activated. Issuing a redundant
@@ -2368,9 +2386,10 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 return false;
               })();
               const effectiveThreshold = isSharedElement ? 0.15 : 0.05;
-              if (!el.seeking && Math.abs(rawDrift) > effectiveThreshold) {
+              if (Math.abs(rawDrift) > effectiveThreshold) {
                 el.currentTime = mediaTime;
                 pendingSeeksRef.current.delete(clip.clipId);
+                seekStartTimeRef.current.set(clip.clipId, performance.now());
               }
             } else if (Math.abs(rawDrift) > VIDEO_PLL_THRESHOLD) {
               // Smoothly modulate playback speed to catch up / slow down without stopping decoder
@@ -2387,7 +2406,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               }
             }
 
-            if (el.paused) {
+            if (!el.seeking && el.paused) {
               el.play().catch(() => {});
             }
           } else {
@@ -2395,6 +2414,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             // When paused: exact seek for frame display
             if (!el.seeking && Math.abs(rawDrift) > 0.005) {
               el.currentTime = mediaTime;
+              seekStartTimeRef.current.set(clip.clipId, performance.now());
             }
           }
         }
@@ -2412,68 +2432,93 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // advances at most one frame ahead — imperceptible.
       if (playing && !scrubbing) {
         let anyBuffering = false;
-        // FIX 5 (Split Boundary Buffering Suppression): Build a set of
-        // elements currently used by active clips. If a seeking element is
-        // shared with another clip that IS active and playing, the decoder
-        // is still producing frames for the canvas — the transient seeking
-        // state from a boundary seek must NOT freeze the entire playhead.
-        const activeEls = new Set<HTMLMediaElement>();
-        for (const ac of clips) {
-          const ae = pool.get(ac.clipId);
-          if (ae && ae.type === 'video') activeEls.add(ae.el);
-        }
+        const nowMs = performance.now();
+
+        // MULTI-TRACK BUFFERING DECOUPLING:
+        // Build a census of active video tracks and decoders.
+        // If at least one active video track is rendering smoothly (readyState >= 2 and not seeking),
+        // we DO NOT stall the master playhead just because a secondary track (V2/V3 overlay/PiP)
+        // is decoding its initial keyframe.
+        let healthyVideoCount = 0;
+        let stalledVideoCount = 0;
+        let primaryTrackStalled = false;
+
+        const primaryVideoTrack = sortedTracksRef.current.find((t: any) => t.type === 'video' && !t.hidden);
+        const primaryTrackId = primaryVideoTrack?.id;
+
         for (const clip of clips) {
           const entry = pool.get(clip.clipId);
           if (!entry || entry.type !== 'video') continue;
           // Reversed/freeze-frame clips are manually seeked each tick — they don't
           // buffer in the traditional sense, so skip them.
           if (clip.isReversed || clip.freezeFrame !== undefined) continue;
-          const el = entry.el;
-          // readyState < HAVE_CURRENT_DATA (2) means the decoder hasn't produced the
-          // frame at `currentTime` yet. `seeking` means a seek is in flight.
-          if (el.seeking || (el.readyState < 2 && el.src !== '')) {
-            // If this element is shared with another active clip (split sibling),
-            // it's still decoding frames — don't treat it as buffering.
-            let isSharedWithActive = false;
-            for (const ac of clips) {
-              if (ac.clipId === clip.clipId) continue;
-              const ae = pool.get(ac.clipId);
-              if (ae && ae.el === el) { isSharedWithActive = true; break; }
-            }
+          const el = entry.el as HTMLVideoElement;
 
-            // Transition smoothing: If this clip is the incoming clip in an active transition
-            // and the outgoing clip is healthy (playing smoothly), do not stall the playback clock.
-            let isCoveredByTransition = false;
-            if (!isSharedWithActive) {
-              for (const track of sortedTracksRef.current) {
-                if (track.type !== 'video') continue;
-                const trans = findActiveTransition(track.clips, ct);
-                if (trans && trans.to?.id === clip.clipId && trans.from) {
-                  const fromEntry = pool.get(trans.from.id);
-                  if (fromEntry && fromEntry.el && fromEntry.el.readyState >= 2 && !fromEntry.el.seeking) {
-                    isCoveredByTransition = true;
-                    break;
-                  }
+          // If this element is shared with another active clip (split sibling),
+          // it's still decoding frames — don't treat it as buffering.
+          let isSharedWithActive = false;
+          for (const ac of clips) {
+            if (ac.clipId === clip.clipId) continue;
+            const ae = pool.get(ac.clipId);
+            if (ae && ae.el === el) { isSharedWithActive = true; break; }
+          }
+
+          // Transition smoothing: If this clip is the incoming clip in an active transition
+          // and the outgoing clip is healthy (playing smoothly), do not stall the playback clock.
+          let isCoveredByTransition = false;
+          if (!isSharedWithActive) {
+            for (const track of sortedTracksRef.current) {
+              if (track.type !== 'video') continue;
+              const trans = findActiveTransition(track.clips, ct);
+              if (trans && trans.to?.id === clip.clipId && trans.from) {
+                const fromEntry = pool.get(trans.from.id);
+                if (fromEntry && fromEntry.el && fromEntry.el.readyState >= 2 && !fromEntry.el.seeking) {
+                  isCoveredByTransition = true;
+                  break;
                 }
               }
             }
+          }
 
-            if (!isSharedWithActive && !isCoveredByTransition) {
-              anyBuffering = true;
-              break;
+          if (isSharedWithActive || isCoveredByTransition) {
+            healthyVideoCount++;
+            continue;
+          }
+
+          // Zombie seek check: if element has been seeking for > 400ms without firing seeked,
+          // suppress buffering for it so it cannot deadlock playback
+          const seekStart = seekStartTimeRef.current.get(clip.clipId);
+          const isZombieSeek = el.seeking && seekStart !== undefined && (nowMs - seekStart > 400);
+
+          if (!isZombieSeek && (el.seeking || (el.readyState < 2 && el.src !== ''))) {
+            stalledVideoCount++;
+            if (clip.trackId === primaryTrackId) {
+              primaryTrackStalled = true;
             }
+          } else {
+            healthyVideoCount++;
           }
         }
+
+        // Whole-timeline buffering is ONLY declared when:
+        // 1. ALL active video tracks are stalled (zero healthy clips available to display), OR
+        // 2. The primary base track (V1) is stalled AND there are no other healthy video tracks.
+        if (stalledVideoCount > 0) {
+          if (healthyVideoCount === 0 || (primaryTrackStalled && healthyVideoCount <= 0)) {
+            anyBuffering = true;
+          }
+        }
+
         const wasBuffering = store.isBuffering;
         if (anyBuffering) {
           bufferingTickCount++;
-          // Hysteresis (~160ms at 60fps): normal keyframe seeks complete in 1-4 ticks (20-70ms).
-          // 10 consecutive ticks filter out transient seeking without freezing playback or flashing spinners.
-          if (!wasBuffering && bufferingTickCount >= 10) {
+          // Hysteresis (~330ms at 60fps): 20 consecutive ticks filter out transient seeking
+          // without freezing playback or flashing spinners during normal keyframe decodes.
+          if (!wasBuffering && bufferingTickCount >= 20) {
             store.setIsBuffering(true);
             playbackDiagnostics.recordIncident(
               'BUFFERING_STARTED',
-              `Video decoder seeking or waiting for data over 10 consecutive frames at timeline ${ct.toFixed(2)}s`,
+              `Video decoder seeking or waiting for data over 20 consecutive frames at timeline ${ct.toFixed(2)}s`,
               { bufferingTickCount, currentTime: ct }
             );
           } else if (wasBuffering && bufferingTickCount === 120) {

@@ -423,7 +423,7 @@ export async function renderCanvasEngine({
     splitSiblingEl = new Map<string, HTMLVideoElement>();
     mediaVideoEl = new Map<string, HTMLVideoElement>();
     for (const [otherId, otherEl] of videoElements) {
-      if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
+      if (!otherEl || otherEl.readyState < 2 || otherEl.videoWidth === 0) continue;
       const oc = clipsById.get(otherId);
       if (!oc) continue;
       // Guard: do not use an element as a generic fallback if it is actively rendering for another clip at this exact moment
@@ -1566,7 +1566,7 @@ export async function renderCanvasEngine({
 
       if (mediaItem.type === 'video') {
         videoEl = videoElements.get(clip.id) || null;
-        if (!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) {
+        if (!videoEl || videoEl.readyState < 2 || videoEl.videoWidth === 0) {
           // Sibling fallback (multi-split fix): O(1) lookup via the per-render
           // indexes built above — was a full videoElements iteration plus a
           // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
@@ -1585,7 +1585,7 @@ export async function renderCanvasEngine({
           // for this render only — the pool will assign the correct element
           // once it's ready, and videoElements will be updated naturally.
         }
-        if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
+        if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
           vw = videoEl.videoWidth;
           vh = videoEl.videoHeight;
           hasRealMedia = true;
