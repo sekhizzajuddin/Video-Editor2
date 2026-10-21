@@ -31,7 +31,7 @@ import { getAnimatedValue } from '@/utils/keyframes';
 import { generateReverbImpulse } from '@/utils/reverbDsp';
 import { resolveMediaFile } from '@/utils/mediaFileHandle';
 import { usePlaybackTime, useTimeBucket } from './usePlaybackTime';
-import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime, setIsPlayingClock } from '@/utils/playbackClock';
+import { getPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, getEffectivePreviewTime, subscribeTrimPreviewTime, setIsPlayingClock, reportPrimaryMediaTime } from '@/utils/playbackClock';
 import { findActiveTransition, getTransitionAudioGains, getTransitionWindow, normalizeTransition } from '@/utils/transitionEngine';
 import { playTransitionSoundPreview } from '@/timeline/sfxSynth';
 import { getMediaPoolContainer, attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
@@ -1767,6 +1767,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     let loadedCount = 0;
     for (const ve of repEntries) {
       const el = ve.entry.el as HTMLVideoElement;
+      // ACTIVE PLAYING GUARD: Never disturb an element that is actively rolling frames
+      if (!el.paused && el.readyState >= 2) {
+        loadedCount++;
+        continue;
+      }
       const isNear = ve.dist <= getProximityWindow(ve.media);
       // ACTIVE-CLIP PRIORITY: the clip currently under the playhead must always
       // receive a src, even when the (already mobile-reduced) decoder budget is
@@ -2054,7 +2059,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 const el = entry.el as HTMLVideoElement;
                 // CRITICAL: NEVER seek an element that is currently rendering the visible frame for an active clip!
                 if (activePoolEntries.has(el)) continue;
-                // If element is already in an in-flight seek, do not disturb it
+                // If element is already actively playing or in-flight seeking, do not disturb it
+                if (!el.paused && !el.ended) continue;
                 if (el.seeking) continue;
 
                 const mediaItem = mediaMapRef.current.get(tc.mediaId) || useEditorStore.getState().mediaLibrary.find(m => m.id === tc.mediaId);
@@ -2147,6 +2153,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         }
         lastActiveClipIdsRef.current = playingIds;
+        reportPrimaryMediaTime(null);
         rafIdRef.current = requestAnimationFrame(syncLoop);
         return;
       }
@@ -2401,7 +2408,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 (el as any)._seekStartTime = performance.now();
                 seekStartTimeRef.current.set(clip.clipId, performance.now());
               }
-            } else if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
+            } else if (justActivated || (!el.paused ? Math.abs(rawDrift) > 1.5 : Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD)) {
               // Skip the hard seek if the element is ALREADY at (or very near)
               // the target — e.g. after a scrub-seek that positioned it, then
               // playback resumed and the clip re-activated. Issuing a redundant
@@ -2423,13 +2430,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 }
                 return false;
               })();
-                            const isAlreadyRolling = !el.paused && Math.abs(rawDrift) < VIDEO_HARD_SEEK_THRESHOLD;
-              const isNearTarget = Math.abs(rawDrift) < 0.15;
+                            const isAlreadyRolling = !el.paused && Math.abs(rawDrift) < 0.60;
+              const isNearTarget = Math.abs(rawDrift) < 0.20;
               if (justActivated && (isAlreadyRolling || isNearTarget)) {
                 // Crossing a cut seamlessly: already rolling or pre-rolled to target frame!
                 // Do NOT issue a hard seek! Let PLL handle micro-drift (< 0.15s).
               } else {
-                const effectiveThreshold = isSharedElement ? 0.35 : 0.15;
+                const effectiveThreshold = isSharedElement ? 0.40 : 0.20;
                 if (Math.abs(rawDrift) > effectiveThreshold) {
                   el.currentTime = mediaTime;
                   pendingSeeksRef.current.delete(clip.clipId);
@@ -2560,12 +2567,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           bufferingTickCount++;
           // Hysteresis (~330ms at 60fps): 20 consecutive ticks filter out transient seeking
           // without freezing playback or flashing spinners during normal keyframe decodes.
-          if (!wasBuffering && bufferingTickCount >= 20) {
+          if (!wasBuffering && bufferingTickCount >= 50) {
             // Local timeline playback: never freeze playhead or display spinner for local media seeks
             // store.setIsBuffering(true);
             playbackDiagnostics.recordIncident(
               'BUFFERING_STARTED',
-              `Video decoder seeking or waiting for data over 20 consecutive frames at timeline ${ct.toFixed(2)}s`,
+              `Video decoder seeking or waiting for data over 50 consecutive frames at timeline ${ct.toFixed(2)}s`,
               { bufferingTickCount, currentTime: ct }
             );
           } else if (wasBuffering && bufferingTickCount === 120) {
@@ -2648,6 +2655,43 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       }
 
       lastActiveClipIdsRef.current = playingIds;
+
+      // Primary Media Presentation Time tracking for master clock slewing
+      let primaryMediaPresentationTime: number | null = null;
+      if (playing && !scrubbing && !store.isBuffering) {
+        const primaryVideoTrack = sortedTracksRef.current.find((t: any) => t.type === 'video' && !t.hidden);
+        const primaryTrackId = primaryVideoTrack?.id;
+        for (const clip of clips) {
+          if (clip.trackId === primaryTrackId) {
+            const entry = pool.get(clip.clipId);
+            if (entry && entry.type === 'video') {
+              const el = entry.el as HTMLVideoElement;
+              if (!el.paused && !el.seeking && el.readyState >= 2) {
+                if (!clip.speedRamp?.length && (!clip.speedFrames || clip.speedFrames.length === 0)) {
+                  primaryMediaPresentationTime = clip.absStartTime + (el.currentTime - clip.trimStart) / (clip.speed || 1);
+                }
+                break;
+              }
+            }
+          }
+        }
+        if (primaryMediaPresentationTime === null) {
+          for (const clip of clips) {
+            const entry = pool.get(clip.clipId);
+            if (entry && entry.type === 'video') {
+              const el = entry.el as HTMLVideoElement;
+              if (!el.paused && !el.seeking && el.readyState >= 2) {
+                if (!clip.speedRamp?.length && (!clip.speedFrames || clip.speedFrames.length === 0)) {
+                  primaryMediaPresentationTime = clip.absStartTime + (el.currentTime - clip.trimStart) / (clip.speed || 1);
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+      reportPrimaryMediaTime(primaryMediaPresentationTime);
+
       rafIdRef.current = requestAnimationFrame(syncLoop);
     };
 
@@ -2655,6 +2699,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     return () => {
       isRunning = false;
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+      reportPrimaryMediaTime(null);
     };
   }, [isPrimary, getActiveClips]);
 

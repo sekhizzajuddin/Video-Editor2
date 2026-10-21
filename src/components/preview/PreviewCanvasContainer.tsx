@@ -38,7 +38,7 @@ import {
   PreviewCanvasTransportControls,
 } from './PreviewCanvasToolbar';
 import { setOnMaskReadyCallback } from '@/utils/aiBackground';
-import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, subscribeTrimPreviewTime } from '@/utils/playbackClock';
+import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, subscribeTrimPreviewTime, getPrimaryMediaSyncTarget } from '@/utils/playbackClock';
 import { isPreviewSuspendedForExport } from '@/utils/previewSuspension';
 import { getOverlayMapping } from './previewMath';
 import { previewDecoder, type CachedFrame } from '@/preview/PreviewDecoder';
@@ -675,7 +675,22 @@ export function PreviewCanvasContainer() {
           } else {
             const dt = (now - lastTime) / 1000;
             lastTime = now;
-            newTime = currentTimeRef.current + dt * speed * dir;
+            let advance = dt * speed * dir;
+
+            // Media Clock Slew: If the primary hardware video decoder is rolling,
+            // gently slew the master playhead so it smoothly tracks hardware frame presentation.
+            // This prevents the playhead from racing ahead of the decoder on integrated GPUs.
+            const primaryMediaTime = getPrimaryMediaSyncTarget();
+            if (primaryMediaTime !== null && dir > 0 && speed === 1) {
+              const clockDrift = currentTimeRef.current - primaryMediaTime; // > 0 means clock is ahead of decoder
+              if (Math.abs(clockDrift) < 0.6) {
+                // If clock is 50ms ahead, slow advance by 15%; if 100ms ahead, slow advance by 30%
+                const slew = Math.max(0.4, Math.min(1.6, 1 - clockDrift * 3.0));
+                advance *= slew;
+              }
+            }
+
+            newTime = currentTimeRef.current + advance;
           }
 
           if (newTime !== currentTimeRef.current) {

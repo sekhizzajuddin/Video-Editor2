@@ -117,3 +117,24 @@ export function getEffectivePreviewTime(): number {
   return (!isPlayingClock && trimPreviewTime !== null) ? trimPreviewTime : currentTime;
 }
 
+// ── Primary Media Clock Sync ─────────────────────────────────────────────
+// When playing at 1x forward speed, the master timeline playhead smoothly slews
+// toward the primary video hardware decoder's presentation time. This anchors the
+// clock to true hardware decode cadence and prevents the playhead from racing ahead
+// and forcing decoders to chase at 1.15x.
+let primaryMediaSyncTarget: number | null = null;
+
+/**
+ * Report the current timeline presentation time of the primary rolling video/audio decoder.
+ * Pass null when paused, seeking, or no primary media is actively presenting frames.
+ */
+export function reportPrimaryMediaTime(timelineTime: number | null): void {
+  primaryMediaSyncTarget = timelineTime;
+}
+
+/**
+ * Get the current primary media presentation timeline time, or null if unanchored.
+ */
+export function getPrimaryMediaSyncTarget(): number | null {
+  return primaryMediaSyncTarget;
+}
