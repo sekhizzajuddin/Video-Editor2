@@ -411,6 +411,7 @@ export async function renderCanvasEngine({
   // a handful of elements) so readiness stays fresh across async loads.
   let splitSiblingEl: Map<string, HTMLVideoElement>;
   let mediaVideoEl: Map<string, HTMLVideoElement>;
+  let trackVideoEl: Map<string, HTMLVideoElement>;
   {
     let clipsById: Map<string, TimelineClip>;
     if (_cachedClipsById && tracks === _cachedClipsByIdTracksRef) {
@@ -425,10 +426,18 @@ export async function renderCanvasEngine({
     }
     splitSiblingEl = new Map<string, HTMLVideoElement>();
     mediaVideoEl = new Map<string, HTMLVideoElement>();
+    trackVideoEl = new Map<string, HTMLVideoElement>();
     for (const [otherId, otherEl] of videoElements) {
       if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
       const oc = clipsById.get(otherId);
       if (!oc) continue;
+      for (const track of tracks) {
+        if (track.clips.some((c) => c.id === otherId)) {
+          const tKey = `${oc.mediaId}::${track.id}`;
+          if (!trackVideoEl.has(tKey)) trackVideoEl.set(tKey, otherEl);
+          break;
+        }
+      }
       // Guard: do not use an element as a generic fallback if it is actively rendering for another clip at this exact moment
       const isOcActive = currentTime >= oc.startTime && currentTime < oc.startTime + oc.duration + 0.001;
       if (isOcActive) continue;
@@ -1596,6 +1605,7 @@ export async function renderCanvasEngine({
             // would draw the identical frame on both sides (causing dual repeat / freeze).
             videoEl =
               (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
+              (!clip.__isTransitionLayer && clip.mediaId && clip.trackId ? trackVideoEl.get(`${clip.mediaId}::${clip.trackId}`) : null) ||
               (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null) ||
               null;
             // FIX 4: Do NOT cache the sibling element into videoElements.set().

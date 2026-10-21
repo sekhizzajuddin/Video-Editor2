@@ -311,7 +311,7 @@ export function isMobileDevice(): boolean {
 let cachedMaxLoadedVideos: number | null = null;
 export function getMaxLoadedVideos(): number {
   if (cachedMaxLoadedVideos === null) {
-    cachedMaxLoadedVideos = isAndroidDevice() || isIOSDevice() ? 2 : 4;
+    cachedMaxLoadedVideos = isAndroidDevice() || isIOSDevice() ? 4 : 8;
   }
   return cachedMaxLoadedVideos;
 }
@@ -1221,16 +1221,13 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const isNearPrimary = ct >= clip.startTime - prox && ct < clip.startTime + clip.duration + prox;
           const isNearTrim = trimCt !== null && trimCt >= clip.startTime - prox && trimCt < clip.startTime + clip.duration + prox;
           if (isNearPrimary || isNearTrim) {
-            neededClips.set(clip.id, {
+                        neededClips.set(clip.id, {
               mediaId: clip.mediaId,
               type: media.type,
-              // Split segments of ONE original clip share a <video> element;
-              // everything else (duplicates, same media on another track) must
-              // NOT share — they can be active simultaneously and would fight
-              // over the single element's currentTime.
-              shareKey: (clip as any).splitGroupId
-                ? `${clip.mediaId}::${(clip as any).splitGroupId}`
-                : `${clip.mediaId}::clip:${clip.id}`,
+              // Track-based element sharing: All clips of the same media on the SAME track
+              // share one <video> element because only one clip per track can be active at any instant.
+              // Different tracks (e.g. V1 A-roll and V2 B-roll) each get their own dedicated element.
+              shareKey: `${clip.mediaId}::track:${track.id}`,
               start: clip.startTime,
               end: clip.startTime + clip.duration,
             });
@@ -1327,7 +1324,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     // Chromium has a hard cap of 16 hardware video decoders across the whole browser.
     // Capping our pool strictly to 4 video elements guarantees we never exhaust hardware
     // decoders or crash the GPU process on multi-split/transition/speed-frame timelines.
-    const MAX_VIDEO_ELEMENTS = 4;
+    const MAX_VIDEO_ELEMENTS = isAndroidDevice() || isIOSDevice() ? 4 : 8;
     {
       const videoKeyDistances = new Map<string, number>();
       for (const [, info] of neededClips) {
@@ -2011,7 +2008,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       if (playing && !scrubbing) {
         const boundary = nextClipBoundaryRef.current;
         const lookahead = boundary - ct;
-        if (Number.isFinite(boundary) && lookahead > 0 && lookahead <= 0.2) {
+        if (Number.isFinite(boundary) && lookahead > 0 && lookahead <= 1.5) {
           if (preRolledBoundaryRef.current !== boundary) {
             preRolledBoundaryRef.current = boundary;
             let preRolled = false;
@@ -2134,6 +2131,19 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // ---- 2. Sync each active element ----
       for (const clip of clips) {
         let entry = pool.get(clip.clipId);
+        // IMMEDIATE TRACK-ELEMENT HEALING:
+        // Check if an existing element for this track/mediaId is already in mediaVideoEls
+        if (!entry) {
+          const trackKey = `${clip.mediaId}::track:${clip.trackId}`;
+          const existingEl = mediaVideoEls.get(trackKey);
+          if (existingEl) {
+            entry = { el: existingEl, clipId: clip.clipId, mediaId: clip.mediaId, type: clip.trackType };
+            pool.set(clip.clipId, entry);
+            if (clip.trackType === 'video') {
+              videoMapRef.current.set(clip.clipId, existingEl);
+            }
+          }
+        }
         // PERF (multi-split fix): the fallback matches elements of the same split
         // group, or the same mediaId if no dedicated element is allocated.
         if (!entry) {
