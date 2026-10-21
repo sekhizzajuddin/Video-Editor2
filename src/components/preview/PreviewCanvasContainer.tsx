@@ -556,10 +556,7 @@ export function PreviewCanvasContainer() {
         }
       }
 
-      // Fire-and-forget: pump decodes in background, don't await
-      if (decodeRequests.length > 0) {
-        previewDecoder.pumpFrames(decodeRequests);
-      }
+      // Decodes are cached on demand; no unawaited main-thread flood
 
       // Build sync decodedFrames map from cache for THIS render pass
       const decodedFrames = new Map<string, CachedFrame>();
@@ -665,13 +662,9 @@ export function PreviewCanvasContainer() {
 
           let newTime = currentTimeRef.current;
 
-          // BUFFERING FREEZE: when video decoders haven't caught up (isBuffering),
-          // freeze the clock so the playhead doesn't race ahead. Keep lastTime
-          // current so there's no time-jump when buffering clears.
-          if (state.isBuffering) {
-            lastTime = now;
-            // Don't advance newTime — stay at currentTimeRef.current
-          } else if (state.isExporting) {
+          // Continuous playback: playhead advances with real-time delta. Decoders catch up
+          // seamlessly via hardware pipeline without freezing the timeline playhead.
+          if (state.isExporting) {
             const targetFps = state.exportFps || 30;
             const frameDuration = 1000 / targetFps;
             const elapsed = now - lastTime;

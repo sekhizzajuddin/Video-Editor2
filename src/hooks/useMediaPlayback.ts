@@ -2385,11 +2385,16 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 }
                 return false;
               })();
-              const effectiveThreshold = isSharedElement ? 0.15 : 0.05;
-              if (Math.abs(rawDrift) > effectiveThreshold) {
-                el.currentTime = mediaTime;
-                pendingSeeksRef.current.delete(clip.clipId);
-                seekStartTimeRef.current.set(clip.clipId, performance.now());
+              const isAlreadyRolling = !el.paused && Math.abs(rawDrift) < VIDEO_HARD_SEEK_THRESHOLD;
+              if (justActivated && isAlreadyRolling) {
+                // Crossing a split boundary seamlessly: already rolling and near target. Do NOT seek!
+              } else {
+                const effectiveThreshold = isSharedElement ? 0.35 : 0.08;
+                if (Math.abs(rawDrift) > effectiveThreshold) {
+                  el.currentTime = mediaTime;
+                  pendingSeeksRef.current.delete(clip.clipId);
+                  seekStartTimeRef.current.set(clip.clipId, performance.now());
+                }
               }
             } else if (Math.abs(rawDrift) > VIDEO_PLL_THRESHOLD) {
               // Smoothly modulate playback speed to catch up / slow down without stopping decoder
@@ -2515,7 +2520,8 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           // Hysteresis (~330ms at 60fps): 20 consecutive ticks filter out transient seeking
           // without freezing playback or flashing spinners during normal keyframe decodes.
           if (!wasBuffering && bufferingTickCount >= 20) {
-            store.setIsBuffering(true);
+            // Local timeline playback: never freeze playhead or display spinner for local media seeks
+            // store.setIsBuffering(true);
             playbackDiagnostics.recordIncident(
               'BUFFERING_STARTED',
               `Video decoder seeking or waiting for data over 20 consecutive frames at timeline ${ct.toFixed(2)}s`,
