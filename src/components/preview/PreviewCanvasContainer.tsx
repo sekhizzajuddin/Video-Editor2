@@ -41,6 +41,8 @@ import { setOnMaskReadyCallback } from '@/utils/aiBackground';
 import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, subscribeTrimPreviewTime } from '@/utils/playbackClock';
 import { isPreviewSuspendedForExport } from '@/utils/previewSuspension';
 import { getOverlayMapping } from './previewMath';
+import { previewDecoder, type CachedFrame } from '@/preview/PreviewDecoder';
+import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
 import { isMobileDevice } from '@/hooks/useMediaPlayback';
@@ -517,6 +519,66 @@ export function PreviewCanvasContainer() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const fresh = useEditorStore.getState();
+    const deps = renderDepsRef.current;
+    const ct = deps.currentTime;
+
+    // ── WebCodecs pre-decode pass ──────────────────────────────────────────
+    // Resolve all active video clip frames BEFORE the synchronous render pass,
+    // so drawSingleClip can pick them up from the decodedFrames map without
+    // awaiting async decode mid-render. This is the key architectural change
+    // that eliminates <video> element readyState/seeking pipeline thrashing.
+    if (previewDecoder.isAvailable) {
+      const tracks = deps.tracks as TimelineTrack[];
+      const mediaLibrary = deps.mediaLibrary as MediaItem[];
+      const mediaMap = new Map<string, MediaItem>();
+      for (const m of mediaLibrary) mediaMap.set(m.id, m);
+
+      const decodeRequests: Array<{ clipId: string; mediaId: string; url: string; timestampSeconds: number }> = [];
+
+      for (const track of tracks) {
+        if (track.hidden || track.type !== 'video') continue;
+        for (const clip of track.clips) {
+          if (clip.disabled) continue;
+          const clipEnd = clip.startTime + clip.duration;
+          if (ct < clip.startTime || ct >= clipEnd + 0.001) continue;
+
+          const mediaItem = mediaMap.get(clip.mediaId);
+          if (!mediaItem || mediaItem.type !== 'video') continue;
+
+          // Calculate source media time (same formula as useMediaPlayback)
+          const mediaTime = getMediaTimeForClip(clip as any, ct);
+
+          decodeRequests.push({
+            clipId: clip.id,
+            mediaId: mediaItem.id,
+            url: mediaItem.url,
+            timestampSeconds: mediaTime,
+          });
+        }
+      }
+
+      if (decodeRequests.length > 0) {
+        // Fire all decodes in parallel and build the clipId → CachedFrame map
+        const decodedFrames = new Map<string, CachedFrame>();
+        const promises = decodeRequests.map(async (req) => {
+          try {
+            const frame = await previewDecoder.getFrame(req.mediaId, req.url, req.timestampSeconds);
+            if (frame) {
+              decodedFrames.set(req.clipId, frame);
+            }
+          } catch {
+            // Silently fall back to <video> element for this clip
+          }
+        });
+        await Promise.all(promises);
+
+        // Attach decoded frames to renderDeps for this render pass
+        deps.decodedFrames = decodedFrames;
+      } else {
+        deps.decodedFrames = undefined;
+      }
+    }
+
     await renderCanvasEngine({
       canvas,
       compositeCtxRef,
@@ -525,7 +587,7 @@ export function PreviewCanvasContainer() {
       lastParticleTimeRef,
       lastFrameCanvasRef,
       isScrubbing: fresh.isScrubbing,
-      renderDeps: renderDepsRef.current,
+      renderDeps: deps,
     });
   }, []);
 

@@ -44,6 +44,7 @@ import { applyVectorMaskToContext, applyVectorMaskRaster, vectorMaskNeedsRaster 
 import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
+import { previewDecoder, type CachedFrame } from '@/preview/PreviewDecoder';
 import { getClipDimensions } from './previewMath';
 import { resolveBlendPlan } from '@/utils/blendCompositor';
 import { applyMotionEffect } from '@/utils/motionEffects';
@@ -186,6 +187,8 @@ export interface RenderCanvasParams {
     selectedClipId: string | null;
     mediaLibrary: MediaItem[];
     videoElements: Map<string, HTMLVideoElement>;
+    /** WebCodecs-decoded frames keyed by clipId — bypasses <video> element pipeline */
+    decodedFrames?: Map<string, CachedFrame>;
     viewport: { x: number; y: number; zoom: number };
     settings: any;
     showGrid: boolean;
@@ -1565,30 +1568,49 @@ export async function renderCanvasEngine({
       let imageEl: HTMLImageElement | null = null;
 
       if (mediaItem.type === 'video') {
-        videoEl = videoElements.get(clip.id) || null;
-        if (!videoEl || videoEl.readyState < 2 || videoEl.videoWidth === 0) {
-          // Sibling fallback (multi-split fix): O(1) lookup via the per-render
-          // indexes built above — was a full videoElements iteration plus a
-          // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
-          // Guard: NEVER fallback to split sibling if rendering inside a transition layer,
-          // because the sibling is the other half of the transition! Falling back to it
-          // would draw the identical frame on both sides (causing dual repeat / freeze).
-          videoEl =
-            (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
-            (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null) ||
-            null;
-          // FIX 4: Do NOT cache the sibling element into videoElements.set().
-          // The sibling is a temporary stand-in currently positioned at a
-          // DIFFERENT media time (it was decoding another segment). Caching it
-          // permanently makes every subsequent render draw the wrong frame
-          // until the clip's own element loads. Instead, use it transiently
-          // for this render only — the pool will assign the correct element
-          // once it's ready, and videoElements will be updated naturally.
-        }
-        if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
-          vw = videoEl.videoWidth;
-          vh = videoEl.videoHeight;
+        // ── WebCodecs decoded frame (primary path) ──────────────────────
+        // PreviewDecoder bypasses <video> element seeking entirely.
+        // Frames are decoded on-demand via mediabunny's CanvasSink and
+        // cached in an LRU — no readyState limbo, no PLL drift, no seek
+        // thrashing. Falls back to <video> elements only when the decoder
+        // hasn't loaded yet (first few frames) or for browsers without
+        // WebCodecs support.
+        const decodedFrames = renderDeps.decodedFrames;
+        const decodedFrame = decodedFrames?.get(clip.id);
+        if (decodedFrame && decodedFrame.drawable) {
+          // Use the WebCodecs-decoded frame directly
+          vw = decodedFrame.width;
+          vh = decodedFrame.height;
           hasRealMedia = true;
+          // videoEl stays null — sourceElement will use decodedFrame.drawable below
+        } else {
+          // Fallback: <video> element pipeline (used during decoder warmup
+          // or on browsers without WebCodecs)
+          videoEl = videoElements.get(clip.id) || null;
+          if (!videoEl || videoEl.readyState < 2 || videoEl.videoWidth === 0) {
+            // Sibling fallback (multi-split fix): O(1) lookup via the per-render
+            // indexes built above — was a full videoElements iteration plus a
+            // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
+            // Guard: NEVER fallback to split sibling if rendering inside a transition layer,
+            // because the sibling is the other half of the transition! Falling back to it
+            // would draw the identical frame on both sides (causing dual repeat / freeze).
+            videoEl =
+              (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
+              (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null) ||
+              null;
+            // FIX 4: Do NOT cache the sibling element into videoElements.set().
+            // The sibling is a temporary stand-in currently positioned at a
+            // DIFFERENT media time (it was decoding another segment). Caching it
+            // permanently makes every subsequent render draw the wrong frame
+            // until the clip's own element loads. Instead, use it transiently
+            // for this render only — the pool will assign the correct element
+            // once it's ready, and videoElements will be updated naturally.
+          }
+          if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+            vw = videoEl.videoWidth;
+            vh = videoEl.videoHeight;
+            hasRealMedia = true;
+          }
         }
       } else {
         imageEl = getCachedImage(mediaItem.id, mediaItem.url as string, renderDeps.requestRedraw);
@@ -1611,7 +1633,11 @@ export async function renderCanvasEngine({
 
       if (hasRealMedia) {
         anyClipDrawn = true;
-        let sourceElement: CanvasImageSource = (mediaItem.type === 'video' ? videoEl : imageEl)!;
+        // Use WebCodecs-decoded frame if available, otherwise fall back to video/image element
+        const decodedFrame = renderDeps.decodedFrames?.get(clip.id);
+        let sourceElement: CanvasImageSource = mediaItem.type === 'video'
+          ? (decodedFrame?.drawable || videoEl)!
+          : imageEl!;
 
         const clipW = dw * (1 - cLeft - cRight);
         const clipH = dh * (1 - cTop - cBot);
@@ -1939,9 +1965,9 @@ export async function renderCanvasEngine({
                 : sourceElement;
                 
               if (isExporting) {
-                await applySubjectNeonOutlineFlash(oCtx, offCanvas.width, offCanvas.height, neonSource, neonOpts);
+                await applySubjectNeonOutlineFlash(oCtx, offCanvas.width, offCanvas.height, neonSource as HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | ImageBitmap, neonOpts);
               } else {
-                void applySubjectNeonOutlineFlash(oCtx, offCanvas.width, offCanvas.height, neonSource, neonOpts);
+                void applySubjectNeonOutlineFlash(oCtx, offCanvas.width, offCanvas.height, neonSource as HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | ImageBitmap, neonOpts);
               }
             }
 
