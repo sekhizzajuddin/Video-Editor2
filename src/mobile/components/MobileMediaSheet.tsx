@@ -16,6 +16,7 @@ import { TransitionCard } from '@/components/MediaPanel';
 import { TRANSITIONS, FX_EFFECTS, COLOR_CORRECTION_EFFECTS, PARTICLE_EFFECTS } from '@/constants/mediaPanel';
 import { normalizeTransition, getDefaultSoundForKind } from '@/utils/transitionEngine';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
+import { PRESENTATION_TEMPLATES, applyPresentationTemplate } from '@/utils/presentationTemplates';
 import { TEXT_TEMPLATES } from '@/utils/textTemplates';
 import type { TimelineClip } from '@/types';
 
@@ -322,19 +323,40 @@ export function MobileMediaSheet({ onClose, initialTab = 'media' }: { onClose: (
           )}
 
         {tab === 'templates' && (
-          <div className="space-y-3">
-            <p className="text-[11px] text-white/50">Motion Graphics & Particle Templates:</p>
-            <div className="grid grid-cols-2 gap-2">
-              {MOTION_TEMPLATES.map((tmpl) => (
-                <button
-                  key={tmpl.id}
-                  onClick={() => addMotionTemplate(tmpl)}
-                  className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
-                >
-                  <span className="text-[12px] font-semibold text-teal-300">{tmpl.name}</span>
-                  <span className="text-[10px] text-white/50 capitalize">{tmpl.category} template</span>
-                </button>
-              ))}
+          <div className="space-y-4">
+            <div>
+              <p className="text-[11px] font-bold text-blue-400 mb-2">⭐ A & B Roll Presentations:</p>
+              <div className="grid grid-cols-2 gap-2">
+                {PRESENTATION_TEMPLATES.map((tmpl) => (
+                  <button
+                    key={tmpl.id}
+                    onClick={() => {
+                      applyPresentationTemplate({ template: tmpl });
+                      onClose();
+                    }}
+                    className="flex flex-col items-start gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 p-2.5 text-left active:bg-blue-500/20 transition-colors"
+                  >
+                    <span className="text-[12px] font-semibold text-white">{tmpl.name}</span>
+                    <span className="text-[10px] text-blue-300/80">{tmpl.badge} · {tmpl.categoryLabel}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[11px] text-white/50 mb-2">Motion Graphics & Particle Templates:</p>
+              <div className="grid grid-cols-2 gap-2">
+                {MOTION_TEMPLATES.map((tmpl) => (
+                  <button
+                    key={tmpl.id}
+                    onClick={() => addMotionTemplate(tmpl)}
+                    className="flex flex-col items-start gap-1 rounded-lg border border-white/10 bg-white/5 p-2.5 text-left active:bg-white/10"
+                  >
+                    <span className="text-[12px] font-semibold text-teal-300">{tmpl.name}</span>
+                    <span className="text-[10px] text-white/50 capitalize">{tmpl.category} template</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}

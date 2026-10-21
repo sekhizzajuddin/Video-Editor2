@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useEditorStore } from '@/store/editorStore';
 import type { TimelineClip, ParticleEffectType, ClipParticleSettings } from '@/types';
 import { MOTION_TEMPLATES } from '@/utils/motionTemplates';
+import { PRESENTATION_TEMPLATES, applyPresentationTemplate } from '@/utils/presentationTemplates';
 import { FX_EFFECTS } from '@/constants/mediaPanel';
 import { toast } from 'sonner';
 import { generateId } from '../timelineUtils';
@@ -39,10 +40,10 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
           }
         }
       }
-      if (!track && !e.dataTransfer.types.includes('application/procut-media') && !e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/procut-media-sequence') && !e.dataTransfer.types.includes('application/procut-effect') && !e.dataTransfer.types.includes('application/procut-custom-fx') && !e.dataTransfer.types.includes('application/procut-element')) {
+      if (!track && !e.dataTransfer.types.includes('application/procut-media') && !e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes('application/procut-media-sequence') && !e.dataTransfer.types.includes('application/procut-effect') && !e.dataTransfer.types.includes('application/procut-custom-fx') && !e.dataTransfer.types.includes('application/procut-element') && !e.dataTransfer.types.includes('application/procut-presentation-template')) {
         // Only return early if track is missing AND we are dropping something that strictly requires a track (like transitions)
         // Media items, files, templates, and FX can be dropped on empty space to auto-create tracks.
-        const hasTemplate = e.dataTransfer.getData('application/procut-template');
+        const hasTemplate = e.dataTransfer.getData('application/procut-template') || e.dataTransfer.getData('application/procut-presentation-template');
         if (!hasTemplate) {
           // P3 FIX: clear the stale ghost/highlight — the drop ended here but the
           // gray highlight and ghost clip used to remain rendered.
@@ -203,9 +204,36 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
         return;
       }
 
+      // ── A/B Roll Presentation Template drop ──
+      const presentationTmplId = e.dataTransfer.getData('application/procut-presentation-template');
+      if (presentationTmplId) {
+        const pTmpl = PRESENTATION_TEMPLATES.find((t) => t.id === presentationTmplId);
+        if (pTmpl) {
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const dropTime = Math.max(0, x / zoomLevel);
+          applyPresentationTemplate({ template: pTmpl, startTime: dropTime });
+          setHoveredTrackId(null);
+          setDropPreview(null);
+          return;
+        }
+      }
+
       // ── Animated Title Template drop ──
       const templateId = e.dataTransfer.getData('application/procut-template');
       if (templateId) {
+        // Check if it's an A/B presentation template first
+        const pTmpl = PRESENTATION_TEMPLATES.find((t) => t.id === templateId);
+        if (pTmpl) {
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const dropTime = Math.max(0, x / zoomLevel);
+          applyPresentationTemplate({ template: pTmpl, startTime: dropTime });
+          setHoveredTrackId(null);
+          setDropPreview(null);
+          return;
+        }
+
         const tmpl = MOTION_TEMPLATES.find((t) => t.id === templateId);
         if (tmpl && track) {
           if (tmpl.type === 'video') {
@@ -655,7 +683,7 @@ export function useTimelineDrop({ timelineState }: UseTimelineDropDeps) {
       const hasColorPreset = e.dataTransfer.types.includes('application/procut-color-preset');
       const hasParticle = e.dataTransfer.types.includes('application/procut-particle');
       const hasTransition = e.dataTransfer.types.includes('application/procut-transition');
-      const hasTemplate = e.dataTransfer.types.includes('application/procut-template');
+      const hasTemplate = e.dataTransfer.types.includes('application/procut-template') || e.dataTransfer.types.includes('application/procut-presentation-template');
       const hasFiles = e.dataTransfer.types.includes('Files');
 
       if ((hasMedia || hasEffect || hasCustomFx || hasElement || hasColorPreset || hasParticle || hasTransition || hasTemplate || hasFiles) && (trackIdx >= 0 || hasMedia || hasFiles || hasTemplate || hasEffect || hasCustomFx || hasElement)) {

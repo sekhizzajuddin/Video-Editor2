@@ -1598,29 +1598,17 @@ export async function renderCanvasEngine({
           vh = decodedFrame.height;
           hasRealMedia = true;
           // videoEl stays null — sourceElement will use decodedFrame.drawable below
-        } else {
-          // Fallback: <video> element pipeline (used during decoder warmup
-          // or on browsers without WebCodecs)
+        } else if (!customCanvasPlayer.isSupported) {
+          // Fallback: <video> element pipeline (used ONLY when custom player is not supported)
           videoEl = videoElements.get(clip.id) || null;
+          if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
           if (!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) {
-            // Sibling fallback (multi-split fix): O(1) lookup via the per-render
-            // indexes built above — was a full videoElements iteration plus a
-            // tracks.flatMap().find() PER clip PER frame (O(N²) with many splits).
-            // Guard: NEVER fallback to split sibling if rendering inside a transition layer,
-            // because the sibling is the other half of the transition! Falling back to it
-            // would draw the identical frame on both sides (causing dual repeat / freeze).
             videoEl =
               (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
               (!clip.__isTransitionLayer && clip.mediaId && clip.trackId ? trackVideoEl.get(`${clip.mediaId}::${clip.trackId}`) : null) ||
               (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null) ||
               null;
-            // FIX 4: Do NOT cache the sibling element into videoElements.set().
-            // The sibling is a temporary stand-in currently positioned at a
-            // DIFFERENT media time (it was decoding another segment). Caching it
-            // permanently makes every subsequent render draw the wrong frame
-            // until the clip's own element loads. Instead, use it transiently
-            // for this render only — the pool will assign the correct element
-            // once it's ready, and videoElements will be updated naturally.
+            if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
           }
           if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
             vw = videoEl.videoWidth;
@@ -1648,12 +1636,24 @@ export async function renderCanvasEngine({
       dy = -dh / 2;
 
       if (hasRealMedia) {
-        anyClipDrawn = true;
         // Use WebCodecs-decoded frame if available, otherwise fall back to video/image element
         const decodedFrame = renderDeps.decodedFrames?.get(clip.id) || customCanvasPlayer.getFrameSync(clip.id, mediaTime);
-        let sourceElement: CanvasImageSource = mediaItem.type === 'video'
-          ? (decodedFrame?.drawable || videoEl)!
-          : imageEl!;
+        let sourceElement: CanvasImageSource | null = null;
+        if (mediaItem.type === 'video') {
+          if (decodedFrame && decodedFrame.drawable) {
+            sourceElement = decodedFrame.drawable;
+          } else if (videoEl instanceof HTMLVideoElement && videoEl.videoWidth > 0) {
+            sourceElement = videoEl;
+          }
+        } else {
+          sourceElement = imageEl;
+        }
+
+        if (!sourceElement) {
+          return;
+        }
+
+        anyClipDrawn = true;
 
         const clipW = dw * (1 - cLeft - cRight);
         const clipH = dh * (1 - cTop - cBot);

@@ -1469,7 +1469,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             }
             const elIsNew = !el;
             if (!el) {
-              const created = (customCanvasPlayer.isSupported ? document.createElement('audio') : document.createElement('video')) as HTMLVideoElement;
+              const created = document.createElement('video');
               created.preload = 'auto';
               created.muted = true; // MUST be true initially for iOS Safari to preload metadata
               created.playsInline = true;
@@ -1479,10 +1479,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               } else {
                 created.crossOrigin = 'anonymous';
               }
-              // ANDROID RENDERING FIX: styles the element "painted but invisible"
-              // and appends it to the shared composited pool container. opacity 0
-              // would make Chrome-Android treat the video as unpainted → decoder
-              // frames never reach drawImage() → black preview on phones only.
+              // Attached to headless pool container for audio decoding / Web Audio routing
               attachInvisibleMediaElement(created);
               // Hidden pool videos must never hijack Android's PiP / Cast UI.
               if ('disablePictureInPicture' in created) (created as any).disablePictureInPicture = true;

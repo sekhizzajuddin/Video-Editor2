@@ -59,7 +59,9 @@ import {
   Sliders,
   Shapes,
   Award,
+  LayoutTemplate,
 } from 'lucide-react';
+import { TemplatesTab } from './tabs/TemplatesTab';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
 import { useEditorStore, getAllClipsDeep, findClipInTracks } from '@/store/editorStore';
 import { usePlaybackTime } from '@/hooks/usePlaybackTime';
@@ -1025,7 +1027,7 @@ export function MediaPanel() {
     { id: 'text', label: 'Text', icon: Type },
     { id: 'fx', label: 'FX', icon: Wand2 },
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
-    { id: 'templates', label: 'Effects', icon: Sparkles },
+    { id: 'templates', label: 'Templates', icon: LayoutTemplate },
     { id: 'elements', label: 'Elements', icon: Shapes },
   ];
 
@@ -1473,7 +1475,7 @@ export function MediaPanel() {
               {activeMediaTab === 'project'
                 ? 'Media Library'
                 : activeMediaTab === 'templates'
-                ? 'Effects'
+                ? 'Templates'
                 : activeMediaTab === 'elements'
                 ? 'Elements'
                 : (activeMediaTab === 'fx' || activeMediaTab === 'effects')
@@ -2787,185 +2789,9 @@ export function MediaPanel() {
         )}
 
         {/* ── Templates Tab ── */}
-        {activeMediaTab === 'templates' && (() => {
-          let filtered = MOTION_TEMPLATES;
-          
-          if (templateSubTab === 'text') {
-            filtered = MOTION_TEMPLATES.filter((t) => t.type === 'text');
-            if (templateCategory !== 'all') {
-              filtered = filtered.filter((t) => t.category === templateCategory);
-            }
-          } else if (templateSubTab === 'video') {
-            filtered = MOTION_TEMPLATES.filter((t) => t.type === 'video');
-            if (templateCategory !== 'all') {
-              filtered = filtered.filter((t) => t.category === templateCategory);
-            }
-          }
-
-          const categories = templateSubTab === 'text'
-            ? [
-                { id: 'all', label: 'All Text' },
-                { id: 'title', label: 'Titles' },
-                { id: 'lower-third', label: 'Lower Thirds' },
-                { id: 'social', label: 'Social Badges' },
-                { id: 'kinetic', label: 'Kinetic Texts' }
-              ]
-            : [
-                { id: 'all', label: 'All Video' },
-                { id: 'particle', label: 'Particles' },
-                { id: 'color-preset', label: 'Color Presets' },
-                { id: 'fx-overlay', label: 'FX Overlays' }
-              ];
-
-          return (
-            <div className="flex-1 flex flex-col min-h-0">
-              {/* Sub-Tab Selector */}
-              <div className="flex border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)]">
-                <button
-                  onClick={() => { setTemplateSubTab('text'); setTemplateCategory('all'); }}
-                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors ${
-                    templateSubTab === 'text'
-                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-card)]'
-                      : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  Text Effects
-                </button>
-                <button
-                  onClick={() => { setTemplateSubTab('video'); setTemplateCategory('all'); }}
-                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors ${
-                    templateSubTab === 'video'
-                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-card)]'
-                      : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  Video Effects
-                </button>
-                <button
-                  onClick={() => setTemplateSubTab('project')}
-                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors ${
-                    templateSubTab === 'project'
-                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-[var(--theme-bg-card)]'
-                      : 'border-transparent text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  Project Layouts
-                </button>
-              </div>
-
-              {templateSubTab !== 'project' ? (
-                <div className="flex-1 overflow-y-auto flex flex-col">
-                  {/* Category filter pills */}
-                  <div className="flex gap-1.5 p-2 flex-wrap border-b border-[var(--theme-border)] bg-[var(--theme-bg-subpanel)]">
-                    {categories.map((cat) => (
-                      <button
-                        key={cat.id}
-                        onClick={() => setTemplateCategory(cat.id)}
-                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
-                          templateCategory === cat.id
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'bg-[var(--theme-bg-card)] border border-[var(--theme-border)] text-[var(--theme-text-muted)] hover:text-[var(--theme-text-primary)]'
-                        }`}
-                      >
-                        {cat.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-[var(--theme-text-muted)] px-3 py-1.5 font-semibold uppercase tracking-wider">
-                    {templateSubTab === 'text' 
-                      ? 'Drag to Text Track / Click to Insert' 
-                      : 'Drag to Video Clip / Click to Apply'}
-                  </p>
-                  <div className="flex flex-col gap-1.5 p-2">
-                    {filtered.map((tmpl) => (
-                      <TemplatePreviewCard
-                        key={tmpl.id}
-                        tmpl={tmpl}
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('application/procut-template', tmpl.id);
-                          e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                        onClick={() => handleTemplateClick(tmpl)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto flex flex-col p-2 space-y-3">
-                  {/* Action card: Save Timeline */}
-                  <button
-                    onClick={() => setShowSaveTemplateModal(true)}
-                    className="w-full py-3 px-4 rounded-xl border border-dashed border-blue-500/40 hover:border-blue-500 bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
-                  >
-                    <span>Save Current Timeline as Template</span>
-                  </button>
-
-                  <div className="flex flex-col gap-2">
-                    {projectTemplates.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 text-center text-[var(--theme-text-muted)]">
-                        <p className="text-xs font-semibold text-[var(--theme-text-primary)]">No Project Templates saved yet</p>
-                        <p className="text-[10px] mt-1">Configure your tracks and clips, then click save above to reuse it.</p>
-                      </div>
-                    ) : (
-                      projectTemplates.map((tmpl) => {
-                        const dateStr = new Date(tmpl.createdAt).toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric'
-                        });
-
-                        return (
-                          <div
-                            key={tmpl.id}
-                            className="flex flex-col p-3 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-bg-card)] hover:border-blue-500/30 transition-all group shadow-sm"
-                          >
-                            <div className="flex justify-between items-start gap-2">
-                              <div className="min-w-0">
-                                <h4 className="text-xs text-[var(--theme-text-primary)] font-bold truncate">{tmpl.name}</h4>
-                                {tmpl.description && (
-                                  <p className="text-[10px] text-[var(--theme-text-muted)] mt-0.5 line-clamp-2 leading-relaxed">
-                                    {tmpl.description}
-                                  </p>
-                                )}
-                              </div>
-                              <button
-                                onClick={async () => {
-                                  await deleteProjectTemplate(tmpl.id);
-                                }}
-                                className="p-1 hover:bg-red-500/10 rounded-md text-[var(--theme-text-muted)] hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                                title="Delete Template"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-
-                            <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-[var(--theme-border)]">
-                              <div className="flex flex-col gap-0.5">
-                                <span className="text-[8px] text-[var(--theme-text-muted)]">
-                                  {dateStr}
-                                </span>
-                                <span className="text-[9px] text-[var(--theme-text-muted)] font-mono font-medium">
-                                  {tmpl.tracks.length} track(s) · {(tmpl.totalDuration || 0).toFixed(1)}s
-                                </span>
-                              </div>
-
-                              <button
-                                onClick={() => setConfirmLoadTemplateId(tmpl.id)}
-                                className="px-3 py-1 text-[10px] font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-md transition-colors shadow-sm"
-                              >
-                                Load
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
+        {activeMediaTab === 'templates' && (
+          <TemplatesTab />
+        )}
 
         {activeMediaTab === 'transitions' && (
           <div className="flex-1 overflow-y-auto p-2 space-y-4">
