@@ -1,3 +1,4 @@
+import { customCanvasPlayer } from '@/preview/CustomCanvasPlayer';
 /**
  * useMediaPlayback.ts (Refactored)
  *
@@ -1468,25 +1469,26 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             }
             const elIsNew = !el;
             if (!el) {
-              el = document.createElement('video');
-              el.preload = 'auto';
-              el.muted = true; // MUST be true initially for iOS Safari to preload metadata
-              el.playsInline = true;
+              const created = (customCanvasPlayer.isSupported ? document.createElement('audio') : document.createElement('video')) as HTMLVideoElement;
+              created.preload = 'auto';
+              created.muted = true; // MUST be true initially for iOS Safari to preload metadata
+              created.playsInline = true;
             
               if (media.url.startsWith('blob:') || media.url.startsWith('data:')) {
-                el.removeAttribute('crossOrigin');
+                created.removeAttribute('crossOrigin');
               } else {
-                el.crossOrigin = 'anonymous';
+                created.crossOrigin = 'anonymous';
               }
               // ANDROID RENDERING FIX: styles the element "painted but invisible"
               // and appends it to the shared composited pool container. opacity 0
               // would make Chrome-Android treat the video as unpainted → decoder
               // frames never reach drawImage() → black preview on phones only.
-              attachInvisibleMediaElement(el);
+              attachInvisibleMediaElement(created);
               // Hidden pool videos must never hijack Android's PiP / Cast UI.
-              if ('disablePictureInPicture' in el) el.disablePictureInPicture = true;
-              if ('disableRemotePlayback' in el) el.disableRemotePlayback = true;
-              mediaVideoEls.set(key, el);
+              if ('disablePictureInPicture' in created) (created as any).disablePictureInPicture = true;
+              if ('disableRemotePlayback' in created) (created as any).disableRemotePlayback = true;
+              mediaVideoEls.set(key, created);
+              el = created;
             }
             mediaVideoRefCount.set(key, (mediaVideoRefCount.get(key) ?? 0) + 1);
 
@@ -3403,6 +3405,33 @@ export function getPlaybackDecodersDetail(): PlaybackDecoderDetail[] {
   const READY_STATE_NAMES = ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'];
   const NETWORK_STATE_NAMES = ['NETWORK_EMPTY', 'NETWORK_IDLE', 'NETWORK_LOADING', 'NETWORK_NO_SOURCE'];
   const result: PlaybackDecoderDetail[] = [];
+
+  // Report Custom Canvas Player (WebCodecs) decoders
+  if (customCanvasPlayer.isSupported) {
+    const customDiag = customCanvasPlayer.getDiagnostics();
+    for (const d of customDiag.decoders) {
+      result.push({
+        clipId: `custom_${d.mediaId}`,
+        mediaId: d.mediaId,
+        type: 'video',
+        shareKey: `custom_webcodecs::${d.mediaId}`,
+        readyState: d.ready ? 4 : 0,
+        readyStateText: d.ready ? 'HAVE_ENOUGH_DATA (CustomPlayer)' : 'INITIALIZING',
+        seeking: false,
+        paused: false,
+        currentTime: 0,
+        playbackRate: 1,
+        networkState: 1,
+        networkStateText: 'NETWORK_IDLE',
+        videoWidth: d.width,
+        videoHeight: d.height,
+        bufferedRanges: [],
+        error: d.error,
+        inDOM: false,
+        hasAudioGraph: false,
+      });
+    }
+  }
   for (const [clipId, entry] of globalMediaPool) {
     const el = entry.el;
     const ranges: { start: number; end: number }[] = [];

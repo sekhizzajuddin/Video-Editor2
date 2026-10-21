@@ -41,7 +41,7 @@ import { setOnMaskReadyCallback } from '@/utils/aiBackground';
 import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime, getTrimPreviewTime, subscribeTrimPreviewTime, getPrimaryMediaSyncTarget } from '@/utils/playbackClock';
 import { isPreviewSuspendedForExport } from '@/utils/previewSuspension';
 import { getOverlayMapping } from './previewMath';
-import { previewDecoder, type CachedFrame } from '@/preview/PreviewDecoder';
+import { customCanvasPlayer, type CustomDecodedFrame } from '@/preview/CustomCanvasPlayer';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
@@ -528,42 +528,66 @@ export function PreviewCanvasContainer() {
     // SYNCHRONOUS cache lookups via previewDecoder.getFrameSync() — zero async
     // in the hot render path. On the first few frames (decoder warmup), the
     // cache will be empty and drawSingleClip falls back to <video> elements.
-    if (previewDecoder.isAvailable) {
+    if (customCanvasPlayer.isSupported) {
       const tracks = deps.tracks as TimelineTrack[];
       const mediaLibrary = deps.mediaLibrary as MediaItem[];
       const mediaMap = new Map<string, MediaItem>();
       for (const m of mediaLibrary) mediaMap.set(m.id, m);
 
-      const decodeRequests: Array<{ clipId: string; mediaId: string; url: string; timestampSeconds: number }> = [];
+      const pumpRequests: Array<{
+        clipId: string;
+        mediaId: string;
+        url: string;
+        mediaTime: number;
+        isPrimaryTrack?: boolean;
+      }> = [];
+
+      const primaryVideoTrack = tracks.find((t) => t.type === 'video' && !t.hidden);
+      const primaryTrackId = primaryVideoTrack?.id;
 
       for (const track of tracks) {
         if (track.hidden || track.type !== 'video') continue;
+        const isPrimaryTrack = track.id === primaryTrackId;
+
         for (const clip of track.clips) {
           if (clip.disabled) continue;
           const clipEnd = clip.startTime + clip.duration;
-          if (ct < clip.startTime || ct >= clipEnd + 0.001) continue;
+
+          // Include active clips and upcoming clips within 1.0s (for pre-roll)
+          const isActive = ct >= clip.startTime && ct < clipEnd + 0.001;
+          const isUpcoming = ct < clip.startTime && clip.startTime - ct <= 1.0;
+
+          if (!isActive && !isUpcoming) continue;
 
           const mediaItem = mediaMap.get(clip.mediaId);
-          if (!mediaItem || mediaItem.type !== 'video') continue;
+          if (!mediaItem || mediaItem.type !== 'video' || !mediaItem.url) continue;
 
-          const mediaTime = getMediaTimeForClip(clip as any, ct);
-          decodeRequests.push({
+          const targetTime = isActive ? ct : clip.startTime;
+          const mediaTime = getMediaTimeForClip(clip as any, targetTime);
+          pumpRequests.push({
             clipId: clip.id,
             mediaId: mediaItem.id,
             url: mediaItem.url,
-            timestampSeconds: mediaTime,
+            mediaTime,
+            isPrimaryTrack,
           });
         }
       }
 
-      // Decodes are cached on demand; no unawaited main-thread flood
+      // 1. Kick non-blocking background lookahead pump
+      customCanvasPlayer.pumpLookahead(pumpRequests);
 
-      // Build sync decodedFrames map from cache for THIS render pass
-      const decodedFrames = new Map<string, CachedFrame>();
-      for (const req of decodeRequests) {
-        const frame = previewDecoder.getFrameSync(req.mediaId, req.timestampSeconds);
+      // 2. Query ready frames synchronously for all active clips
+      const decodedFrames = new Map<string, CustomDecodedFrame>();
+      for (const req of pumpRequests) {
+        const frame = customCanvasPlayer.getFrameSync(req.clipId, req.mediaTime);
         if (frame) {
           decodedFrames.set(req.clipId, frame);
+        } else if (!fresh.isPlaying) {
+          // When paused/scrubbing: issue direct exact seek if frame not in buffer yet
+          customCanvasPlayer.seekExact(req.clipId, req.mediaId, req.url, req.mediaTime).then((f) => {
+            if (f) framePendingRef.current = true;
+          });
         }
       }
       deps.decodedFrames = decodedFrames.size > 0 ? decodedFrames : undefined;

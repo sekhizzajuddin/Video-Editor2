@@ -44,7 +44,7 @@ import { applyVectorMaskToContext, applyVectorMaskRaster, vectorMaskNeedsRaster 
 import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
 import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
-import { previewDecoder, type CachedFrame } from '@/preview/PreviewDecoder';
+import { customCanvasPlayer, type CustomDecodedFrame } from '@/preview/CustomCanvasPlayer';
 import { getClipDimensions } from './previewMath';
 import { resolveBlendPlan } from '@/utils/blendCompositor';
 import { applyMotionEffect } from '@/utils/motionEffects';
@@ -188,7 +188,7 @@ export interface RenderCanvasParams {
     mediaLibrary: MediaItem[];
     videoElements: Map<string, HTMLVideoElement>;
     /** WebCodecs-decoded frames keyed by clipId — bypasses <video> element pipeline */
-    decodedFrames?: Map<string, CachedFrame>;
+    decodedFrames?: Map<string, CustomDecodedFrame>;
     viewport: { x: number; y: number; zoom: number };
     settings: any;
     showGrid: boolean;
@@ -1580,6 +1580,8 @@ export async function renderCanvasEngine({
       let videoEl: HTMLVideoElement | null = null;
       let imageEl: HTMLImageElement | null = null;
 
+      const mediaTime = getMediaTimeForClip(clip as any, currentTime);
+
       if (mediaItem.type === 'video') {
         // ── WebCodecs decoded frame (primary path) ──────────────────────
         // PreviewDecoder bypasses <video> element seeking entirely.
@@ -1589,7 +1591,7 @@ export async function renderCanvasEngine({
         // hasn't loaded yet (first few frames) or for browsers without
         // WebCodecs support.
         const decodedFrames = renderDeps.decodedFrames;
-        const decodedFrame = decodedFrames?.get(clip.id);
+        const decodedFrame = decodedFrames?.get(clip.id) || customCanvasPlayer.getFrameSync(clip.id, mediaTime);
         if (decodedFrame && decodedFrame.drawable) {
           // Use the WebCodecs-decoded frame directly
           vw = decodedFrame.width;
@@ -1648,7 +1650,7 @@ export async function renderCanvasEngine({
       if (hasRealMedia) {
         anyClipDrawn = true;
         // Use WebCodecs-decoded frame if available, otherwise fall back to video/image element
-        const decodedFrame = renderDeps.decodedFrames?.get(clip.id);
+        const decodedFrame = renderDeps.decodedFrames?.get(clip.id) || customCanvasPlayer.getFrameSync(clip.id, mediaTime);
         let sourceElement: CanvasImageSource = mediaItem.type === 'video'
           ? (decodedFrame?.drawable || videoEl)!
           : imageEl!;
