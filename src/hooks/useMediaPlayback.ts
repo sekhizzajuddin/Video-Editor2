@@ -1227,7 +1227,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               // Track-based element sharing: All clips of the same media on the SAME track
               // share one <video> element because only one clip per track can be active at any instant.
               // Different tracks (e.g. V1 A-roll and V2 B-roll) each get their own dedicated element.
-              shareKey: `${clip.mediaId}::track:${track.id}`,
+              shareKey: `${clip.mediaId}::track:${track.id}::slot:0`,
               start: clip.startTime,
               end: clip.startTime + clip.duration,
             });
@@ -1306,14 +1306,16 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         }
         chains.push(currentChain);
 
-        chains.forEach((chain, chainIdx) => {
-          if (chain.length === 1) {
-            const info = neededClips.get(chain[0].clipId);
-            if (info) info.shareKey = `${info.mediaId}::clip:${chain[0].clipId}`;
-          } else if (chainIdx > 0) {
-            for (const m of chain) {
-              const info = neededClips.get(m.clipId);
-              if (info) info.shareKey = `${info.mediaId}::split:${m.clip.splitGroupId}_${chainIdx}`;
+                chains.forEach((chain, chainIdx) => {
+          // PING-PONG DUAL BUFFER: Alternate contiguous chains between slot:0 and slot:1.
+          // This gives non-contiguous cuts and edits a dedicated idle element for 1.5s pre-roll
+          // while strictly bounding the decoder count to max 2 elements per track.
+          const slot = chainIdx % 2;
+          for (const m of chain) {
+            const info = neededClips.get(m.clipId);
+            if (info) {
+              const trackId = m.clip.trackId || (m as any).trackId || 'v';
+              info.shareKey = `${info.mediaId}::track:${trackId}::slot:${slot}`;
             }
           }
         });
@@ -2011,8 +2013,14 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         if (Number.isFinite(boundary) && lookahead > 0 && lookahead <= 1.5) {
           if (preRolledBoundaryRef.current !== boundary) {
             preRolledBoundaryRef.current = boundary;
-            let preRolled = false;
+            const activePoolEntries = new Set<any>();
+            for (const c of cachedActiveClipsRef.current) {
+              const e = pool.get(c.clipId);
+              if (e && e.el) activePoolEntries.add(e.el);
+            }
+
             for (const track of sortedTracksRef.current) {
+              if (track.hidden || track.type !== 'video') continue;
               for (let i = 0; i < track.clips.length; i++) {
                 const tc = track.clips[i];
                 let isIncomingTransition = false;
@@ -2028,11 +2036,28 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                   }
                 }
                 if (!isIncomingTransition && Math.abs(tc.startTime - boundary) > 0.005) continue;
-                const entry = pool.get(tc.id); // own entry only — never the shared active element
-                if (!entry || entry.type !== 'video') break;
+
+                // Find element for incoming clip
+                let entry = pool.get(tc.id);
+                if (!entry) {
+                  const tKey0 = `${tc.mediaId}::track:${track.id}::slot:0`;
+                  const tKey1 = `${tc.mediaId}::track:${track.id}::slot:1`;
+                  const matchedEl = mediaVideoEls.get(tKey0) || mediaVideoEls.get(tKey1) || mediaVideoEls.get(`${tc.mediaId}::track:${track.id}`);
+                  if (matchedEl) {
+                    entry = { el: matchedEl, clipId: tc.id, mediaId: tc.mediaId, type: 'video' };
+                    pool.set(tc.id, entry);
+                    videoMapRef.current.set(tc.id, matchedEl);
+                  }
+                }
+                if (!entry || entry.type !== 'video' || !entry.el) continue;
+
                 const el = entry.el as HTMLVideoElement;
-                if (el.seeking || el.readyState >= 2) break;
-                const mediaItem = mediaMapRef.current.get(tc.mediaId);
+                // CRITICAL: NEVER seek an element that is currently rendering the visible frame for an active clip!
+                if (activePoolEntries.has(el)) continue;
+                // If element is already in an in-flight seek, do not disturb it
+                if (el.seeking) continue;
+
+                const mediaItem = mediaMapRef.current.get(tc.mediaId) || useEditorStore.getState().mediaLibrary.find(m => m.id === tc.mediaId);
                 const maxDuration = mediaItem ? mediaItem.duration : 10000;
                 const targetPreRollTime = isIncomingTransition ? tc.startTime : boundary;
                 const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip(
@@ -2050,17 +2075,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                   },
                   targetPreRollTime
                 )));
-                if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.05) {
+
+                if (Math.abs(el.currentTime - mediaTime) > 0.03) {
                   el.currentTime = mediaTime;
-                  // If the element's src is (re)assigned before the boundary,
-                  // the load path replays this pending seek so the pre-roll
-                  // position survives the reload.
                   pendingSeeksRef.current.set(tc.id, mediaTime);
+                  seekStartTimeRef.current.set(tc.id, performance.now());
+                  (el as any)._seekStartTime = performance.now();
                 }
-                preRolled = true;
                 break;
               }
-              if (preRolled) break;
             }
           }
         } else if (lookahead <= 0 || lookahead > 0.5) {
@@ -2132,10 +2155,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       for (const clip of clips) {
         let entry = pool.get(clip.clipId);
         // IMMEDIATE TRACK-ELEMENT HEALING:
-        // Check if an existing element for this track/mediaId is already in mediaVideoEls
+        // Check if an existing element for this track/slot is already in mediaVideoEls
         if (!entry) {
-          const trackKey = `${clip.mediaId}::track:${clip.trackId}`;
-          const existingEl = mediaVideoEls.get(trackKey);
+          const tKey0 = `${clip.mediaId}::track:${clip.trackId}::slot:0`;
+          const tKey1 = `${clip.mediaId}::track:${clip.trackId}::slot:1`;
+          const tKeyDirect = `${clip.mediaId}::track:${clip.trackId}`;
+          const existingEl = mediaVideoEls.get(tKey0) || mediaVideoEls.get(tKey1) || mediaVideoEls.get(tKeyDirect);
           if (existingEl) {
             entry = { el: existingEl, clipId: clip.clipId, mediaId: clip.mediaId, type: clip.trackType };
             pool.set(clip.clipId, entry);
@@ -2362,16 +2387,19 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               entry.audioCtx.resume().catch(() => {});
             }
 
-            if (el.seeking) {
+                        if (el.seeking) {
               // Decoder is actively in-flight seeking a keyframe.
               // CRITICAL: NEVER mutate el.playbackRate or call el.play() while el.seeking === true.
               // In Chromium, modifying playbackRate or issuing play() while seeking interrupts
               // the hardware decoder pipeline, keeping seeking=true and readyState=1 indefinitely.
-              // Watchdog: recover zombie seeks (> 450ms without 'seeked' event)
-              const seekStart = seekStartTimeRef.current.get(clip.clipId);
-              if (seekStart && (performance.now() - seekStart > 450)) {
-                seekStartTimeRef.current.delete(clip.clipId);
-                if (el.paused) el.play().catch(() => {});
+              const seekStart = (el as any)._seekStartTime || seekStartTimeRef.current.get(clip.clipId);
+              if (seekStart && (performance.now() - seekStart > 800)) {
+                // If the element has been stalled in seek for > 800ms, retry keyframe snap without play()
+                if (typeof (el as any).fastSeek === 'function') {
+                  (el as any).fastSeek(mediaTime);
+                }
+                (el as any)._seekStartTime = performance.now();
+                seekStartTimeRef.current.set(clip.clipId, performance.now());
               }
             } else if (justActivated || Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD) {
               // Skip the hard seek if the element is ALREADY at (or very near)
@@ -2395,15 +2423,18 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 }
                 return false;
               })();
-              const isAlreadyRolling = !el.paused && Math.abs(rawDrift) < VIDEO_HARD_SEEK_THRESHOLD;
-              if (justActivated && isAlreadyRolling) {
-                // Crossing a split boundary seamlessly: already rolling and near target. Do NOT seek!
+                            const isAlreadyRolling = !el.paused && Math.abs(rawDrift) < VIDEO_HARD_SEEK_THRESHOLD;
+              const isNearTarget = Math.abs(rawDrift) < 0.15;
+              if (justActivated && (isAlreadyRolling || isNearTarget)) {
+                // Crossing a cut seamlessly: already rolling or pre-rolled to target frame!
+                // Do NOT issue a hard seek! Let PLL handle micro-drift (< 0.15s).
               } else {
-                const effectiveThreshold = isSharedElement ? 0.35 : 0.08;
+                const effectiveThreshold = isSharedElement ? 0.35 : 0.15;
                 if (Math.abs(rawDrift) > effectiveThreshold) {
                   el.currentTime = mediaTime;
                   pendingSeeksRef.current.delete(clip.clipId);
                   seekStartTimeRef.current.set(clip.clipId, performance.now());
+                  (el as any)._seekStartTime = performance.now();
                 }
               }
             } else if (Math.abs(rawDrift) > VIDEO_PLL_THRESHOLD) {
@@ -2502,7 +2533,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
           // Zombie seek check: if element has been seeking for > 400ms without firing seeked,
           // suppress buffering for it so it cannot deadlock playback
-          const seekStart = seekStartTimeRef.current.get(clip.clipId);
+          const seekStart = (el as any)._seekStartTime || seekStartTimeRef.current.get(clip.clipId);
           const isZombieSeek = el.seeking && seekStart !== undefined && (nowMs - seekStart > 400);
 
           if (!isZombieSeek && (el.seeking || (el.readyState < 2 && el.src !== ''))) {

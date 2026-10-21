@@ -434,7 +434,11 @@ export async function renderCanvasEngine({
       for (const track of tracks) {
         if (track.clips.some((c) => c.id === otherId)) {
           const tKey = `${oc.mediaId}::${track.id}`;
+          const tKey0 = `${oc.mediaId}::track:${track.id}::slot:0`;
+          const tKey1 = `${oc.mediaId}::track:${track.id}::slot:1`;
           if (!trackVideoEl.has(tKey)) trackVideoEl.set(tKey, otherEl);
+          if (!trackVideoEl.has(tKey0)) trackVideoEl.set(tKey0, otherEl);
+          if (!trackVideoEl.has(tKey1)) trackVideoEl.set(tKey1, otherEl);
           break;
         }
       }
