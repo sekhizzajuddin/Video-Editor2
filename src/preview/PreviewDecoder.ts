@@ -3,20 +3,21 @@
  *
  * WebCodecs-based frame-on-demand decoder for the preview canvas player.
  * Replaces Chromium's <video> element seeking pipeline with mediabunny's
- * CanvasSink.getCanvas(timestamp) — a frame-accurate, random-access decoder
- * that never enters readyState limbo or seek thrashing.
+ * CanvasSink — a frame-accurate, sequential decoder that never enters
+ * readyState limbo or seek thrashing.
  *
  * Architecture:
  * - One mediabunny Input + CanvasSink per unique media file (keyed by mediaId)
- * - getFrame(mediaId, url, timestamp) returns a CanvasImageSource synchronously
- *   from cache, or asynchronously via decode
- * - LRU frame cache (ImageBitmap) for scrub-back without re-decode
- * - Singleton instance shared across all clips
+ * - Sequential iterator pattern (same as export engine's AssetDecoder) for
+ *   efficient frame-by-frame playback — no re-seeking from keyframes
+ * - Background pre-decode pump fills cache AHEAD of the playhead
+ * - Render loop does SYNCHRONOUS cache lookups only (zero async in render path)
+ * - Falls back to <video> elements during decoder warmup
  *
  * Connected to:
- * - CanvasRenderingEngine.ts: drawSingleClip uses getFrame() instead of videoEl
- * - PreviewCanvasContainer.tsx: pre-render step resolves active clip frames
- * - useMediaPlayback.ts: audio still uses <video> elements; video bypasses them
+ * - CanvasRenderingEngine.ts: drawSingleClip uses cached frames
+ * - PreviewCanvasContainer.tsx: kicks pre-decode pump each tick
+ * - useMediaPlayback.ts: audio still uses <video> elements
  */
 
 import {
@@ -29,6 +30,12 @@ import {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+type WrappedCanvas = {
+  canvas: CanvasImageSource;
+  timestamp: number;
+  duration: number;
+};
 
 interface DecoderEntry {
   mediaId: string;
@@ -46,14 +53,18 @@ interface DecoderEntry {
   loadError: string | null;
   /** Loading promise for dedup */
   loadPromise: Promise<void> | null;
-  /** Reference count — how many active clips are using this decoder */
-  refCount: number;
-  /** Last requested timestamp (for sequential access optimization) */
-  lastRequestedTime: number;
-  /** Serialization tail to prevent overlapping getCanvas() calls */
-  decodeTail: Promise<any>;
   /** The blob source we fetched (kept alive so Input doesn't lose its source) */
   blobSource: InstanceType<typeof BlobSource> | null;
+  /** Whether this entry has been disposed */
+  disposed: boolean;
+
+  // ── Sequential iterator state (mirrors AssetDecoder pattern) ──────────
+  iterator: AsyncIterator<any> | null;
+  current: WrappedCanvas | null;
+  lookahead: WrappedCanvas | null;
+  lastRequestedTime: number;
+  /** Serialization tail to prevent overlapping decode calls */
+  decodeTail: Promise<any>;
 }
 
 interface CachedFrame {
@@ -63,16 +74,13 @@ interface CachedFrame {
   width: number;
   /** Native height of the decoded frame */
   height: number;
-  /** Cache insertion timestamp for LRU eviction */
-  lastUsed: number;
+  /** The source timestamp this frame corresponds to */
+  timestamp: number;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Maximum number of decoded frames to keep in the LRU cache */
-const MAX_CACHED_FRAMES = 60;
 
 /** Maximum concurrent decoder instances (limits GPU/CPU decoder sessions) */
 const MAX_DECODERS = 6;
@@ -85,6 +93,9 @@ const MAX_DECODERS = 6;
  */
 const CACHE_FPS = 30;
 
+/** Maximum cached frames per decoder (ring buffer) */
+const MAX_FRAMES_PER_DECODER = 10;
+
 // ---------------------------------------------------------------------------
 // Singleton
 // ---------------------------------------------------------------------------
@@ -93,14 +104,19 @@ class PreviewDecoderManager {
   /** Map of mediaId → decoder entry */
   private decoders = new Map<string, DecoderEntry>();
 
-  /** LRU frame cache: "${mediaId}:${frameIndex}" → CachedFrame */
-  private frameCache = new Map<string, CachedFrame>();
-
-  /** Eviction order tracking */
-  private frameCacheOrder: string[] = [];
+  /**
+   * Per-decoder frame ring buffer: mediaId → Map<frameIndex, CachedFrame>
+   * Small per-decoder cache (10 frames) — holds the recent sequential run
+   * so the sync render path can grab the latest decoded frame.
+   */
+  private frameCaches = new Map<string, Map<number, CachedFrame>>();
 
   /** Whether WebCodecs / mediabunny is available in this browser */
   private _webCodecsAvailable: boolean | null = null;
+
+  /** Pre-decode pump state */
+  private _pumpRunning = false;
+  private _pumpRafId: number | null = null;
 
   // -------------------------------------------------------------------------
   // Public API
@@ -108,7 +124,6 @@ class PreviewDecoderManager {
 
   /**
    * Check if WebCodecs-based preview decoding is available.
-   * Falls back to false if VideoDecoder is not supported (e.g. Safari < 16.4).
    */
   get isAvailable(): boolean {
     if (this._webCodecsAvailable === null) {
@@ -122,16 +137,12 @@ class PreviewDecoderManager {
   /**
    * Ensure a decoder is loaded for the given media file.
    * Safe to call multiple times — deduplicates via loadPromise.
-   *
-   * @param mediaId  Unique media library ID
-   * @param url      Blob URL or HTTP URL for the media file
    */
   async ensureLoaded(mediaId: string, url: string): Promise<void> {
     if (!this.isAvailable) return;
 
     let entry = this.decoders.get(mediaId);
     if (entry) {
-      // Already loaded or loading
       if (entry.loadPromise) await entry.loadPromise;
       return;
     }
@@ -141,23 +152,7 @@ class PreviewDecoderManager {
       this.evictOldestDecoder();
     }
 
-    entry = {
-      mediaId,
-      url,
-      input: null,
-      videoSink: null,
-      width: 0,
-      height: 0,
-      codec: null,
-      ready: false,
-      loadError: null,
-      loadPromise: null,
-      refCount: 0,
-      lastRequestedTime: -1,
-      decodeTail: Promise.resolve(),
-      blobSource: null,
-    };
-
+    entry = this.createEntry(mediaId, url);
     const loadPromise = this.loadDecoder(entry);
     entry.loadPromise = loadPromise;
     this.decoders.set(mediaId, entry);
@@ -166,114 +161,56 @@ class PreviewDecoderManager {
   }
 
   /**
-   * Get a decoded video frame at the given timestamp.
+   * Kick the background pre-decode pump for active clips.
+   * Called ONCE per tick from PreviewCanvasContainer, BEFORE renderCanvasEngine.
    *
-   * Returns immediately from cache if available, otherwise decodes on demand.
-   * The returned object includes the drawable source and its native dimensions.
+   * This fires-and-forgets async decodes that populate the frame cache.
+   * The render pass then reads from cache synchronously.
    *
-   * @param mediaId          Media library ID
-   * @param url              Blob URL (used for lazy-load if not yet loaded)
-   * @param timestampSeconds Source-time in seconds (after trimStart + speed adjustment)
-   * @returns                Decoded frame, or null if decoder unavailable/errored
+   * @param requests Active clips needing frames this tick
    */
-  async getFrame(
-    mediaId: string,
-    url: string,
-    timestampSeconds: number
-  ): Promise<CachedFrame | null> {
-    if (!this.isAvailable) return null;
+  pumpFrames(
+    requests: Array<{ mediaId: string; url: string; timestampSeconds: number; clipId: string }>
+  ): void {
+    if (!this.isAvailable || requests.length === 0) return;
 
-    // Lazy-load the decoder if not yet loaded
-    let entry = this.decoders.get(mediaId);
-    if (!entry) {
-      await this.ensureLoaded(mediaId, url);
-      entry = this.decoders.get(mediaId);
+    // Fire all decodes in parallel — don't await them
+    for (const req of requests) {
+      this.decodeFrameAsync(req.mediaId, req.url, req.timestampSeconds);
     }
-    if (!entry || !entry.ready || entry.loadError) return null;
-
-    // Check cache first
-    const frameIndex = Math.round(timestampSeconds * CACHE_FPS);
-    const cacheKey = `${mediaId}:${frameIndex}`;
-    const cached = this.frameCache.get(cacheKey);
-    if (cached) {
-      cached.lastUsed = performance.now();
-      return cached;
-    }
-
-    // Decode on demand — serialize to avoid overlapping getCanvas() calls
-    // which can confuse the internal WebCodecs state machine
-    const decodePromise = entry.decodeTail.then(async () => {
-      // Double-check cache (another frame request might have filled it)
-      const recheck = this.frameCache.get(cacheKey);
-      if (recheck) {
-        recheck.lastUsed = performance.now();
-        return recheck;
-      }
-
-      try {
-        const wrapped = await entry!.videoSink!.getCanvas(timestampSeconds);
-        if (!wrapped || !wrapped.canvas) return null;
-
-        const frame: CachedFrame = {
-          drawable: wrapped.canvas,
-          width: (wrapped.canvas as any).width || entry!.width,
-          height: (wrapped.canvas as any).height || entry!.height,
-          lastUsed: performance.now(),
-        };
-
-        this.cacheFrame(cacheKey, frame);
-        return frame;
-      } catch (err: any) {
-        console.warn(`[PreviewDecoder] decode error for ${mediaId} at ${timestampSeconds}s:`, err?.message || err);
-        return null;
-      }
-    });
-
-    entry.decodeTail = decodePromise.then(() => undefined, () => undefined);
-    return decodePromise;
   }
 
   /**
-   * Synchronous cache-only lookup. Returns the frame if it's already
-   * decoded and in the LRU cache, null otherwise. Used by the fast
-   * rendering path to avoid async overhead when frames are pre-decoded.
+   * Synchronous cache-only lookup. Returns the decoded frame if already
+   * in the ring buffer, null otherwise. This is the ONLY method called
+   * during the render pass — zero async, zero blocking.
    */
   getFrameSync(mediaId: string, timestampSeconds: number): CachedFrame | null {
+    const cache = this.frameCaches.get(mediaId);
+    if (!cache) return null;
+
     const frameIndex = Math.round(timestampSeconds * CACHE_FPS);
-    const cacheKey = `${mediaId}:${frameIndex}`;
-    const cached = this.frameCache.get(cacheKey);
-    if (cached) {
-      cached.lastUsed = performance.now();
-      return cached;
-    }
-    return null;
-  }
+    const exact = cache.get(frameIndex);
+    if (exact) return exact;
 
-  /**
-   * Pre-decode frames for a batch of active clips. Called once per tick,
-   * before renderCanvasEngine, so all frames are cache-hot for synchronous
-   * lookup during the render pass.
-   *
-   * @param requests Array of { mediaId, url, timestampSeconds }
-   * @returns Map of mediaId:frameIndex → CachedFrame
-   */
-  async preDecodeFrames(
-    requests: Array<{ mediaId: string; url: string; timestampSeconds: number }>
-  ): Promise<Map<string, CachedFrame>> {
-    const results = new Map<string, CachedFrame>();
-    if (!this.isAvailable || requests.length === 0) return results;
+    // Fuzzy: try ±1 frame (covers sub-frame jitter)
+    const prev = cache.get(frameIndex - 1);
+    if (prev) return prev;
+    const next = cache.get(frameIndex + 1);
+    if (next) return next;
 
-    // Fire all decodes in parallel
-    const promises = requests.map(async (req) => {
-      const frame = await this.getFrame(req.mediaId, req.url, req.timestampSeconds);
-      if (frame) {
-        const frameIndex = Math.round(req.timestampSeconds * CACHE_FPS);
-        results.set(`${req.mediaId}:${frameIndex}`, frame);
+    // Last resort: return the closest cached frame (for warmup period)
+    let bestFrame: CachedFrame | null = null;
+    let bestDist = Infinity;
+    for (const [idx, frame] of cache) {
+      const dist = Math.abs(idx - frameIndex);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestFrame = frame;
       }
-    });
-
-    await Promise.all(promises);
-    return results;
+    }
+    // Only use if within 5 frames (~167ms at 30fps)
+    return bestDist <= 5 ? bestFrame : null;
   }
 
   /**
@@ -285,74 +222,25 @@ class PreviewDecoderManager {
   }
 
   /**
-   * Get the native video dimensions for a loaded media file.
-   */
-  getDimensions(mediaId: string): { width: number; height: number } | null {
-    const entry = this.decoders.get(mediaId);
-    if (!entry?.ready) return null;
-    return { width: entry.width, height: entry.height };
-  }
-
-  /**
-   * Increment reference count (a clip is actively using this decoder).
-   */
-  addRef(mediaId: string): void {
-    const entry = this.decoders.get(mediaId);
-    if (entry) entry.refCount++;
-  }
-
-  /**
-   * Decrement reference count. When it hits 0 and we're at capacity,
-   * the decoder becomes eligible for eviction.
-   */
-  releaseRef(mediaId: string): void {
-    const entry = this.decoders.get(mediaId);
-    if (entry && entry.refCount > 0) entry.refCount--;
-  }
-
-  /**
    * Dispose a specific decoder and clear its cached frames.
    */
   disposeDecoder(mediaId: string): void {
     const entry = this.decoders.get(mediaId);
     if (!entry) return;
-
     this.cleanupEntry(entry);
     this.decoders.delete(mediaId);
-
-    // Clear cached frames for this media
-    const keysToDelete: string[] = [];
-    for (const key of this.frameCache.keys()) {
-      if (key.startsWith(mediaId + ':')) keysToDelete.push(key);
-    }
-    for (const key of keysToDelete) {
-      this.frameCache.delete(key);
-    }
-    this.frameCacheOrder = this.frameCacheOrder.filter(
-      (k) => !k.startsWith(mediaId + ':')
-    );
+    this.frameCaches.delete(mediaId);
   }
 
   /**
    * Dispose all decoders and clear the entire frame cache.
-   * Called on project close or major state reset.
    */
   disposeAll(): void {
     for (const entry of this.decoders.values()) {
       this.cleanupEntry(entry);
     }
     this.decoders.clear();
-    this.frameCache.clear();
-    this.frameCacheOrder = [];
-  }
-
-  /**
-   * Clear the frame cache without disposing decoders.
-   * Useful when scrubbing rapidly and cache is stale.
-   */
-  clearCache(): void {
-    this.frameCache.clear();
-    this.frameCacheOrder = [];
+    this.frameCaches.clear();
   }
 
   /**
@@ -360,33 +248,203 @@ class PreviewDecoderManager {
    */
   getDiagnostics(): {
     decoderCount: number;
-    cachedFrames: number;
-    decoders: Array<{ mediaId: string; ready: boolean; error: string | null; refCount: number; codec: string | null }>;
+    totalCachedFrames: number;
+    decoders: Array<{ mediaId: string; ready: boolean; error: string | null; codec: string | null; cachedFrames: number }>;
   } {
-    const decoderInfo: Array<{ mediaId: string; ready: boolean; error: string | null; refCount: number; codec: string | null }> = [];
+    const decoderInfo: Array<{ mediaId: string; ready: boolean; error: string | null; codec: string | null; cachedFrames: number }> = [];
+    let total = 0;
     for (const [id, entry] of this.decoders) {
+      const cached = this.frameCaches.get(id)?.size || 0;
+      total += cached;
       decoderInfo.push({
         mediaId: id,
         ready: entry.ready,
         error: entry.loadError,
-        refCount: entry.refCount,
         codec: entry.codec,
+        cachedFrames: cached,
       });
     }
-    return {
-      decoderCount: this.decoders.size,
-      cachedFrames: this.frameCache.size,
-      decoders: decoderInfo,
-    };
+    return { decoderCount: this.decoders.size, totalCachedFrames: total, decoders: decoderInfo };
   }
 
   // -------------------------------------------------------------------------
-  // Internal
+  // Internal: Sequential decode (mirrors AssetDecoder pattern)
   // -------------------------------------------------------------------------
+
+  /**
+   * Fire-and-forget async decode. Populates the frame cache for the
+   * given timestamp. Uses sequential iterator for efficient playback.
+   */
+  private async decodeFrameAsync(
+    mediaId: string,
+    url: string,
+    timestampSeconds: number
+  ): Promise<void> {
+    // Ensure loaded (no-op if already loaded)
+    let entry = this.decoders.get(mediaId);
+    if (!entry) {
+      // Start loading in background — will be available next tick
+      this.ensureLoaded(mediaId, url);
+      return;
+    }
+    if (entry.loadPromise) {
+      // Still loading — skip this tick, will be ready later
+      return;
+    }
+    if (!entry.ready || entry.loadError || entry.disposed) return;
+
+    // Serialize: don't overlap decode calls on the same decoder
+    const decodeWork = entry.decodeTail.then(async () => {
+      if (entry!.disposed) return;
+      try {
+        const frame = await this.decodeSequential(entry!, timestampSeconds);
+        if (frame) {
+          this.cacheFrame(mediaId, timestampSeconds, {
+            drawable: frame,
+            width: (frame as any).width || entry!.width,
+            height: (frame as any).height || entry!.height,
+            timestamp: timestampSeconds,
+          });
+        }
+      } catch (err: any) {
+        // Non-fatal — render will fall back to <video> element
+        if (!entry!.disposed) {
+          console.warn(`[PreviewDecoder] decode error ${mediaId} @${timestampSeconds.toFixed(3)}s:`, err?.message || err);
+        }
+      }
+    });
+
+    entry.decodeTail = decodeWork.then(() => undefined, () => undefined);
+  }
+
+  /**
+   * Sequential decode: advance the iterator to the requested timestamp.
+   * Keeps decoder state between calls for efficient frame-by-frame playback.
+   * Only restarts the iterator on backwards seeks or large forward jumps (>2.5s).
+   *
+   * This is the same algorithm used by the export engine's AssetDecoder.
+   */
+  private async decodeSequential(
+    entry: DecoderEntry,
+    timestampSeconds: number
+  ): Promise<CanvasImageSource | null> {
+    if (!entry.videoSink || entry.disposed) return null;
+
+    // Initialize iterator on first use
+    if (!entry.iterator) {
+      this.resetIterator(entry, timestampSeconds);
+    }
+
+    // Backwards seek or large forward jump → restart iterator at new position
+    // This prevents walking thousands of frames when seeking across the timeline
+    if (
+      entry.lastRequestedTime >= 0 &&
+      (timestampSeconds + 0.0005 < entry.lastRequestedTime ||
+       timestampSeconds - entry.lastRequestedTime > 2.5)
+    ) {
+      this.resetIterator(entry, timestampSeconds);
+    }
+    entry.lastRequestedTime = timestampSeconds;
+
+    // Walk the iterator forward until we have the frame at/past our timestamp
+    let iterations = 0;
+    const MAX_ITERATIONS = 120; // Safety: don't walk more than 4 seconds at 30fps
+
+    while (!entry.disposed && iterations < MAX_ITERATIONS) {
+      iterations++;
+
+      if (!entry.lookahead) {
+        if (!entry.iterator) break;
+        try {
+          const next = await entry.iterator.next();
+          if (next.done || !next.value) break;
+          entry.lookahead = next.value as WrappedCanvas;
+        } catch {
+          break;
+        }
+      }
+
+      // Keep the latest frame whose timestamp ≤ requested time
+      if (entry.lookahead.timestamp <= timestampSeconds + 0.0005) {
+        entry.current = entry.lookahead;
+        entry.lookahead = null;
+        continue;
+      }
+      break;
+    }
+
+    if (entry.current) return entry.current.canvas;
+    if (entry.lookahead) return entry.lookahead.canvas;
+
+    // Fallback: random-access decode (first frame, or after iterator exhaustion)
+    try {
+      const wrapped = await entry.videoSink.getCanvas(timestampSeconds);
+      if (wrapped?.canvas) return wrapped.canvas;
+    } catch {}
+
+    return null;
+  }
+
+  private resetIterator(entry: DecoderEntry, startTime: number = 0): void {
+    try { entry.iterator?.return?.(); } catch {}
+    entry.iterator = entry.videoSink &&
+      typeof (entry.videoSink as any).canvases === 'function'
+        ? (entry.videoSink as any).canvases(startTime)[Symbol.asyncIterator]()
+        : null;
+    entry.current = null;
+    entry.lookahead = null;
+    entry.lastRequestedTime = startTime;
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal: Frame cache (per-decoder ring buffer)
+  // -------------------------------------------------------------------------
+
+  private cacheFrame(mediaId: string, timestamp: number, frame: CachedFrame): void {
+    let cache = this.frameCaches.get(mediaId);
+    if (!cache) {
+      cache = new Map<number, CachedFrame>();
+      this.frameCaches.set(mediaId, cache);
+    }
+
+    const frameIndex = Math.round(timestamp * CACHE_FPS);
+    cache.set(frameIndex, frame);
+
+    // Evict oldest if over capacity
+    if (cache.size > MAX_FRAMES_PER_DECODER) {
+      const firstKey = cache.keys().next().value;
+      if (firstKey !== undefined) cache.delete(firstKey);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal: Decoder lifecycle
+  // -------------------------------------------------------------------------
+
+  private createEntry(mediaId: string, url: string): DecoderEntry {
+    return {
+      mediaId,
+      url,
+      input: null,
+      videoSink: null,
+      width: 0,
+      height: 0,
+      codec: null,
+      ready: false,
+      loadError: null,
+      loadPromise: null,
+      blobSource: null,
+      disposed: false,
+      iterator: null,
+      current: null,
+      lookahead: null,
+      lastRequestedTime: -1,
+      decodeTail: Promise.resolve(),
+    };
+  }
 
   private async loadDecoder(entry: DecoderEntry): Promise<void> {
     try {
-      // Fetch the media blob
       const response = await fetch(entry.url);
       if (!response.ok) {
         entry.loadError = `Fetch failed (${response.status})`;
@@ -394,10 +452,11 @@ class PreviewDecoderManager {
       }
       const blob = await response.blob();
 
+      if (entry.disposed) return;
+
       entry.blobSource = new BlobSource(blob);
       entry.input = new Input({ source: entry.blobSource, formats: ALL_FORMATS });
 
-      // Get the primary video track
       const videoTrack = await entry.input.getPrimaryVideoTrack();
       if (!videoTrack) {
         entry.loadError = 'No video track found';
@@ -405,12 +464,10 @@ class PreviewDecoderManager {
         return;
       }
 
-      // Check codec support
       let canDecode = true;
       try {
         canDecode = await videoTrack.canDecode();
       } catch {
-        // If canDecode throws, assume support and let actual decode fail
         canDecode = true;
       }
       if (!canDecode) {
@@ -419,7 +476,6 @@ class PreviewDecoderManager {
         return;
       }
 
-      // Get codec info
       try {
         entry.codec = await videoTrack.getCodec();
       } catch {
@@ -436,16 +492,15 @@ class PreviewDecoderManager {
         entry.height = 1080;
       }
 
-      // Create the CanvasSink for frame-on-demand decoding
-      // Use software decoding to avoid exhausting hardware decoder sessions
-      // (the export engine may also be running hardware decoders)
+      // Create CanvasSink — prefer software decode to avoid exhausting
+      // hardware decoder sessions (export engine may use hardware decoders)
       const decoderMode = entry.codec === 'hevc' ? 'prefer-hardware' : 'prefer-software';
       entry.videoSink = new CanvasSink(videoTrack, {
         decoderOptions: {
           hardwareAcceleration: decoderMode as HardwarePreference,
           optimizeForLatency: true,
         },
-        poolSize: 4, // Small pool for preview (4 reusable canvases)
+        poolSize: 4,
       });
 
       entry.ready = true;
@@ -462,37 +517,14 @@ class PreviewDecoderManager {
     }
   }
 
-  private cacheFrame(key: string, frame: CachedFrame): void {
-    // Evict oldest if at capacity
-    while (this.frameCache.size >= MAX_CACHED_FRAMES && this.frameCacheOrder.length > 0) {
-      const oldestKey = this.frameCacheOrder.shift()!;
-      this.frameCache.delete(oldestKey);
-    }
-
-    this.frameCache.set(key, frame);
-    this.frameCacheOrder.push(key);
-  }
-
   private evictOldestDecoder(): void {
-    // Find the decoder with refCount === 0 and lowest lastRequestedTime
     let evictId: string | null = null;
     let oldestTime = Infinity;
 
     for (const [id, entry] of this.decoders) {
-      if (entry.refCount === 0 && entry.lastRequestedTime < oldestTime) {
+      if (entry.lastRequestedTime < oldestTime) {
         oldestTime = entry.lastRequestedTime;
         evictId = id;
-      }
-    }
-
-    // If all have refs, evict the one with lowest refCount
-    if (!evictId) {
-      let lowestRef = Infinity;
-      for (const [id, entry] of this.decoders) {
-        if (entry.refCount < lowestRef) {
-          lowestRef = entry.refCount;
-          evictId = id;
-        }
       }
     }
 
@@ -503,7 +535,13 @@ class PreviewDecoderManager {
   }
 
   private cleanupEntry(entry: DecoderEntry): void {
+    entry.disposed = true;
     entry.ready = false;
+
+    try { entry.iterator?.return?.(); } catch {}
+    entry.iterator = null;
+    entry.current = null;
+    entry.lookahead = null;
 
     if (entry.input) {
       try {
@@ -528,7 +566,7 @@ class PreviewDecoderManager {
 // Singleton export
 // ---------------------------------------------------------------------------
 
-/** Global preview decoder instance — import this in any module that needs frames */
+/** Global preview decoder instance */
 export const previewDecoder = new PreviewDecoderManager();
 
 export type { CachedFrame };

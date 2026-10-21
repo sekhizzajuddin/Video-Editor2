@@ -522,11 +522,12 @@ export function PreviewCanvasContainer() {
     const deps = renderDepsRef.current;
     const ct = deps.currentTime;
 
-    // ── WebCodecs pre-decode pass ──────────────────────────────────────────
-    // Resolve all active video clip frames BEFORE the synchronous render pass,
-    // so drawSingleClip can pick them up from the decodedFrames map without
-    // awaiting async decode mid-render. This is the key architectural change
-    // that eliminates <video> element readyState/seeking pipeline thrashing.
+    // ── WebCodecs pre-decode pump (FIRE-AND-FORGET) ────────────────────────
+    // Kick async background decodes for all active video clips. These populate
+    // the per-decoder frame cache. The actual render pass below only does
+    // SYNCHRONOUS cache lookups via previewDecoder.getFrameSync() — zero async
+    // in the hot render path. On the first few frames (decoder warmup), the
+    // cache will be empty and drawSingleClip falls back to <video> elements.
     if (previewDecoder.isAvailable) {
       const tracks = deps.tracks as TimelineTrack[];
       const mediaLibrary = deps.mediaLibrary as MediaItem[];
@@ -545,9 +546,7 @@ export function PreviewCanvasContainer() {
           const mediaItem = mediaMap.get(clip.mediaId);
           if (!mediaItem || mediaItem.type !== 'video') continue;
 
-          // Calculate source media time (same formula as useMediaPlayback)
           const mediaTime = getMediaTimeForClip(clip as any, ct);
-
           decodeRequests.push({
             clipId: clip.id,
             mediaId: mediaItem.id,
@@ -557,26 +556,20 @@ export function PreviewCanvasContainer() {
         }
       }
 
+      // Fire-and-forget: pump decodes in background, don't await
       if (decodeRequests.length > 0) {
-        // Fire all decodes in parallel and build the clipId → CachedFrame map
-        const decodedFrames = new Map<string, CachedFrame>();
-        const promises = decodeRequests.map(async (req) => {
-          try {
-            const frame = await previewDecoder.getFrame(req.mediaId, req.url, req.timestampSeconds);
-            if (frame) {
-              decodedFrames.set(req.clipId, frame);
-            }
-          } catch {
-            // Silently fall back to <video> element for this clip
-          }
-        });
-        await Promise.all(promises);
-
-        // Attach decoded frames to renderDeps for this render pass
-        deps.decodedFrames = decodedFrames;
-      } else {
-        deps.decodedFrames = undefined;
+        previewDecoder.pumpFrames(decodeRequests);
       }
+
+      // Build sync decodedFrames map from cache for THIS render pass
+      const decodedFrames = new Map<string, CachedFrame>();
+      for (const req of decodeRequests) {
+        const frame = previewDecoder.getFrameSync(req.mediaId, req.timestampSeconds);
+        if (frame) {
+          decodedFrames.set(req.clipId, frame);
+        }
+      }
+      deps.decodedFrames = decodedFrames.size > 0 ? decodedFrames : undefined;
     }
 
     await renderCanvasEngine({
