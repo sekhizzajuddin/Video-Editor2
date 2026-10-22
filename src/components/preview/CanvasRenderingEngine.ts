@@ -345,9 +345,12 @@ export async function renderCanvasEngine({
   // On scrub-end, the 'procut-scrub-finalize' path triggers a full-quality redraw.
   if (isScrubbing) {
     ctx.imageSmoothingEnabled = false;
+  } else if (isPlaying) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'low'; // Fast hardware bilinear filtering for 60fps throughput
   } else {
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingQuality = 'high'; // Full high-quality bicubic when paused
   }
   const previewQuality = settings?.previewQuality ?? useEditorStore.getState().settings?.previewQuality ?? 'full';
   const previewMode = settings?.previewMode ?? useEditorStore.getState().settings?.previewMode ?? 'auto';
