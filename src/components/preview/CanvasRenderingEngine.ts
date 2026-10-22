@@ -1586,36 +1586,30 @@ export async function renderCanvasEngine({
       const mediaTime = getMediaTimeForClip(clip as any, currentTime);
 
       if (mediaItem.type === 'video') {
-        // ── WebCodecs decoded frame (primary path) ──────────────────────
-        // PreviewDecoder bypasses <video> element seeking entirely.
-        // Frames are decoded on-demand via mediabunny's CanvasSink and
-        // cached in an LRU — no readyState limbo, no PLL drift, no seek
-        // thrashing. Falls back to <video> elements only when the decoder
-        // hasn't loaded yet (first few frames) or for browsers without
-        // WebCodecs support.
-        const decodedFrames = renderDeps.decodedFrames;
-        const decodedFrame = decodedFrames?.get(clip.id) || customCanvasPlayer.getFrameSync(clip.id, mediaTime);
-        if (decodedFrame && decodedFrame.drawable) {
-          // Use the WebCodecs-decoded frame directly
-          vw = decodedFrame.width;
-          vh = decodedFrame.height;
-          hasRealMedia = true;
-          // videoEl stays null — sourceElement will use decodedFrame.drawable below
-        } else if (!customCanvasPlayer.isSupported) {
-          // Fallback: <video> element pipeline (used ONLY when custom player is not supported)
-          videoEl = videoElements.get(clip.id) || null;
+        // ── VEED-Style Hardware Decoded Video Element (Primary Engine) ──────────
+        // Chromium's GPU hardware video decoder decodes frames directly on the GPU ASIC.
+        // Direct drawing from HTMLVideoElement eliminates CPU buffer roundtrips and RAM bloat.
+        videoEl = videoElements.get(clip.id) || null;
+        if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
+        if (!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) {
+          videoEl =
+            (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
+            (!clip.__isTransitionLayer && clip.mediaId && clip.trackId ? trackVideoEl.get(`${clip.mediaId}::${clip.trackId}`) : null) ||
+            (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null) ||
+            null;
           if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
-          if (!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) {
-            videoEl =
-              (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
-              (!clip.__isTransitionLayer && clip.mediaId && clip.trackId ? trackVideoEl.get(`${clip.mediaId}::${clip.trackId}`) : null) ||
-              (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null) ||
-              null;
-            if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
-          }
-          if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
-            vw = videoEl.videoWidth;
-            vh = videoEl.videoHeight;
+        }
+        if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
+          vw = videoEl.videoWidth;
+          vh = videoEl.videoHeight;
+          hasRealMedia = true;
+        } else {
+          // Fallback to pre-decoded frame if video element is not ready
+          const decodedFrames = renderDeps.decodedFrames;
+          const decodedFrame = decodedFrames?.get(clip.id) || customCanvasPlayer.getFrameSync(clip.id, mediaTime);
+          if (decodedFrame && decodedFrame.drawable) {
+            vw = decodedFrame.width;
+            vh = decodedFrame.height;
             hasRealMedia = true;
           }
         }
@@ -1639,14 +1633,14 @@ export async function renderCanvasEngine({
       dy = -dh / 2;
 
       if (hasRealMedia) {
-        // Use WebCodecs-decoded frame if available, otherwise fall back to video/image element
+        // Use hardware video element directly; fallback to decoded frame
         const decodedFrame = renderDeps.decodedFrames?.get(clip.id) || customCanvasPlayer.getFrameSync(clip.id, mediaTime);
         let sourceElement: CanvasImageSource | null = null;
         if (mediaItem.type === 'video') {
-          if (decodedFrame && decodedFrame.drawable) {
-            sourceElement = decodedFrame.drawable;
-          } else if (videoEl instanceof HTMLVideoElement && videoEl.videoWidth > 0) {
+          if (videoEl instanceof HTMLVideoElement && videoEl.videoWidth > 0) {
             sourceElement = videoEl;
+          } else if (decodedFrame && decodedFrame.drawable) {
+            sourceElement = decodedFrame.drawable;
           }
         } else {
           sourceElement = imageEl;

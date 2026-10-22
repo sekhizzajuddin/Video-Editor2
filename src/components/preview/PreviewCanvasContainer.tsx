@@ -42,6 +42,7 @@ import { getPlaybackTime, setPlaybackTime, subscribePlaybackTime, getTrimPreview
 import { isPreviewSuspendedForExport } from '@/utils/previewSuspension';
 import { getOverlayMapping } from './previewMath';
 import { customCanvasPlayer, type CustomDecodedFrame } from '@/preview/CustomCanvasPlayer';
+import { veedEngine } from '@/preview/veedPlaybackEngine';
 import { getMediaTimeForClip } from '@/utils/speedRamp';
 import { MediaPoolDebugOverlay } from './MediaPoolDebugOverlay';
 import { isMediaDebugEnabled } from '@/utils/mediaPoolContainer';
@@ -522,77 +523,20 @@ export function PreviewCanvasContainer() {
     const deps = renderDepsRef.current;
     const ct = deps.currentTime;
 
-    // ── WebCodecs pre-decode pump (FIRE-AND-FORGET) ────────────────────────
-    // Kick async background decodes for all active video clips. These populate
-    // the per-decoder frame cache. The actual render pass below only does
-    // SYNCHRONOUS cache lookups via previewDecoder.getFrameSync() — zero async
-    // in the hot render path. On the first few frames (decoder warmup), the
-    // cache will be empty and drawSingleClip falls back to <video> elements.
-    if (customCanvasPlayer.isSupported) {
-      const tracks = deps.tracks as TimelineTrack[];
-      const mediaLibrary = deps.mediaLibrary as MediaItem[];
-      const mediaMap = new Map<string, MediaItem>();
-      for (const m of mediaLibrary) mediaMap.set(m.id, m);
-
-      const pumpRequests: Array<{
-        clipId: string;
-        mediaId: string;
-        url: string;
-        mediaTime: number;
-        isPrimaryTrack?: boolean;
-      }> = [];
-
-      const primaryVideoTrack = tracks.find((t) => t.type === 'video' && !t.hidden);
-      const primaryTrackId = primaryVideoTrack?.id;
-
-      for (const track of tracks) {
-        if (track.hidden || track.type !== 'video') continue;
-        const isPrimaryTrack = track.id === primaryTrackId;
-
-        for (const clip of track.clips) {
-          if (clip.disabled) continue;
-          const clipEnd = clip.startTime + clip.duration;
-
-          // Include active clips and upcoming clips within 1.0s (for pre-roll)
-          const isActive = ct >= clip.startTime && ct < clipEnd + 0.001;
-          const isUpcoming = ct < clip.startTime && clip.startTime - ct <= 1.0;
-
-          if (!isActive && !isUpcoming) continue;
-
-          const mediaItem = mediaMap.get(clip.mediaId);
-          if (!mediaItem || mediaItem.type !== 'video' || !mediaItem.url) continue;
-
-          const targetTime = isActive ? ct : clip.startTime;
-          const mediaTime = getMediaTimeForClip(clip as any, targetTime);
-          pumpRequests.push({
-            clipId: clip.id,
-            mediaId: mediaItem.id,
-            url: mediaItem.url,
-            mediaTime,
-            isPrimaryTrack,
-          });
+    // ── VEED Engine Active Tracks Census ──────────────────────────────────
+    const tracks = deps.tracks as TimelineTrack[];
+    const activeVideoClipIds: string[] = [];
+    for (const track of tracks) {
+      if (track.hidden || track.type !== 'video') continue;
+      for (const clip of track.clips) {
+        if (clip.disabled) continue;
+        const clipEnd = clip.startTime + clip.duration;
+        if (ct >= clip.startTime && ct < clipEnd + 0.001) {
+          activeVideoClipIds.push(clip.id);
         }
       }
-
-      // 1. Kick non-blocking background lookahead pump
-      customCanvasPlayer.pumpLookahead(pumpRequests);
-
-      // 2. Query ready frames synchronously for all active clips
-      const decodedFrames = new Map<string, CustomDecodedFrame>();
-      for (const req of pumpRequests) {
-        const frame = customCanvasPlayer.getFrameSync(req.clipId, req.mediaTime);
-        if (frame) {
-          decodedFrames.set(req.clipId, frame);
-        } else if (!fresh.isPlaying) {
-          // When paused/scrubbing: issue direct exact seek if frame not in buffer yet
-          // (seekExact is debounced to max 1 per 60ms per clip in CustomCanvasPlayer)
-          customCanvasPlayer.seekExact(req.clipId, req.mediaId, req.url, req.mediaTime).then((f) => {
-            if (f) framePendingRef.current = true;
-          });
-        }
-      }
-      deps.decodedFrames = decodedFrames.size > 0 ? decodedFrames : undefined;
     }
+    veedEngine.setActiveClips(activeVideoClipIds);
 
     await renderCanvasEngine({
       canvas,
@@ -703,6 +647,16 @@ export function PreviewCanvasContainer() {
             // Constant, silky-smooth real-time advance at display refresh rate
             const advance = dt * speed * dir;
             newTime = currentTimeRef.current + advance;
+
+            // VEED Hardware Clock Anchor:
+            // When playing 1x forward and the primary hardware video decoder reports its presentation time via rVFC,
+            // gently slew the playhead toward the hardware presentation time to eliminate drift
+            if (dir === 1 && speed === 1) {
+              const hardwareTarget = getPrimaryMediaSyncTarget();
+              if (hardwareTarget !== null && Math.abs(hardwareTarget - newTime) < 0.20) {
+                newTime += (hardwareTarget - newTime) * 0.08;
+              }
+            }
           }
 
           if (newTime !== currentTimeRef.current) {

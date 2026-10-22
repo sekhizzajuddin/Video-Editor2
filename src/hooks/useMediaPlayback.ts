@@ -1,4 +1,11 @@
 import { customCanvasPlayer } from '@/preview/CustomCanvasPlayer';
+import {
+  veedEngine,
+  veedAbortableSeek,
+  veedSyncSecondaryTrack,
+  veedSwapOrSeekReadyElement,
+  VEED_CONSTANTS,
+} from '@/preview/veedPlaybackEngine';
 /**
  * useMediaPlayback.ts (Refactored)
  *
@@ -2105,30 +2112,21 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       // ---- 1. Scrubbing: pause everything, but keep ACTIVE video elements
       // following the scrub position so the preview updates in REAL TIME.
-      // (Previously we only paused here and returned — the video elements were
-      // never seeked until the drag ended, so the canvas kept drawing the
-      // pre-scrub frame the whole drag and only repainted after release.) ----
+      // (Using VEED's 'Q' abortable non-blocking seeking engine to eliminate scrub freezes)
       if (scrubbing) {
         for (const [, entry] of pool) {
           if (!entry.el.paused) entry.el.pause();
         }
-        // WEBCODECS BYPASS: When the custom canvas player handles visual
-        // rendering, we don't need to seek <video> elements during scrub.
-        // WebCodecs seekExact() handles frame display directly. Seeking video
-        // elements during scrub competes for hardware decoder sessions and
-        // causes visible stutter on integrated GPUs.
-        if (!customCanvasPlayer.isSupported) {
-        // During trim, ct is already getEffectivePreviewTime() (amber playhead position)
         const scrubTime = ct;
         for (const clip of clips) {
-        let entry = pool.get(clip.clipId);
-        if (!entry) {
-          entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
-        }
-        if (!entry || entry.type !== 'video') continue;
-        const mediaItem = mediaMap.get(clip.mediaId);
-        const maxDuration = mediaItem ? mediaItem.duration : 10000;
-        const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
+          let entry = pool.get(clip.clipId);
+          if (!entry) {
+            entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
+          }
+          if (!entry || entry.type !== 'video') continue;
+          const mediaItem = mediaMap.get(clip.mediaId);
+          const maxDuration = mediaItem ? mediaItem.duration : 10000;
+          const mediaTime = Math.max(0, Math.min(maxDuration, getMediaTimeForClip({
             id: clip.clipId,
             startTime: clip.absStartTime,
             duration: clip.clipDuration,
@@ -2141,23 +2139,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             freezeFrame: clip.freezeFrame,
           }, scrubTime)));
           const el = entry.el;
-          // Don't fight an in-flight seek — the element's 'seeked' listener
-          // triggers a canvas repaint the moment the new frame decodes.
-          // PERF: fastSeek snaps to the nearest keyframe without exact-frame
-          // decode — 2-10x faster per scrub tick. Scrub tolerates imprecision
-          // (the scrub-end finalize path re-seeks exactly + full-quality
-          // redraw), so intermediate ticks don't need exact frames.
-          if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.03) {
-            if (typeof (el as HTMLVideoElement).fastSeek === 'function') {
-              (el as HTMLVideoElement).fastSeek(mediaTime);
-            } else {
-              el.currentTime = mediaTime;
-            }
-          } else if (el.seeking) {
-            pendingSeeksRef.current.set(clip.clipId, mediaTime);
-          }
+          // VEED's 'Q' abortable seek:
+          veedAbortableSeek(el, mediaTime);
         }
-        } // end !customCanvasPlayer.isSupported
         lastActiveClipIdsRef.current = playingIds;
         reportPrimaryMediaTime(null);
         rafIdRef.current = requestAnimationFrame(syncLoop);
@@ -2352,189 +2336,74 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           }
         }
 
-        // ---- VIDEO SYNC STRATEGY (Smooth PLL without seek-storm stutter) ----
+        // ---- VIDEO SYNC STRATEGY (VEED Engine Architecture) ----
         else if (entry.type === 'video') {
-          // ── WEBCODECS AUDIO-ONLY MODE ──────────────────────────────────────
-          // When the custom WebCodecs canvas player is active, it handles ALL
-          // visual frame decoding independently via mediabunny CanvasSink.
-          // The <video> elements exist ONLY for audio demuxing via Web Audio API.
-          // We MUST NOT seek/play/modulate-playbackRate on video elements for
-          // visual sync — that competes with WebCodecs for hardware decoder
-          // sessions on integrated GPUs (AMD Radeon, Intel Iris, 8GB RAM),
-          // causing frame drops, stutter, and decode pipeline contention.
-          //
-          // In this mode, the video element just plays at nominal speed for
-          // audio output. Audio sync uses the gentle PLL from the audio strategy.
-          if (customCanvasPlayer.isSupported) {
-            // Audio graph: resume AudioContext if suspended
-            if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
-              entry.audioCtx.resume().catch(() => {});
+          // Audio graph: resume AudioContext if suspended
+          if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
+            entry.audioCtx.resume().catch(() => {});
+          }
+
+          const primaryVideoTrack = sortedTracksRef.current.find((t: any) => t.type === 'video' && !t.hidden);
+          const primaryTrackId = primaryVideoTrack?.id;
+          const isPrimaryTrackClip = clip.trackId === primaryTrackId;
+
+          // REVERSE / FREEZE FRAME
+          if (clip.isReversed || clip.freezeFrame !== undefined) {
+            if (!el.paused) el.pause();
+            if (Math.abs(el.currentTime - mediaTime) > 0.016) {
+              veedAbortableSeek(el, mediaTime);
             }
+          } else if (playing && !isReversing) {
+            const nominalRate = Math.max(0.05, globalSpeed * currentSegmentSpeed);
 
-            if (playing && !isReversing) {
-              // Keep element playing at nominal speed for audio output only.
-              // Use gentle audio-style PLL (max 0.5% rate adjust) to keep audio
-              // in sync without expensive video seeks.
-              const nominalRate = Math.max(0.05, globalSpeed * currentSegmentSpeed);
-              const AUDIO_ONLY_PLL_THRESHOLD = 0.15;  // 150ms
-              const AUDIO_ONLY_HARD_SEEK = 0.6;       // 600ms
-              const AUDIO_ONLY_MAX_ADJUST = 0.008;    // 0.8%
+            if (isPrimaryTrackClip) {
+              // ── PRIMARY TRACK VIDEO (Drives Master Clock via requestVideoFrameCallback) ──
+              veedEngine.bindPrimaryVideo(el as HTMLVideoElement);
 
-              if (justActivated || Math.abs(rawDrift) > AUDIO_ONLY_HARD_SEEK) {
-                // Hard seek only on activation or massive audio drift
-                if (!el.seeking && Math.abs(rawDrift) > 0.05) {
-                  el.currentTime = mediaTime;
-                }
-              } else if (Math.abs(rawDrift) > AUDIO_ONLY_PLL_THRESHOLD) {
-                // Gentle PLL for audio sync
-                let adj = rawDrift * 0.15;
-                adj = Math.max(-AUDIO_ONLY_MAX_ADJUST, Math.min(AUDIO_ONLY_MAX_ADJUST, adj));
-                const targetRate = Math.max(0.05, nominalRate * (1 - adj));
-                if (Math.abs(el.playbackRate - targetRate) > 0.001) {
-                  el.playbackRate = targetRate;
-                }
-              } else {
+              if (el.paused && !el.seeking) {
+                el.play().catch(() => {});
+              }
+
+              const absDrift = Math.abs(rawDrift);
+
+              // 1. DEADBAND (< 50ms): Zero seeking! Let it roll smoothly at nominal rate
+              if (absDrift < VEED_CONSTANTS.MIN_DRIFT_THRESHOLD) {
                 if (Math.abs(el.playbackRate - nominalRate) > 0.001) {
                   el.playbackRate = nominalRate;
                 }
               }
+              // 2. SOFT PLL (50ms - 300ms): Modulate rate slightly without stopping decoder
+              else if (absDrift <= VEED_CONSTANTS.HARD_SEEK_DRIFT) {
+                const adj = rawDrift * 0.2;
+                const clampedAdj = Math.max(-0.15, Math.min(0.15, adj));
+                const targetRate = Math.max(0.05, nominalRate * (1 - clampedAdj));
+                if (Math.abs(el.playbackRate - targetRate) > 0.002) {
+                  el.playbackRate = targetRate;
+                }
+              }
+              // 3. HARD SEEK (> 300ms): Use VEED's abortable seek
+              else if (absDrift > 0.30) {
+                veedAbortableSeek(el, mediaTime);
+              }
 
-              if (!el.seeking && el.paused) {
+              // Report presentation time to clock
+              reportPrimaryMediaTime(ct - rawDrift);
+            } else {
+              // ── SECONDARY TRACK VIDEO (V2/V3 B-roll, Overlays, PiP) ───
+              if (el.paused && !el.seeking) {
                 el.play().catch(() => {});
               }
-            } else if (clip.isReversed || clip.freezeFrame !== undefined) {
-              // Reversed/frozen: pause audio, no visual seeking needed
-              if (!el.paused) el.pause();
-            } else {
-              // Paused: pause element, no visual seeking needed
-              // (WebCodecs handles paused-frame display via seekExact)
-              if (!el.paused) el.pause();
+
+              // VEED's 'Ir' multi-track synchronization (with 50ms deadband & learned overshoot)
+              veedSyncSecondaryTrack(el as HTMLVideoElement, mediaTime, clip.clipId, nominalRate);
             }
           } else {
-          // ── LEGACY <video> SYNC (fallback when WebCodecs unavailable) ──────
-          const isRamped = (clip.speedRamp && clip.speedRamp.length >= 2) || ((clip.clip as any)?.speedFrames && (clip.clip as any).speedFrames.length > 0);
-          const hasSpeedFramesOnly = hasSpeedFrames && (!clip.speedRamp || clip.speedRamp.length < 2);
-          // SPEED FRAME FIX: drift thresholds must scale with the CURRENT segment
-          // speed. rawDrift is in MEDIA seconds but the perceptual error is in
-          // TIMELINE seconds: at 10x speed, 1.2s of media drift is only 120ms of
-          // timeline error — yet the old fixed 1.2s threshold made the PLL fight
-          // it with ±35% rate modulation (visible speed jitter) and hard-seek
-          // whenever a fast segment outpaced the decoder (browsers cap
-          // playbackRate), producing repeated decode restarts + buffering
-          // freezes on ramped timelines. Scaling by segment speed keeps the
-          // same timeline-time tolerance at every ramp speed.
-          //
-          // BUG 5 FIX: Speed-frame clips (from AI Speed Sync) need MUCH tighter
-          // thresholds than regular speed ramps. Word-level lip-sync requires
-          // ≤50ms accuracy, but the old 0.75×speedScale threshold allowed up to
-          // 1.5s drift at 2x speed — far too wide.
-          const speedScale = Math.max(1, currentSegmentSpeed);
-          const VIDEO_HARD_SEEK_THRESHOLD = hasSpeedFramesOnly
-            ? Math.max(0.35, 0.40 * speedScale)
-            : (isRamped ? Math.max(0.65, 0.90 * speedScale) : Math.max(0.85, 1.20 * speedScale));
-          const VIDEO_PLL_THRESHOLD = hasSpeedFramesOnly
-            ? Math.max(0.02, 0.03 * speedScale)
-            : Math.max(0.025, 0.05 * speedScale);
-          const VIDEO_MAX_PLL_ADJUST = isRamped ? 0.35 : 0.15;       // Dynamic playback rate modulation
-
-          // REVERSE / FREEZE FRAME: browsers can't play <video> backward, so we
-          // keep the element paused and manually seek each sync tick.
-          if (clip.isReversed || clip.freezeFrame !== undefined) {
+            // Paused: pause and exact seek if drift > 5ms
             if (!el.paused) el.pause();
-            // Seek to target time if we're more than one frame (~16ms) off.
-            // PERF: fastSeek (keyframe-snap) keeps per-tick reverse scrubbing
-            // cheap; exactness isn't needed mid-reverse.
-            if (!el.seeking && Math.abs(el.currentTime - mediaTime) > 0.016) {
-              if (typeof (el as HTMLVideoElement).fastSeek === 'function') {
-                (el as HTMLVideoElement).fastSeek(mediaTime);
-              } else {
-                el.currentTime = mediaTime;
-              }
-              seekStartTimeRef.current.set(clip.clipId, performance.now());
-            }
-          } else if (playing && !isReversing) {
-            // Immediate resume if suspended (ensures video internal audio plays via Web Audio)
-            if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
-              entry.audioCtx.resume().catch(() => {});
-            }
-
-                        if (el.seeking) {
-              // Decoder is actively in-flight seeking a keyframe.
-              // CRITICAL: NEVER mutate el.playbackRate or call el.play() while el.seeking === true.
-              // In Chromium, modifying playbackRate or issuing play() while seeking interrupts
-              // the hardware decoder pipeline, keeping seeking=true and readyState=1 indefinitely.
-              const seekStart = (el as any)._seekStartTime || seekStartTimeRef.current.get(clip.clipId);
-              if (seekStart && (performance.now() - seekStart > 800)) {
-                // If the element has been stalled in seek for > 800ms, retry keyframe snap without play()
-                if (typeof (el as any).fastSeek === 'function') {
-                  (el as any).fastSeek(mediaTime);
-                }
-                (el as any)._seekStartTime = performance.now();
-                seekStartTimeRef.current.set(clip.clipId, performance.now());
-              }
-            } else if (justActivated || (!el.paused ? Math.abs(rawDrift) > 1.5 : Math.abs(rawDrift) > VIDEO_HARD_SEEK_THRESHOLD)) {
-              // Skip the hard seek if the element is ALREADY at (or very near)
-              // the target — e.g. after a scrub-seek that positioned it, then
-              // playback resumed and the clip re-activated. Issuing a redundant
-              // seek cancels the in-flight decode and restarts it from scratch,
-              // which is the #1 cause of the stutter storm on ruler-click jumps.
-              //
-              // FIX 2 (Split Boundary Smooth Activation): When a clip activates
-              // at a split boundary and the element is SHARED with the previous
-              // segment (same <video> DOM node), the element's currentTime is
-              // already at (or very near) the correct position — it just played
-              // up to the boundary. Issuing a hard seek here would cancel the
-              // in-flight decode, trigger el.seeking=true, and trip the
-              // buffering detector — causing a playback freeze at every cut.
-              // Allow the PLL to handle drift < 0.15s smoothly instead.
-              const isSharedElement = justActivated && playingIds.size > 0 && (() => {
-                for (const prevId of lastActiveClipIdsRef.current) {
-                  const prevEntry = pool.get(prevId);
-                  if (prevEntry && prevEntry.el === el) return true;
-                }
-                return false;
-              })();
-                            const isAlreadyRolling = !el.paused && Math.abs(rawDrift) < 0.60;
-              const isNearTarget = Math.abs(rawDrift) < 0.20;
-              if (justActivated && (isAlreadyRolling || isNearTarget)) {
-                // Crossing a cut seamlessly: already rolling or pre-rolled to target frame!
-                // Do NOT issue a hard seek! Let PLL handle micro-drift (< 0.15s).
-              } else {
-                const effectiveThreshold = isSharedElement ? 0.40 : 0.20;
-                if (Math.abs(rawDrift) > effectiveThreshold) {
-                  el.currentTime = mediaTime;
-                  pendingSeeksRef.current.delete(clip.clipId);
-                  seekStartTimeRef.current.set(clip.clipId, performance.now());
-                  (el as any)._seekStartTime = performance.now();
-                }
-              }
-            } else if (Math.abs(rawDrift) > VIDEO_PLL_THRESHOLD) {
-              // Smoothly modulate playback speed to catch up / slow down without stopping decoder
-              let adjustment = rawDrift * 0.4;
-              adjustment = Math.max(-VIDEO_MAX_PLL_ADJUST, Math.min(VIDEO_MAX_PLL_ADJUST, adjustment));
-              const targetRate = Math.max(0.05, globalSpeed * currentSegmentSpeed * (1 - adjustment));
-              if (Math.abs(el.playbackRate - targetRate) > 0.005) {
-                el.playbackRate = targetRate;
-              }
-            } else {
-              const nominalRate = Math.max(0.05, globalSpeed * currentSegmentSpeed);
-              if (Math.abs(el.playbackRate - nominalRate) > 0.005) {
-                el.playbackRate = nominalRate;
-              }
-            }
-
-            if (!el.seeking && el.paused) {
-              el.play().catch(() => {});
-            }
-          } else {
-            if (!el.paused) el.pause();
-            // When paused: exact seek for frame display
-            if (!el.seeking && Math.abs(rawDrift) > 0.005) {
-              el.currentTime = mediaTime;
-              seekStartTimeRef.current.set(clip.clipId, performance.now());
+            if (Math.abs(rawDrift) > 0.005) {
+              veedAbortableSeek(el, mediaTime);
             }
           }
-          } // end legacy <video> fallback
         }
       }
 
