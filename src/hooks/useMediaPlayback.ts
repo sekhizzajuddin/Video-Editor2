@@ -221,6 +221,10 @@ const globalMediaPool = new Map<string, MediaElement>();
 const globalVideoMap = new Map<string, HTMLVideoElement>();
 const globalPlaybackResult: MediaPlaybackResult = { videoElements: globalVideoMap };
 
+export function getGlobalVideoMap(): Map<string, HTMLVideoElement> {
+  return globalVideoMap;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared <video> elements per media FILE (not per clip).
 //
@@ -993,15 +997,20 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
   useEffect(() => {
     let lastTime = getPlaybackTime();
     const unsub = subscribePlaybackTime((t) => {
-      if (Math.abs(t - lastTime) > 0.3) {
+      if (!useEditorStore.getState().isScrubbing && Math.abs(t - lastTime) > 0.3) {
         setSeekRevision((r) => r + 1);
       }
       lastTime = t;
     });
     const unsubTrim = subscribeTrimPreviewTime(() => {
-      setSeekRevision((r) => r + 1);
+      if (!useEditorStore.getState().isScrubbing) {
+        setSeekRevision((r) => r + 1);
+      }
     });
-    const onFrameUpdate = () => setSeekRevision((r) => r + 1);
+    const onFrameUpdate = () => {
+      if (useEditorStore.getState().isScrubbing) return;
+      setSeekRevision((r) => r + 1);
+    };
     window.addEventListener('procut-frame-updated', onFrameUpdate);
     return () => {
       unsub();
@@ -2110,19 +2119,140 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       for (const c of clips) playingIds.add(c.clipId);
       const mediaMap = mediaMapRef.current;
 
+      // ---- Immediate On-Demand Element Resolution / Self-Healing ----
+      // Guarantees every active clip on any track (V1, V2, V3, overlays, PiP)
+      // always has a live element in the pool and videoMap, avoiding skipped tracks.
+      const resolveOrAllocateClipElement = (clip: ActiveClipInfo): MediaElement | null => {
+        let entry = pool.get(clip.clipId);
+        // 1. Immediate track-element healing
+        if (!entry) {
+          const tKey0 = `${clip.mediaId}::track:${clip.trackId}::slot:0`;
+          const tKey1 = `${clip.mediaId}::track:${clip.trackId}::slot:1`;
+          const tKeyDirect = `${clip.mediaId}::track:${clip.trackId}`;
+          const existingEl = mediaVideoEls.get(tKey0) || mediaVideoEls.get(tKey1) || mediaVideoEls.get(tKeyDirect);
+          if (existingEl) {
+            entry = { el: existingEl, clipId: clip.clipId, mediaId: clip.mediaId, type: clip.trackType };
+            pool.set(clip.clipId, entry);
+            if (clip.trackType === 'video') {
+              videoMapRef.current.set(clip.clipId, existingEl as HTMLVideoElement);
+            }
+          }
+        }
+        // 2. Split group match
+        if (!entry) {
+          entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
+          if (entry && clip.trackType === 'video' && entry.el) {
+            videoMapRef.current.set(clip.clipId, entry.el as HTMLVideoElement);
+          }
+        }
+        // 3. Video pool fallback: match existing ready element for this mediaId not actively playing another clip
+        if (!entry && (clip.trackType === 'video' || (clip.clip as any)?.type === 'video')) {
+          for (const [, e] of pool) {
+            if (playingIds.has(e.clipId) && e.clipId !== clip.clipId) continue;
+            if (e.type === 'video' && e.mediaId === clip.mediaId && e.el) {
+              entry = e;
+              pool.set(clip.clipId, { ...e, clipId: clip.clipId });
+              videoMapRef.current.set(clip.clipId, e.el as HTMLVideoElement);
+              break;
+            }
+          }
+        }
+        // 4. Audio split fallback
+        if (!entry && (clip.trackType === 'audio' || (clip.clip as any)?.type === 'audio')) {
+          for (const [, e] of pool) {
+            if (playingIds.has(e.clipId) && e.clipId !== clip.clipId) continue;
+            if (e.type === 'audio' && e.mediaId === clip.mediaId && e.el) {
+              entry = e;
+              pool.set(clip.clipId, { ...e, clipId: clip.clipId });
+              break;
+            }
+          }
+        }
+        // 5. SYNCHRONOUS ON-DEMAND ALLOCATION:
+        if (!entry && (clip.trackType === 'video' || (clip.clip as any)?.type === 'video')) {
+          const media = mediaMap.get(clip.mediaId) || useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId);
+          if (media && media.url && media.url !== 'PENDING_RESTORE') {
+            const created = document.createElement('video');
+            created.preload = 'auto';
+            created.muted = true;
+            created.playsInline = true;
+            if (media.url.startsWith('blob:') || media.url.startsWith('data:')) {
+              created.removeAttribute('crossOrigin');
+            } else {
+              created.crossOrigin = 'anonymous';
+            }
+            attachInvisibleMediaElement(created);
+            if ('disablePictureInPicture' in created) (created as any).disablePictureInPicture = true;
+            if ('disableRemotePlayback' in created) (created as any).disableRemotePlayback = true;
+
+            const handleSeeked = () => {
+              seekStartTimeRef.current.delete(clip.clipId);
+              triggerRedraw();
+            };
+            created.addEventListener('seeked', handleSeeked);
+            created.addEventListener('timeupdate', triggerRedraw);
+            created.addEventListener('canplay', triggerRedraw);
+            created.addEventListener('loadedmetadata', triggerRedraw);
+            created.addEventListener('loadeddata', triggerRedraw);
+
+            assignClipMediaSrc(created as TaggedMediaElement, clip.clipId, media.url);
+            created.load();
+
+            const trackKey = `${clip.mediaId}::track:${clip.trackId}::slot:0`;
+            mediaVideoEls.set(trackKey, created);
+            mediaVideoRefCount.set(trackKey, 1);
+
+            entry = {
+              el: created,
+              clipId: clip.clipId,
+              mediaId: clip.mediaId,
+              type: 'video',
+              _shareKey: trackKey,
+              _handleSeeked: handleSeeked,
+            };
+            pool.set(clip.clipId, entry);
+            videoMapRef.current.set(clip.clipId, created);
+          }
+        }
+        if (!entry && (clip.trackType === 'audio' || (clip.clip as any)?.type === 'audio')) {
+          const media = mediaMap.get(clip.mediaId) || useEditorStore.getState().mediaLibrary.find((m) => m.id === clip.mediaId);
+          if (media && media.url && media.url !== 'PENDING_RESTORE') {
+            const created = document.createElement('audio');
+            created.preload = 'auto';
+            if (media.url.startsWith('blob:') || media.url.startsWith('data:')) {
+              created.removeAttribute('crossOrigin');
+            } else {
+              created.crossOrigin = 'anonymous';
+            }
+            assignClipMediaSrc(created as TaggedMediaElement, clip.clipId, media.url);
+            created.style.position = 'absolute';
+            created.style.opacity = '0.01';
+            created.style.pointerEvents = 'none';
+            attachInvisibleMediaElement(created);
+            created.load();
+
+            entry = {
+              el: created,
+              clipId: clip.clipId,
+              mediaId: clip.mediaId,
+              type: 'audio',
+            };
+            pool.set(clip.clipId, entry);
+          }
+        }
+        return entry ?? null;
+      };
+
       // ---- 1. Scrubbing: pause everything, but keep ACTIVE video elements
       // following the scrub position so the preview updates in REAL TIME.
-      // (Using VEED's 'Q' abortable non-blocking seeking engine to eliminate scrub freezes)
+      // (Using VEED's 'Q' abortable non-blocking seeking engine with fastSeek)
       if (scrubbing) {
         for (const [, entry] of pool) {
           if (!entry.el.paused) entry.el.pause();
         }
         const scrubTime = ct;
         for (const clip of clips) {
-          let entry = pool.get(clip.clipId);
-          if (!entry) {
-            entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
-          }
+          const entry = resolveOrAllocateClipElement(clip);
           if (!entry || entry.type !== 'video') continue;
           const mediaItem = mediaMap.get(clip.mediaId);
           const maxDuration = mediaItem ? mediaItem.duration : 10000;
@@ -2138,9 +2268,9 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             isReversed: clip.isReversed,
             freezeFrame: clip.freezeFrame,
           }, scrubTime)));
-          const el = entry.el;
-          // VEED's 'Q' abortable seek:
-          veedAbortableSeek(el, mediaTime);
+          const el = entry.el as HTMLVideoElement;
+          // VEED's 'Q' abortable non-blocking fastSeek during scrubbing:
+          veedAbortableSeek(el, mediaTime, true);
         }
         lastActiveClipIdsRef.current = playingIds;
         reportPrimaryMediaTime(null);
@@ -2150,53 +2280,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
       // ---- 2. Sync each active element ----
       for (const clip of clips) {
-        let entry = pool.get(clip.clipId);
-        // IMMEDIATE TRACK-ELEMENT HEALING:
-        // Check if an existing element for this track/slot is already in mediaVideoEls
-        if (!entry) {
-          const tKey0 = `${clip.mediaId}::track:${clip.trackId}::slot:0`;
-          const tKey1 = `${clip.mediaId}::track:${clip.trackId}::slot:1`;
-          const tKeyDirect = `${clip.mediaId}::track:${clip.trackId}`;
-          const existingEl = mediaVideoEls.get(tKey0) || mediaVideoEls.get(tKey1) || mediaVideoEls.get(tKeyDirect);
-          if (existingEl) {
-            entry = { el: existingEl, clipId: clip.clipId, mediaId: clip.mediaId, type: clip.trackType };
-            pool.set(clip.clipId, entry);
-            if (clip.trackType === 'video') {
-              videoMapRef.current.set(clip.clipId, existingEl);
-            }
-          }
-        }
-        // PERF (multi-split fix): the fallback matches elements of the same split
-        // group, or the same mediaId if no dedicated element is allocated.
-        if (!entry) {
-          entry = getSplitGroupEntry(clip.clip?.splitGroupId) ?? undefined;
-        }
-        // VIDEO FALLBACK: match any existing video element sharing this mediaId
-        if (!entry && (clip.trackType === 'video' || (clip.clip as any)?.type === 'video')) {
-          for (const [, e] of pool) {
-            // CRITICAL GUARD: Never steal an element that is actively playing another clip in this frame!
-            if (playingIds.has(e.clipId) && e.clipId !== clip.clipId) continue;
-            if (e.type === 'video' && e.mediaId === clip.mediaId && e.el) {
-              entry = e;
-              // Self-heal: register this entry under clip.clipId so pool and videoMap have it immediately
-              pool.set(clip.clipId, { ...e, clipId: clip.clipId });
-              videoMapRef.current.set(clip.clipId, e.el as HTMLVideoElement);
-              break;
-            }
-          }
-        }
-        // AUDIO SPLIT FALLBACK: match any existing audio element sharing this mediaId
-        if (!entry && (clip.trackType === 'audio' || (clip.clip as any)?.type === 'audio')) {
-          for (const [, e] of pool) {
-            // CRITICAL GUARD: Never steal an element that is actively playing another clip in this frame!
-            if (playingIds.has(e.clipId) && e.clipId !== clip.clipId) continue;
-            if (e.type === 'audio' && e.mediaId === clip.mediaId && e.el) {
-              entry = e;
-              pool.set(clip.clipId, { ...e, clipId: clip.clipId });
-              break;
-            }
-          }
-        }
+        let entry = resolveOrAllocateClipElement(clip);
         if (!entry) continue;
 
         const mediaItem = mediaMap.get(clip.mediaId);
@@ -2401,7 +2485,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             // Paused: pause and exact seek if drift > 5ms
             if (!el.paused) el.pause();
             if (Math.abs(rawDrift) > 0.005) {
-              veedAbortableSeek(el, mediaTime);
+              veedAbortableSeek(el, mediaTime, store.isScrubbing);
             }
           }
         }

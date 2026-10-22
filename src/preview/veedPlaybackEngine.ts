@@ -73,56 +73,54 @@ export interface VeedPlaybackDiagnostics {
 // 1. VEED 'Q' Abortable Non-Blocking Seeking Engine
 // ---------------------------------------------------------------------------
 
-const activeSeekAborts = new Map<HTMLMediaElement, AbortController>();
-
 /**
- * VEED 'Q' Abortable Seek:
- * If the element is not seeking, applies currentTime = targetTime immediately.
- * If already in-flight seeking, aborts stale listener, queues the latest target,
- * and updates as soon as the current decode settles.
+ * VEED 'Q' High-Performance Abortable & Coalesced Seeking:
+ * 1. If element is not currently seeking, applies targetTime immediately.
+ * 2. If already in-flight seeking, coalesces the newest targetTime without timer leaks.
+ * 3. Uses fastSeek(targetTime) when isFast is true (continuous timeline scrubbing).
+ * 4. When the hardware decoder finishes, immediately drains the latest target.
  */
-export function veedAbortableSeek(el: HTMLMediaElement, targetTime: number): void {
-  if (!el) return;
+export function veedAbortableSeek(el: HTMLMediaElement, targetTime: number, isFast: boolean = false): void {
+  if (!el || !Number.isFinite(targetTime)) return;
+
+  const target = Math.max(0, targetTime);
+  const current = el.currentTime;
+  if (Math.abs(current - target) < 0.003) return;
+
+  (el as any)._pendingSeekTarget = target;
 
   if (!el.seeking) {
     try {
-      el.currentTime = targetTime;
+      if (isFast && typeof (el as any).fastSeek === 'function') {
+        (el as any).fastSeek(target);
+      } else {
+        el.currentTime = target;
+      }
     } catch {}
     return;
   }
 
-  // Cancel prior abort controller for this element
-  const prevAbort = activeSeekAborts.get(el);
-  if (prevAbort) {
-    prevAbort.abort();
-    activeSeekAborts.delete(el);
-  }
-
-  const controller = new AbortController();
-  activeSeekAborts.set(el, controller);
-
-  const cleanup = () => {
-    controller.abort();
-    activeSeekAborts.delete(el);
-  };
-
-  const onSeeked = () => {
+  // Already seeking in hardware decoder: ensure a listener drains the newest pending target
+  if (!(el as any)._hasVeedSeekHandler) {
+    (el as any)._hasVeedSeekHandler = true;
+    const onDrain = () => {
+      (el as any)._hasVeedSeekHandler = false;
+      const nextTarget = (el as any)._pendingSeekTarget;
+      if (nextTarget !== undefined && Math.abs(el.currentTime - nextTarget) > 0.008) {
+        delete (el as any)._pendingSeekTarget;
+        try {
+          if (isFast && typeof (el as any).fastSeek === 'function') {
+            (el as any).fastSeek(nextTarget);
+          } else {
+            el.currentTime = nextTarget;
+          }
+        } catch {}
+      }
+    };
     try {
-      el.currentTime = targetTime;
+      el.addEventListener('seeked', onDrain, { once: true });
     } catch {}
-    cleanup();
-  };
-
-  el.addEventListener('seeked', onSeeked, { signal: controller.signal, once: true });
-  el.addEventListener('emptied', cleanup, { signal: controller.signal, once: true });
-
-  const interval = setInterval(() => {
-    if (!el.seeking) {
-      onSeeked();
-    }
-  }, VEED_CONSTANTS.SEEK_RETRY_INTERVAL_MS);
-
-  controller.signal.addEventListener('abort', () => clearInterval(interval));
+  }
 }
 
 // ---------------------------------------------------------------------------

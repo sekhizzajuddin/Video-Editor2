@@ -22,7 +22,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, findClipInTracks } from '@/store/editorStore';
 import { useShallow } from 'zustand/react/shallow';
-import { useMediaPlayback } from '@/hooks/useMediaPlayback';
+import { useMediaPlayback, getGlobalVideoMap } from '@/hooks/useMediaPlayback';
 import { Spinner } from '@/components/ui/spinner';
 import { TimelineTrack, MediaItem } from '@/types';
 import { ColorScopes } from '../ColorScopes';
@@ -766,6 +766,7 @@ export function PreviewCanvasContainer() {
             deps.mediaLibrary = freshState.mediaLibrary;
             deps.isPlaying = currentlyPlaying;
             deps.isScrubbing = currentlyScrubbing;
+            deps.videoElements = getGlobalVideoMap();
 
             renderCanvasRef.current()
               .catch((err: unknown) => {

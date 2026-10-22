@@ -14,7 +14,7 @@ export function RulerPlayhead({ zoomLevel }: { zoomLevel: number }) {
     // animation frame with the exact position.
     const paint = (t: number) => {
       if (containerRef.current) {
-        containerRef.current.style.left = `${t * zoomLevel}px`;
+        containerRef.current.style.transform = `translate3d(${t * zoomLevel}px, 0, 0)`;
       }
     };
     paint(getPlaybackTime());
@@ -24,7 +24,7 @@ export function RulerPlayhead({ zoomLevel }: { zoomLevel: number }) {
   return (
     <div
       ref={containerRef}
-      className="absolute top-0 h-full z-10 pointer-events-none"
+      className="absolute top-0 h-full z-10 pointer-events-none left-0 will-change-transform"
     >
       <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-red-500 -translate-x-1/2" />
     </div>
@@ -41,7 +41,7 @@ export function WorkspacePlayhead({ zoomLevel }: { zoomLevel: number }) {
     // animation frame with the exact position.
     const paint = (t: number) => {
       if (containerRef.current) {
-        containerRef.current.style.left = `${t * zoomLevel}px`;
+        containerRef.current.style.transform = `translate3d(${t * zoomLevel}px, 0, 0)`;
       }
     };
     paint(getPlaybackTime());
@@ -51,7 +51,7 @@ export function WorkspacePlayhead({ zoomLevel }: { zoomLevel: number }) {
   return (
     <div
       ref={containerRef}
-      className="absolute top-0 bottom-0 z-30 pointer-events-none"
+      className="absolute top-0 bottom-0 z-30 pointer-events-none left-0 will-change-transform"
     >
       <div className="w-px h-full bg-red-500" />
       <div className="absolute top-0 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full -translate-y-px" />
@@ -83,7 +83,7 @@ export function FloatingScrubTooltip({
         const liveScrollLeft = trackContainerRef.current?.scrollLeft ?? state.scrollLeft;
         // Exact position from the playback clock (the store lags during playback).
         const t = getPlaybackTime();
-        containerRef.current.style.left = `${t * zoomLevel - liveScrollLeft}px`;
+        containerRef.current.style.transform = `translate3d(${t * zoomLevel - liveScrollLeft}px, 0, 0)`;
         textRef.current.textContent = formatDetailedTooltipTime(t);
       }
     };
@@ -99,7 +99,7 @@ export function FloatingScrubTooltip({
   return (
     <div
       ref={containerRef}
-      className="absolute z-50 bg-[#141414]/95 text-amber-400 text-[10px] font-bold px-2 py-1 rounded border border-[#3e3e3e] shadow-2xl pointer-events-none -translate-x-1/2 flex items-center gap-1.5"
+      className="absolute left-0 will-change-transform z-50 bg-[#141414]/95 text-amber-400 text-[10px] font-bold px-2 py-1 rounded border border-[#3e3e3e] shadow-2xl pointer-events-none -translate-x-1/2 flex items-center gap-1.5"
       style={{ top: `${RULER_HEIGHT + 6}px` }}
     >
       <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-[#141414] border-t border-l border-[#3e3e3e] rotate-45" />
@@ -186,7 +186,7 @@ export function TrimPlayhead({ zoomLevel }: { zoomLevel: number }) {
   useEffect(() => {
     const paint = (t: number) => {
       if (containerRef.current) {
-        containerRef.current.style.left = `${t * zoomLevel}px`;
+        containerRef.current.style.transform = `translate3d(${t * zoomLevel}px, 0, 0)`;
         containerRef.current.style.display = 'block';
       }
     };
@@ -223,7 +223,7 @@ export function TrimPlayhead({ zoomLevel }: { zoomLevel: number }) {
   return (
     <div
       ref={containerRef}
-      className="absolute top-0 bottom-0 z-30 pointer-events-none"
+      className="absolute top-0 bottom-0 z-30 pointer-events-none left-0 will-change-transform"
       style={{ display: 'none' }}
     >
       <div className="w-px h-full bg-amber-400" />

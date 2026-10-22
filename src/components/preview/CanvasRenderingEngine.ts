@@ -43,7 +43,7 @@ import { applyCurvesToImageData as applyCurves, buildCurveLUT as buildLUT, isCur
 import { applyVectorMaskToContext, applyVectorMaskRaster, vectorMaskNeedsRaster } from '@/utils/vectorMaskEngine';
 import { applyAdjustmentLayerPass } from '@/utils/adjustmentLayerEngine';
 import { getInterpolatedMotionPosition } from '@/utils/motionTrackingEngine';
-import { MediaPlaybackResult } from '@/hooks/useMediaPlayback';
+import { MediaPlaybackResult, getGlobalVideoMap } from '@/hooks/useMediaPlayback';
 import { customCanvasPlayer, type CustomDecodedFrame } from '@/preview/CustomCanvasPlayer';
 import { getClipDimensions } from './previewMath';
 import { resolveBlendPlan } from '@/utils/blendCompositor';
@@ -430,7 +430,8 @@ export async function renderCanvasEngine({
     splitSiblingEl = new Map<string, HTMLVideoElement>();
     mediaVideoEl = new Map<string, HTMLVideoElement>();
     trackVideoEl = new Map<string, HTMLVideoElement>();
-    for (const [otherId, otherEl] of videoElements) {
+    const activeVideoEls = videoElements && videoElements.size > 0 ? videoElements : getGlobalVideoMap();
+    for (const [otherId, otherEl] of activeVideoEls) {
       if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
       const oc = clipsById.get(otherId);
       if (!oc) continue;
@@ -1589,7 +1590,7 @@ export async function renderCanvasEngine({
         // ── VEED-Style Hardware Decoded Video Element (Primary Engine) ──────────
         // Chromium's GPU hardware video decoder decodes frames directly on the GPU ASIC.
         // Direct drawing from HTMLVideoElement eliminates CPU buffer roundtrips and RAM bloat.
-        videoEl = videoElements.get(clip.id) || null;
+        videoEl = videoElements?.get(clip.id) || getGlobalVideoMap().get(clip.id) || null;
         if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
         if (!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) {
           videoEl =
@@ -2848,12 +2849,21 @@ export async function renderCanvasEngine({
     }
   }
 
+  const totalTracks = tracks.length;
   const drawQueue: { clip: any; layer: number }[] = [];
   for (const track of visualTracks) {
+    const trackIdx = tracks.findIndex((t) => t.id === track.id);
+    const trackVisualPriority = trackIdx >= 0 ? (totalTracks - trackIdx) * 10 : 0;
+    const isText = track.type === 'text' || track.id.startsWith('text');
+
     for (const clip of track.clips) {
       if (transitionClipIds.has(clip.id)) continue; // drawn by the transition pass
       if (!clip.disabled && currentTime >= clip.startTime && currentTime < clip.startTime + clip.duration + 0.001) {
-        drawQueue.push({ clip, layer: track.id.startsWith('text') ? 100 : 0 });
+        const clipZ = typeof clip.zIndex === 'number' ? clip.zIndex : 0;
+        drawQueue.push({
+          clip,
+          layer: (isText ? 500 : 0) + trackVisualPriority + clipZ,
+        });
       }
     }
   }
@@ -2861,9 +2871,13 @@ export async function renderCanvasEngine({
   // Queue the transition pass at the owning track's layer so z-ordering against
   // text/PiP layers is preserved.
   for (const [trackId, active] of activeTransitions) {
+    const trackIdx = tracks.findIndex((t) => t.id === trackId);
+    const trackVisualPriority = trackIdx >= 0 ? (totalTracks - trackIdx) * 10 : 0;
+    const ownerTrack = tracks[trackIdx];
+    const isText = ownerTrack ? (ownerTrack.type === 'text' || ownerTrack.id.startsWith('text')) : trackId.startsWith('text');
     drawQueue.push({
       clip: { __transition: active, id: `__transition_${trackId}` },
-      layer: trackId.startsWith('text') ? 100 : 0,
+      layer: (isText ? 500 : 0) + trackVisualPriority,
     });
   }
 
@@ -2900,12 +2914,15 @@ export async function renderCanvasEngine({
               __pipEEMods: pipEEMods,
               id: `__pip_bg_${pip.id}`,
             },
-            layer: 199, // Just below PIP children
+            layer: 1199, // Just below PIP children
           });
         }
 
-        for (const pTrack of pip.tracks) {
+        const pTotalTracks = pip.tracks.length;
+        for (let pIdx = 0; pIdx < pip.tracks.length; pIdx++) {
+          const pTrack = pip.tracks[pIdx];
           if (pTrack.hidden) continue;
+          const pPriority = (pTotalTracks - pIdx) * 10;
           for (const pClip of pTrack.clips) {
             const pAbsStart = pipAbsStart + pClip.startTime;
             if (!pClip.disabled && currentTime >= pAbsStart && currentTime < pAbsStart + pClip.duration + 0.001) {
@@ -2923,7 +2940,11 @@ export async function renderCanvasEngine({
                 __parentCrop: parentClip.crop,
                 __pipEEMods: pipEEMods,
               };
-              drawQueue.push({ clip: syntheticClip, layer: 200 + (pTrack.type === 'text' ? 100 : 0) });
+              const pClipZ = typeof pClip.zIndex === 'number' ? pClip.zIndex : 0;
+              drawQueue.push({
+                clip: syntheticClip,
+                layer: 1200 + pPriority + (pTrack.type === 'text' ? 100 : 0) + pClipZ,
+              });
             }
           }
         }
@@ -2940,7 +2961,7 @@ export async function renderCanvasEngine({
               __pipEEMods: pipEEMods,
               id: `__pip_outline_${pip.id}`,
             },
-            layer: 301, // Above PIP children
+            layer: 1401, // Above PIP children
           });
         }
       }
