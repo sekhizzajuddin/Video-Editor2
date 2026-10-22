@@ -2112,6 +2112,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         for (const [, entry] of pool) {
           if (!entry.el.paused) entry.el.pause();
         }
+        // WEBCODECS BYPASS: When the custom canvas player handles visual
+        // rendering, we don't need to seek <video> elements during scrub.
+        // WebCodecs seekExact() handles frame display directly. Seeking video
+        // elements during scrub competes for hardware decoder sessions and
+        // causes visible stutter on integrated GPUs.
+        if (!customCanvasPlayer.isSupported) {
         // During trim, ct is already getEffectivePreviewTime() (amber playhead position)
         const scrubTime = ct;
         for (const clip of clips) {
@@ -2151,6 +2157,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
             pendingSeeksRef.current.set(clip.clipId, mediaTime);
           }
         }
+        } // end !customCanvasPlayer.isSupported
         lastActiveClipIdsRef.current = playingIds;
         reportPrimaryMediaTime(null);
         rafIdRef.current = requestAnimationFrame(syncLoop);
@@ -2347,6 +2354,64 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
 
         // ---- VIDEO SYNC STRATEGY (Smooth PLL without seek-storm stutter) ----
         else if (entry.type === 'video') {
+          // ── WEBCODECS AUDIO-ONLY MODE ──────────────────────────────────────
+          // When the custom WebCodecs canvas player is active, it handles ALL
+          // visual frame decoding independently via mediabunny CanvasSink.
+          // The <video> elements exist ONLY for audio demuxing via Web Audio API.
+          // We MUST NOT seek/play/modulate-playbackRate on video elements for
+          // visual sync — that competes with WebCodecs for hardware decoder
+          // sessions on integrated GPUs (AMD Radeon, Intel Iris, 8GB RAM),
+          // causing frame drops, stutter, and decode pipeline contention.
+          //
+          // In this mode, the video element just plays at nominal speed for
+          // audio output. Audio sync uses the gentle PLL from the audio strategy.
+          if (customCanvasPlayer.isSupported) {
+            // Audio graph: resume AudioContext if suspended
+            if (entry.audioCtx && entry.audioCtx.state === 'suspended') {
+              entry.audioCtx.resume().catch(() => {});
+            }
+
+            if (playing && !isReversing) {
+              // Keep element playing at nominal speed for audio output only.
+              // Use gentle audio-style PLL (max 0.5% rate adjust) to keep audio
+              // in sync without expensive video seeks.
+              const nominalRate = Math.max(0.05, globalSpeed * currentSegmentSpeed);
+              const AUDIO_ONLY_PLL_THRESHOLD = 0.15;  // 150ms
+              const AUDIO_ONLY_HARD_SEEK = 0.6;       // 600ms
+              const AUDIO_ONLY_MAX_ADJUST = 0.008;    // 0.8%
+
+              if (justActivated || Math.abs(rawDrift) > AUDIO_ONLY_HARD_SEEK) {
+                // Hard seek only on activation or massive audio drift
+                if (!el.seeking && Math.abs(rawDrift) > 0.05) {
+                  el.currentTime = mediaTime;
+                }
+              } else if (Math.abs(rawDrift) > AUDIO_ONLY_PLL_THRESHOLD) {
+                // Gentle PLL for audio sync
+                let adj = rawDrift * 0.15;
+                adj = Math.max(-AUDIO_ONLY_MAX_ADJUST, Math.min(AUDIO_ONLY_MAX_ADJUST, adj));
+                const targetRate = Math.max(0.05, nominalRate * (1 - adj));
+                if (Math.abs(el.playbackRate - targetRate) > 0.001) {
+                  el.playbackRate = targetRate;
+                }
+              } else {
+                if (Math.abs(el.playbackRate - nominalRate) > 0.001) {
+                  el.playbackRate = nominalRate;
+                }
+              }
+
+              if (!el.seeking && el.paused) {
+                el.play().catch(() => {});
+              }
+            } else if (clip.isReversed || clip.freezeFrame !== undefined) {
+              // Reversed/frozen: pause audio, no visual seeking needed
+              if (!el.paused) el.pause();
+            } else {
+              // Paused: pause element, no visual seeking needed
+              // (WebCodecs handles paused-frame display via seekExact)
+              if (!el.paused) el.pause();
+            }
+          } else {
+          // ── LEGACY <video> SYNC (fallback when WebCodecs unavailable) ──────
           const isRamped = (clip.speedRamp && clip.speedRamp.length >= 2) || ((clip.clip as any)?.speedFrames && (clip.clip as any).speedFrames.length > 0);
           const hasSpeedFramesOnly = hasSpeedFrames && (!clip.speedRamp || clip.speedRamp.length < 2);
           // SPEED FRAME FIX: drift thresholds must scale with the CURRENT segment
@@ -2469,6 +2534,7 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
               seekStartTimeRef.current.set(clip.clipId, performance.now());
             }
           }
+          } // end legacy <video> fallback
         }
       }
 
@@ -2482,7 +2548,12 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
       // flip-flicker every other tick (render storm competing with the decoders).
       // Two consecutive ticks (~33ms) filters transient seeks while the clock
       // advances at most one frame ahead — imperceptible.
-      if (playing && !scrubbing) {
+      //
+      // WEBCODECS BYPASS: When the custom canvas player handles visual decoding,
+      // <video> elements are audio-only sources. Their readyState/seeking status
+      // is irrelevant for visual buffering — skip the entire detection block to
+      // prevent false-positive buffering stalls from audio element seeks.
+      if (playing && !scrubbing && !customCanvasPlayer.isSupported) {
         let anyBuffering = false;
         const nowMs = performance.now();
 

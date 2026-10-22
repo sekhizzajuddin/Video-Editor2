@@ -585,6 +585,7 @@ export function PreviewCanvasContainer() {
           decodedFrames.set(req.clipId, frame);
         } else if (!fresh.isPlaying) {
           // When paused/scrubbing: issue direct exact seek if frame not in buffer yet
+          // (seekExact is debounced to max 1 per 60ms per clip in CustomCanvasPlayer)
           customCanvasPlayer.seekExact(req.clipId, req.mediaId, req.url, req.mediaTime).then((f) => {
             if (f) framePendingRef.current = true;
           });

@@ -17,6 +17,13 @@
  * 4. Fast O(log N) Binary Search:
  *    getFrameSync() finds ready frames in <0.01ms and holds the current frame if a new
  *    frame is in flight, guaranteeing 100% continuous presentation with zero black flashes.
+ * 5. Per-Clip Input Isolation (v4):
+ *    Each clip stream creates its OWN mediabunny Input + CanvasSink to avoid shared
+ *    videoTrack conflicts. Multiple clips on the same media file (split clips, B-roll
+ *    on V2/V3) never interfere with each other's decode pipeline.
+ * 6. Debounced Scrub Seeking:
+ *    seekExact() requests are throttled to max 1 per 60ms per clip during scrubbing,
+ *    preventing decode pipeline thrashing on fast playhead drags.
  */
 
 import {
@@ -43,24 +50,19 @@ export interface CustomDecodedFrame {
   duration: number;
 }
 
-export interface MediaResourceEntry {
-  mediaId: string;
+/** Cached blob for a media URL — avoids re-fetching the same file per clip stream. */
+interface MediaBlobCache {
   url: string;
-  input: InstanceType<typeof Input> | null;
-  videoTrack: any | null;
+  blob: Blob;
   width: number;
   height: number;
-  duration: number;
-  codec: string | null;
-  ready: boolean;
-  loadError: string | null;
-  loadPromise: Promise<boolean> | null;
-  disposed: boolean;
 }
 
 export interface ClipStream {
   clipId: string;
   mediaId: string;
+  /** Per-clip dedicated Input instance (isolated decoder) */
+  input: InstanceType<typeof Input> | null;
   sink: InstanceType<typeof CanvasSink> | null;
   iterator: AsyncIterator<any> | null;
   iteratorTime: number;
@@ -70,6 +72,12 @@ export interface ClipStream {
   lastReturnedFrame: CustomDecodedFrame | null;
   lastAccessTime: number;
   disposed: boolean;
+  /** Last seekExact timestamp to debounce scrub seeks */
+  lastSeekTime: number;
+  /** Width from media source */
+  width: number;
+  /** Height from media source */
+  height: number;
 }
 
 export interface CustomPlayerDiagnostics {
@@ -93,16 +101,21 @@ export interface CustomPlayerDiagnostics {
 const MAX_LOOKAHEAD_FRAMES = 24; // ~800ms lookahead at 30fps
 const MAX_RING_BUFFER_SIZE = 36; // ~1.2s total ring buffer
 const BATCH_DECODE_SIZE = 8;     // 8 frames per background decode batch (~260ms)
-const MAX_MEDIA_RESOURCES = 10;
+const MAX_BLOB_CACHE = 12;
+const MAX_CLIP_STREAMS = 24;
 const MAX_PREVIEW_WIDTH = 1920;
 const MAX_PREVIEW_HEIGHT = 1080;
+const SCRUB_SEEK_DEBOUNCE_MS = 60; // Max 1 seekExact per 60ms per clip
 
 // ---------------------------------------------------------------------------
 // CustomCanvasPlayer Class
 // ---------------------------------------------------------------------------
 
 export class CustomCanvasPlayer {
-  private mediaResources = new Map<string, MediaResourceEntry>();
+  /** Cached blobs per mediaId — shared across clip streams to avoid re-fetching */
+  private blobCache = new Map<string, MediaBlobCache>();
+  /** Pending blob fetch promises to dedupe concurrent fetches */
+  private blobFetchPromises = new Map<string, Promise<MediaBlobCache | null>>();
   private clipStreams = new Map<string, ClipStream>();
   private webCodecsAvailable: boolean | null = null;
 
@@ -124,43 +137,29 @@ export class CustomCanvasPlayer {
   }
 
   /**
-   * Preload / initialize the WebCodecs media resource for a media file.
-   * Dedupes multiple calls for the same mediaId.
+   * Preload the blob for a media file. Dedupes multiple calls for the same mediaId.
+   * Returns the cached blob entry with dimensions.
    */
   async ensureMediaLoaded(mediaId: string, url: string): Promise<boolean> {
     if (!this.isSupported) return false;
     if (!url || url === 'PENDING_RESTORE') return false;
 
-    let res = this.mediaResources.get(mediaId);
-    if (res) {
-      if (res.loadPromise) return res.loadPromise;
-      return res.ready;
+    if (this.blobCache.has(mediaId)) return true;
+    if (this.blobFetchPromises.has(mediaId)) {
+      const result = await this.blobFetchPromises.get(mediaId)!;
+      return result !== null;
     }
 
-    if (this.mediaResources.size >= MAX_MEDIA_RESOURCES) {
-      this.evictOldestMediaResource();
+    if (this.blobCache.size >= MAX_BLOB_CACHE) {
+      this.evictOldestBlobCache();
     }
 
-    res = {
-      mediaId,
-      url,
-      input: null,
-      videoTrack: null,
-      width: 1920,
-      height: 1080,
-      duration: 0,
-      codec: null,
-      ready: false,
-      loadError: null,
-      loadPromise: null,
-      disposed: false,
-    };
+    const fetchPromise = this.fetchAndCacheBlob(mediaId, url);
+    this.blobFetchPromises.set(mediaId, fetchPromise);
 
-    const loadPromise = this.initMediaResource(res);
-    res.loadPromise = loadPromise;
-    this.mediaResources.set(mediaId, res);
-
-    return loadPromise;
+    const result = await fetchPromise;
+    this.blobFetchPromises.delete(mediaId);
+    return result !== null;
   }
 
   /**
@@ -218,6 +217,9 @@ export class CustomCanvasPlayer {
    * Lookahead Pump:
    * Called each animation frame by PreviewCanvasContainer.
    * Non-blocking background pump that fills each active clip's individual ring buffer.
+   *
+   * PERF (v4): Replaced .reduce() with a simple for-loop counter for O(frames)
+   * instead of O(frames * closure_overhead) per clip per tick.
    */
   pumpLookahead(
     requests: Array<{
@@ -233,27 +235,15 @@ export class CustomCanvasPlayer {
       const req = requests[i];
       let stream = this.clipStreams.get(req.clipId);
       if (!stream) {
-        stream = {
-          clipId: req.clipId,
-          mediaId: req.mediaId,
-          sink: null,
-          iterator: null,
-          iteratorTime: -1,
-          decodeInFlight: false,
-          decodeTail: Promise.resolve(),
-          frames: [],
-          lastReturnedFrame: null,
-          lastAccessTime: performance.now(),
-          disposed: false,
-        };
+        stream = this.createClipStream(req.clipId, req.mediaId);
         this.clipStreams.set(req.clipId, stream);
       }
 
       stream.lastAccessTime = performance.now();
 
-      // Ensure underlying media file resource is loaded
-      const res = this.mediaResources.get(req.mediaId);
-      if (!res || !res.ready) {
+      // Ensure underlying blob is fetched
+      const blobEntry = this.blobCache.get(req.mediaId);
+      if (!blobEntry) {
         this.ensureMediaLoaded(req.mediaId, req.url).then((loaded) => {
           if (loaded && stream && !stream.sink && !stream.disposed) {
             this.initStreamSink(stream, req.mediaId);
@@ -268,28 +258,39 @@ export class CustomCanvasPlayer {
 
       if (!stream.sink || stream.disposed) continue;
 
-      // Check how many future frames are buffered ahead of the target media time
-      const futureFramesCount = stream.frames.reduce(
-        (acc, f) => (f.timestamp >= req.mediaTime - 0.01 ? acc + 1 : acc),
-        0
-      );
+      // PERF (v4): Simple for-loop counter instead of .reduce() with closure.
+      // Count how many frames are at or ahead of the target media time.
+      let futureFramesCount = 0;
+      const targetThreshold = req.mediaTime - 0.01;
+      const streamFrames = stream.frames;
+      for (let j = streamFrames.length - 1; j >= 0; j--) {
+        if (streamFrames[j].timestamp >= targetThreshold) {
+          futureFramesCount++;
+        } else {
+          break; // Frames are sorted — once we pass the threshold, stop
+        }
+      }
 
       if (futureFramesCount >= MAX_LOOKAHEAD_FRAMES) {
         // Trim old frames that have already passed (retain 4 previous frames for micro-scrub)
-        while (stream.frames.length > 4 && stream.frames[0].timestamp < req.mediaTime - 0.35) {
-          stream.frames.shift();
+        while (streamFrames.length > 4 && streamFrames[0].timestamp < req.mediaTime - 0.35) {
+          streamFrames.shift();
         }
         continue;
       }
 
       // Trigger background sequential decode batch for this clip's dedicated stream
-      this.decodeAheadBatch(stream, res, req.mediaTime);
+      this.decodeAheadBatch(stream, req.mediaTime);
     }
   }
 
   /**
    * Exact Seek (Scrubbing / Paused seek):
    * Decodes the exact frame for a given timestamp immediately and stores it in buffer.
+   *
+   * PERF (v4): Debounced to max 1 seek per SCRUB_SEEK_DEBOUNCE_MS per clip.
+   * Random-access decode via getCanvas() costs 50-200ms (seeks to keyframe, decodes
+   * forward), so unbounded firing during fast scrub drags overwhelms the decoder.
    */
   async seekExact(
     clipId: string,
@@ -299,28 +300,22 @@ export class CustomCanvasPlayer {
   ): Promise<CustomDecodedFrame | null> {
     if (!this.isSupported) return null;
 
-    let res = this.mediaResources.get(mediaId);
-    if (!res || !res.ready) {
-      await this.ensureMediaLoaded(mediaId, url);
-      res = this.mediaResources.get(mediaId);
-    }
-    if (!res || !res.videoTrack || res.disposed) return null;
-
     let stream = this.clipStreams.get(clipId);
+
+    // Debounce: skip if last seek was too recent
+    const now = performance.now();
+    if (stream && now - stream.lastSeekTime < SCRUB_SEEK_DEBOUNCE_MS) {
+      return stream.lastReturnedFrame; // Return held frame while debouncing
+    }
+
+    const blobEntry = this.blobCache.get(mediaId);
+    if (!blobEntry) {
+      await this.ensureMediaLoaded(mediaId, url);
+    }
+    if (!this.blobCache.has(mediaId)) return null;
+
     if (!stream) {
-      stream = {
-        clipId,
-        mediaId,
-        sink: null,
-        iterator: null,
-        iteratorTime: -1,
-        decodeInFlight: false,
-        decodeTail: Promise.resolve(),
-        frames: [],
-        lastReturnedFrame: null,
-        lastAccessTime: performance.now(),
-        disposed: false,
-      };
+      stream = this.createClipStream(clipId, mediaId);
       this.clipStreams.set(clipId, stream);
     }
 
@@ -329,14 +324,16 @@ export class CustomCanvasPlayer {
     }
     if (!stream.sink || stream.disposed) return null;
 
+    stream.lastSeekTime = now;
+
     try {
       const wrapped = await stream.sink.getCanvas(mediaTime);
       if (!wrapped || !wrapped.canvas) return null;
 
       const frame: CustomDecodedFrame = {
         drawable: wrapped.canvas,
-        width: (wrapped.canvas as any).width || res.width,
-        height: (wrapped.canvas as any).height || res.height,
+        width: (wrapped.canvas as any).width || stream.width,
+        height: (wrapped.canvas as any).height || stream.height,
         timestamp: wrapped.timestamp,
         duration: wrapped.duration || 1 / 30,
       };
@@ -369,11 +366,8 @@ export class CustomCanvasPlayer {
    * Dispose an individual media resource and its active clip streams.
    */
   disposeMedia(mediaId: string): void {
-    const res = this.mediaResources.get(mediaId);
-    if (res) {
-      this.cleanupMediaResource(res);
-      this.mediaResources.delete(mediaId);
-    }
+    this.blobCache.delete(mediaId);
+    this.blobFetchPromises.delete(mediaId);
     const toDelete: string[] = [];
     this.clipStreams.forEach((stream, clipId) => {
       if (stream.mediaId === mediaId) {
@@ -393,11 +387,8 @@ export class CustomCanvasPlayer {
       this.cleanupStream(stream);
     });
     this.clipStreams.clear();
-
-    this.mediaResources.forEach((res) => {
-      this.cleanupMediaResource(res);
-    });
-    this.mediaResources.clear();
+    this.blobCache.clear();
+    this.blobFetchPromises.clear();
   }
 
   /**
@@ -416,18 +407,29 @@ export class CustomCanvasPlayer {
       height: number;
       error: string | null;
     }> = [];
-    this.mediaResources.forEach((r) => {
+    this.blobCache.forEach((b) => {
       decs.push({
-        mediaId: r.mediaId,
-        ready: r.ready,
-        codec: r.codec,
-        width: r.width,
-        height: r.height,
-        error: r.loadError,
+        mediaId: '', // blob cache doesn't track mediaId per entry
+        ready: true,
+        codec: null,
+        width: b.width,
+        height: b.height,
+        error: null,
+      });
+    });
+    // Also report per-stream info
+    this.clipStreams.forEach((s) => {
+      decs.push({
+        mediaId: s.mediaId,
+        ready: !!s.sink,
+        codec: null,
+        width: s.width,
+        height: s.height,
+        error: s.disposed ? 'disposed' : null,
       });
     });
     return {
-      decoderCount: this.mediaResources.size,
+      decoderCount: this.clipStreams.size,
       activeBuffers: this.clipStreams.size,
       totalBufferedFrames: totalFrames,
       decoders: decs,
@@ -438,84 +440,121 @@ export class CustomCanvasPlayer {
   // Internal Helpers
   // -------------------------------------------------------------------------
 
-  private async initMediaResource(res: MediaResourceEntry): Promise<boolean> {
+  private createClipStream(clipId: string, mediaId: string): ClipStream {
+    // Evict oldest unused stream if at capacity
+    if (this.clipStreams.size >= MAX_CLIP_STREAMS) {
+      this.evictOldestClipStream();
+    }
+
+    return {
+      clipId,
+      mediaId,
+      input: null,
+      sink: null,
+      iterator: null,
+      iteratorTime: -1,
+      decodeInFlight: false,
+      decodeTail: Promise.resolve(),
+      frames: [],
+      lastReturnedFrame: null,
+      lastAccessTime: performance.now(),
+      disposed: false,
+      lastSeekTime: 0,
+      width: 1920,
+      height: 1080,
+    };
+  }
+
+  private async fetchAndCacheBlob(mediaId: string, url: string): Promise<MediaBlobCache | null> {
     try {
-      const resp = await fetch(res.url);
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
       const blob = await resp.blob();
-      const source = new BlobSource(blob);
 
-      if (res.disposed) return false;
-
-      res.input = new Input({ source, formats: ALL_FORMATS });
-      const videoTrack = await res.input.getPrimaryVideoTrack();
-      if (!videoTrack) {
-        res.loadError = 'No video track found';
-        return false;
-      }
-      res.videoTrack = videoTrack;
-
+      // Probe dimensions via a temporary Input
+      let width = 1920;
+      let height = 1080;
       try {
-        res.codec = (await videoTrack.getCodec?.()) || videoTrack.codec || null;
+        const probeInput = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
+        const probeTrack = await probeInput.getPrimaryVideoTrack();
+        if (probeTrack) {
+          const cw = (await probeTrack.getCodedWidth?.()) || probeTrack.codedWidth;
+          const ch = (await probeTrack.getCodedHeight?.()) || probeTrack.codedHeight;
+          width = cw || 1920;
+          height = ch || 1080;
+        }
+        try { (probeInput as any).dispose?.(); } catch {}
       } catch {
-        res.codec = null;
+        // Dimensions fallback to 1920x1080
       }
 
-      try {
-        const cw = (await videoTrack.getCodedWidth?.()) || videoTrack.codedWidth;
-        const ch = (await videoTrack.getCodedHeight?.()) || videoTrack.codedHeight;
-        res.width = cw || 1920;
-        res.height = ch || 1080;
-      } catch {
-        res.width = 1920;
-        res.height = 1080;
-      }
-
-      res.ready = true;
-      res.loadError = null;
-      return true;
-    } catch (err: any) {
-      res.loadError = err?.message || String(err);
-      res.ready = false;
-      return false;
-    } finally {
-      res.loadPromise = null;
+      const entry: MediaBlobCache = { url, blob, width, height };
+      this.blobCache.set(mediaId, entry);
+      return entry;
+    } catch {
+      return null;
     }
   }
 
+  /**
+   * Per-Clip Input Isolation (v4):
+   * Each clip stream gets its OWN Input + CanvasSink. This ensures that
+   * split clips, B-roll on V2/V3, and any other multi-clip-same-media
+   * scenarios never share a videoTrack or decode pipeline.
+   */
   private initStreamSink(stream: ClipStream, mediaId: string): void {
-    const res = this.mediaResources.get(mediaId);
-    if (!res || !res.videoTrack || res.disposed) return;
+    const blobEntry = this.blobCache.get(mediaId);
+    if (!blobEntry || stream.disposed) return;
 
     try {
-      // 1080p Cap: On 4K or ultra-high-resolution media, cap the decode canvas dimension
-      // to 1080p. This cuts GPU VRAM consumption by 75% (8MB vs 33MB per frame),
-      // eliminating memory bandwidth saturation on integrated GPUs (AMD Radeon, Intel Iris).
-      let targetW = res.width;
-      let targetH = res.height;
-      if (targetW > MAX_PREVIEW_WIDTH || targetH > MAX_PREVIEW_HEIGHT) {
-        const scale = Math.min(MAX_PREVIEW_WIDTH / targetW, MAX_PREVIEW_HEIGHT / targetH);
-        targetW = Math.round(targetW * scale);
-        targetH = Math.round(targetH * scale);
-      }
+      // Create a DEDICATED Input per clip stream — no shared videoTrack conflicts
+      const input = new Input({ source: new BlobSource(blobEntry.blob), formats: ALL_FORMATS });
+      stream.input = input;
 
-      stream.sink = new CanvasSink(res.videoTrack, {
-        width: targetW,
-        height: targetH,
-        fit: 'contain',
-        decoderOptions: {
-          hardwareAcceleration: 'no-preference',
-          optimizeForLatency: true,
-        },
+      // Async init: get the video track and create the sink
+      input.getPrimaryVideoTrack().then((videoTrack: any) => {
+        if (!videoTrack || stream.disposed) {
+          try { (input as any).dispose?.(); } catch {}
+          return;
+        }
+
+        stream.width = blobEntry.width;
+        stream.height = blobEntry.height;
+
+        // 1080p Cap: On 4K or ultra-high-resolution media, cap the decode canvas dimension
+        // to 1080p. This cuts GPU VRAM consumption by 75% (8MB vs 33MB per frame),
+        // eliminating memory bandwidth saturation on integrated GPUs (AMD Radeon, Intel Iris).
+        let targetW = blobEntry.width;
+        let targetH = blobEntry.height;
+        if (targetW > MAX_PREVIEW_WIDTH || targetH > MAX_PREVIEW_HEIGHT) {
+          const scale = Math.min(MAX_PREVIEW_WIDTH / targetW, MAX_PREVIEW_HEIGHT / targetH);
+          targetW = Math.round(targetW * scale);
+          targetH = Math.round(targetH * scale);
+        }
+
+        try {
+          stream.sink = new CanvasSink(videoTrack, {
+            width: targetW,
+            height: targetH,
+            fit: 'contain',
+            decoderOptions: {
+              hardwareAcceleration: 'no-preference',
+              optimizeForLatency: true,
+            },
+          });
+        } catch (err: any) {
+          console.warn(`[CustomCanvasPlayer] Failed to create CanvasSink for clip ${stream.clipId}:`, err);
+        }
+      }).catch((err: any) => {
+        console.warn(`[CustomCanvasPlayer] Failed to get video track for clip ${stream.clipId}:`, err);
       });
     } catch (err: any) {
-      console.warn(`[CustomCanvasPlayer] Failed to create CanvasSink for clip ${stream.clipId}:`, err);
+      console.warn(`[CustomCanvasPlayer] Failed to create Input for clip ${stream.clipId}:`, err);
     }
   }
 
   private decodeAheadBatch(
     stream: ClipStream,
-    res: MediaResourceEntry,
     targetMediaTime: number
   ): void {
     if (stream.decodeInFlight || stream.disposed || !stream.sink) return;
@@ -549,8 +588,8 @@ export class CustomCanvasPlayer {
           const wrapped = next.value;
           const frame: CustomDecodedFrame = {
             drawable: wrapped.canvas,
-            width: (wrapped.canvas as any).width || res.width,
-            height: (wrapped.canvas as any).height || res.height,
+            width: (wrapped.canvas as any).width || stream.width,
+            height: (wrapped.canvas as any).height || stream.height,
             timestamp: wrapped.timestamp,
             duration: wrapped.duration || 1 / 30,
           };
@@ -599,22 +638,31 @@ export class CustomCanvasPlayer {
     stream.iteratorTime = Math.max(0, startTime - 0.04);
   }
 
-  private evictOldestMediaResource(): void {
-    let oldestId: string | null = null;
-
-    this.mediaResources.forEach((res, id) => {
-      // Find oldest media without active streams
+  private evictOldestBlobCache(): void {
+    // Evict blob cache entries that have no active clip streams
+    for (const [mediaId] of this.blobCache) {
       let hasActiveStream = false;
       this.clipStreams.forEach((s) => {
-        if (s.mediaId === id) hasActiveStream = true;
+        if (s.mediaId === mediaId && !s.disposed) hasActiveStream = true;
       });
       if (!hasActiveStream) {
-        oldestId = id;
+        this.blobCache.delete(mediaId);
+        return;
+      }
+    }
+  }
+
+  private evictOldestClipStream(): void {
+    let oldestId: string | null = null;
+    let oldestTime = Infinity;
+    this.clipStreams.forEach((stream, clipId) => {
+      if (stream.lastAccessTime < oldestTime) {
+        oldestTime = stream.lastAccessTime;
+        oldestId = clipId;
       }
     });
-
     if (oldestId) {
-      this.disposeMedia(oldestId);
+      this.clearClipBuffer(oldestId);
     }
   }
 
@@ -627,18 +675,13 @@ export class CustomCanvasPlayer {
     stream.sink = null;
     stream.frames = [];
     stream.lastReturnedFrame = null;
-  }
-
-  private cleanupMediaResource(res: MediaResourceEntry): void {
-    res.disposed = true;
-    res.ready = false;
-    res.videoTrack = null;
-    if (res.input) {
+    // Dispose the per-clip Input
+    if (stream.input) {
       try {
-        const disposable = res.input as any;
+        const disposable = stream.input as any;
         if (typeof disposable.dispose === 'function') disposable.dispose();
       } catch {}
-      res.input = null;
+      stream.input = null;
     }
   }
 }

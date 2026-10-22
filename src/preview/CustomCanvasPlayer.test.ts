@@ -121,8 +121,13 @@ describe('CustomCanvasPlayer', () => {
     (player as any).clipBuffers.set('clip_2', {
       clipId: 'clip_2',
       mediaId: 'media_2',
+      input: null,
+      sink: null,
+      iterator: null,
       frames: [],
+      lastReturnedFrame: null,
       lastAccessTime: performance.now(),
+      disposed: false,
     });
     expect((player as any).clipBuffers.has('clip_2')).toBe(true);
     player.clearClipBuffer('clip_2');
