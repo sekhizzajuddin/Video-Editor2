@@ -54,6 +54,13 @@ import {
   type SyncPlan,
 } from '@/utils/kineticSync';
 import type { AspectRatioConflictData } from '@/types';
+import {
+  migrateLegacyTrackSplitGroups,
+  migrateLegacyTracks,
+  migrateLegacyPipWindows,
+} from '@/utils/splitGroupMigration';
+
+export { migrateLegacyTrackSplitGroups, migrateLegacyTracks, migrateLegacyPipWindows };
 
 let saveTimeoutId: any = null;
 const debouncedSaveProject = (state: any) => {
@@ -4783,9 +4790,10 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       const data = await loadProjectFromDB();
       if (!data) return false;
       
-      const loadedTracks = data.tracks;
+      const rawTracks = data.tracks || [];
+      const loadedTracks = syncFxTrackLinkages(migrateLegacyTracks(rawTracks));
 
-      const loadedPipWindows = (data as any).pipWindows || {};
+      const loadedPipWindows = migrateLegacyPipWindows((data as any).pipWindows || {});
       const folders = data.folders || [];
       const subtitles = (data as any).subtitles || [];
       const markers = (data as any).markers || [];
@@ -4803,7 +4811,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
       }
 
       set({
-        tracks: syncFxTrackLinkages(loadedTracks),
+        tracks: loadedTracks,
         mediaLibrary: data.mediaLibrary,
         folders,
         subtitles,
@@ -4911,7 +4919,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set, get) => 
     }
 
     // Deep clone the template tracks
-    const loadedTracks = JSON.parse(JSON.stringify(template.tracks));
+    const rawTemplateTracks = JSON.parse(JSON.stringify(template.tracks));
+    const loadedTracks = syncFxTrackLinkages(migrateLegacyTracks(rawTemplateTracks));
 
     set({
       tracks: loadedTracks,

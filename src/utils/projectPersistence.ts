@@ -15,6 +15,7 @@
 
 import { MediaItem, TimelineTrack, ExportRegion } from '@/types';
 import { attachInvisibleMediaElement } from '@/utils/mediaPoolContainer';
+import { migrateLegacyTracks } from '@/utils/splitGroupMigration';
 
 const DB_NAME = 'procut_editor_db';
 const DB_VERSION = 3; // Bumped to handle new autosaves object store
@@ -543,7 +544,7 @@ export async function restoreSnapshotMedia(snapshot: {
   }
 
   return {
-    tracks: snapshot.tracks,
+    tracks: migrateLegacyTracks(snapshot.tracks),
     mediaLibrary,
     currentTime: snapshot.currentTime,
     aspectRatio: snapshot.aspectRatio,

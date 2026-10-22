@@ -1,4 +1,5 @@
-import { useEditorStore } from '@/store/editorStore';
+import { useEditorStore, syncFxTrackLinkages } from '@/store/editorStore';
+import { migrateLegacyTracks, migrateLegacyPipWindows } from '@/utils/splitGroupMigration';
 
 export function serializeProjectData(state: any) {
   // Clean up blob URLs since they are session-specific
@@ -41,7 +42,9 @@ export function loadProjectData(data: any) {
     throw new Error('Invalid project file: missing or invalid "mediaLibrary" array.');
   }
 
-  const loadedTracks = data.tracks;
+  const rawTracks = data.tracks || [];
+  const loadedTracks = syncFxTrackLinkages(migrateLegacyTracks(rawTracks));
+  const loadedPipWindows = data.pipWindows ? migrateLegacyPipWindows(data.pipWindows) : undefined;
 
   useEditorStore.setState({
     tracks: loadedTracks,
@@ -58,7 +61,7 @@ export function loadProjectData(data: any) {
       ? Math.min(400, Math.max(0.05, data.zoomLevel))
       : 100,
     ...(data.settings ? { settings: { ...useEditorStore.getState().settings, ...data.settings } } : {}),
-    ...(data.pipWindows ? { pipWindows: data.pipWindows } : {}),
+    ...(loadedPipWindows ? { pipWindows: loadedPipWindows } : {}),
     ...(data.timelineStack ? { timelineStack: data.timelineStack } : {}),
     history: [
       {
