@@ -516,6 +516,10 @@ export function PreviewCanvasContainer() {
 
   const currentTimeRef = useRef(currentTime);
 
+  // PERF: Reusable array for VEED engine active clip census — avoids 60 array
+  // allocations/sec. Cleared and refilled each frame (zero GC pressure).
+  const _veedActiveClipIds: string[] = [];
+
   const renderCanvas = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -525,18 +529,18 @@ export function PreviewCanvasContainer() {
 
     // ── VEED Engine Active Tracks Census ──────────────────────────────────
     const tracks = deps.tracks as TimelineTrack[];
-    const activeVideoClipIds: string[] = [];
+    _veedActiveClipIds.length = 0;
     for (const track of tracks) {
       if (track.hidden || track.type !== 'video') continue;
       for (const clip of track.clips) {
         if (clip.disabled) continue;
         const clipEnd = clip.startTime + clip.duration;
         if (ct >= clip.startTime && ct < clipEnd + 0.001) {
-          activeVideoClipIds.push(clip.id);
+          _veedActiveClipIds.push(clip.id);
         }
       }
     }
-    veedEngine.setActiveClips(activeVideoClipIds);
+    veedEngine.setActiveClips(_veedActiveClipIds);
 
     await renderCanvasEngine({
       canvas,

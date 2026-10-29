@@ -164,6 +164,37 @@ let _cachedMediaMapRef: MediaItem[] | null = null;
 let _cachedClipsById: Map<string, TimelineClip> | null = null;
 let _cachedClipsByIdTracksRef: TimelineTrack[] | null = null;
 
+// PERF: Module-level mobile detection — computed ONCE, never per-frame.
+// Previously 3× RegExp.test() on navigator.userAgent ran every frame (180 regex/sec).
+const _isMobileUA: boolean = typeof navigator !== 'undefined' && (
+  /android/i.test(navigator.userAgent) ||
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+);
+
+// PERF: Persistent video-element lookup Maps — reused across frames.
+// Previously 3× new Map() per frame = 180 GC-eligible allocations/sec.
+// Rebuilt only when videoElements ref or tracks ref changes.
+let _cachedSplitSiblingEl = new Map<string, HTMLVideoElement>();
+let _cachedMediaVideoEl = new Map<string, HTMLVideoElement>();
+let _cachedTrackVideoEl = new Map<string, HTMLVideoElement>();
+let _cachedVideoElMapRef: Map<string, HTMLVideoElement> | null = null;
+let _cachedVideoElTracksRef: TimelineTrack[] | null = null;
+
+// PERF: Cached isAutoFast LUT presence scan — only recomputed when tracks change.
+let _cachedHasLutFilter: boolean = false;
+let _cachedHasLutFilterTracksRef: TimelineTrack[] | null = null;
+
+// PERF: Pre-built track-index map for O(1) lookups in draw queue construction.
+// Previously tracks.findIndex() was called per-track = O(T²) per frame.
+let _cachedTrackIndexMap = new Map<string, number>();
+let _cachedTrackIndexMapRef: TimelineTrack[] | null = null;
+
+// PERF: Reusable transition containers — .clear()-ed and refilled each frame
+// instead of allocating new Map+Set (120 GC objects/sec at 60fps).
+const _reusableActiveTransitions = new Map<string, ActiveTransition>();
+const _reusableTransitionClipIds = new Set<string>();
+
 function getCachedCurveLUT(curve: any): Uint8ClampedArray {
   if (!curve || typeof curve !== 'object') return buildLUT(curve);
   const hit = _curveLutCache.get(curve);
@@ -319,7 +350,11 @@ export async function renderCanvasEngine({
 
   const tracks = tracksRaw as TimelineTrack[];
   const mediaLibrary = mediaLibraryRaw as MediaItem[];
-  const hasClips = tracks.some((t) => t.clips.length > 0);
+  // PERF: Avoid .some() closure allocation; simple loop is allocation-free.
+  let hasClips = false;
+  for (let i = 0; i < tracks.length; i++) {
+    if (tracks[i].clips.length > 0) { hasClips = true; break; }
+  }
   const isScrubbing = isScrubbingParam ?? renderDeps.isScrubbing ?? false;
 
   if (!canvas) return;
@@ -360,19 +395,40 @@ export async function renderCanvasEngine({
   // via humanDetection.ts (temporal caching, scene-change detection, downscaled inference).
   // Including them here creates a circular dependency where enabling the feature causes
   // it to skip itself during playback.
-  const activeVideoClipCount = tracks
-    .filter((t) => t.type === 'video' && !t.hidden)
-    .reduce((count, track) => {
-      const hasActive = track.clips.some(
-        (c) => !c.disabled && currentTime >= c.startTime && currentTime < c.startTime + c.duration + 0.001
-      );
-      return count + (hasActive ? 1 : 0);
-    }, 0);
+  // PERF: Use _cachedVideoTracks (rebuilt only on tracks ref change) instead of
+  // re-filtering every frame. Only the time-based active check runs per frame.
+  // Previously: filter().reduce() created a new array + closures every frame.
+  let activeVideoClipCount = 0;
+  for (let ti = 0; ti < _cachedVideoTracks.length; ti++) {
+    const vt = _cachedVideoTracks[ti];
+    for (let ci = 0; ci < vt.clips.length; ci++) {
+      const c = vt.clips[ci];
+      if (!c.disabled && currentTime >= c.startTime && currentTime < c.startTime + c.duration + 0.001) {
+        activeVideoClipCount++;
+        break; // one active clip per track is enough
+      }
+    }
+  }
+
+  // PERF: Cache LUT filter presence scan — only recomputed when tracks ref changes.
+  // Previously: nested .some().some() with closures ran O(tracks×clips) every frame.
+  if (tracks !== _cachedHasLutFilterTracksRef) {
+    _cachedHasLutFilter = false;
+    for (let ti = 0; ti < tracks.length && !_cachedHasLutFilter; ti++) {
+      for (let ci = 0; ci < tracks[ti].clips.length; ci++) {
+        if (!tracks[ti].clips[ci].disabled && tracks[ti].clips[ci].lutFilter?.mediaId) {
+          _cachedHasLutFilter = true;
+          break;
+        }
+      }
+    }
+    _cachedHasLutFilterTracksRef = tracks;
+  }
 
   const isAutoFast =
     previewMode === 'auto' &&
     isPlaying &&
-    (activeVideoClipCount > 1 || tracks.length > 5 || tracks.some(t => t.clips.some(c => !c.disabled && c.lutFilter?.mediaId)));
+    (activeVideoClipCount > 1 || tracks.length > 5 || _cachedHasLutFilter);
   // Scrubbing forces quality-2 path so heavy FX (chroma, LUT, AI bg) are skipped,
   // making playhead drag feel CapCut-smooth.
   // Adaptive performance downgrade: if rolling FPS dropped below 50 for >1.5s,
@@ -386,7 +442,8 @@ export async function renderCanvasEngine({
   // (getImageData/putImageData) during playback. These stall the GPU→CPU
   // readback pipeline on TBDR mobile GPUs (Mali, Adreno, Apple GPU),
   // causing severe frame drops. Effects still render when paused.
-  const isMobilePlaying = isPlaying && (typeof navigator !== 'undefined' && (/android/i.test(navigator.userAgent) || /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)));
+  // PERF: Use module-level _isMobileUA constant instead of 3× RegExp.test() per frame.
+  const isMobilePlaying = isPlaying && _isMobileUA;
   const skipExpensiveFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || isMobilePlaying)));
   const skipUltraHeavyFX = !isExporting && (isScrubbing || adaptiveSlowdown || (isPlaying && (previewMode === 'fast' || isAutoFast || previewQuality === 'quarter' || previewQuality === 'half' || isMobilePlaying)));
 
@@ -410,8 +467,10 @@ export async function renderCanvasEngine({
   // element wasn't ready — O(N²) inside the render loop that stalled preview on
   // heavily-split timelines.
   // The clipsById pass (O(tracks × clips)) is cached on the tracks reference;
-  // the ready-element indexes are rebuilt every render (cheap — the pool holds
-  // a handful of elements) so readiness stays fresh across async loads.
+  // PERF: The 3 video-element lookup maps are now cached on (videoElements ref +
+  // tracks ref) instead of being rebuilt as 3× new Map() every frame. This
+  // eliminates 180 GC-eligible Map allocations/sec at 60fps. The maps are
+  // .clear()-ed and refilled (zero allocation) when either ref changes.
   let splitSiblingEl: Map<string, HTMLVideoElement>;
   let mediaVideoEl: Map<string, HTMLVideoElement>;
   let trackVideoEl: Map<string, HTMLVideoElement>;
@@ -427,35 +486,43 @@ export async function renderCanvasEngine({
       _cachedClipsById = clipsById;
       _cachedClipsByIdTracksRef = tracks;
     }
-    splitSiblingEl = new Map<string, HTMLVideoElement>();
-    mediaVideoEl = new Map<string, HTMLVideoElement>();
-    trackVideoEl = new Map<string, HTMLVideoElement>();
     const activeVideoEls = videoElements && videoElements.size > 0 ? videoElements : getGlobalVideoMap();
-    for (const [otherId, otherEl] of activeVideoEls) {
-      if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
-      const oc = clipsById.get(otherId);
-      if (!oc) continue;
-      for (const track of tracks) {
-        if (track.clips.some((c) => c.id === otherId)) {
-          const tKey = `${oc.mediaId}::${track.id}`;
-          const tKey0 = `${oc.mediaId}::track:${track.id}::slot:0`;
-          const tKey1 = `${oc.mediaId}::track:${track.id}::slot:1`;
-          if (!trackVideoEl.has(tKey)) trackVideoEl.set(tKey, otherEl);
-          if (!trackVideoEl.has(tKey0)) trackVideoEl.set(tKey0, otherEl);
-          if (!trackVideoEl.has(tKey1)) trackVideoEl.set(tKey1, otherEl);
-          break;
+    if (activeVideoEls !== _cachedVideoElMapRef || tracks !== _cachedVideoElTracksRef) {
+      // Refs changed — clear and rebuild (reuses existing Map objects, zero alloc)
+      _cachedSplitSiblingEl.clear();
+      _cachedMediaVideoEl.clear();
+      _cachedTrackVideoEl.clear();
+      for (const [otherId, otherEl] of activeVideoEls) {
+        if (!otherEl || otherEl.readyState < 1 || otherEl.videoWidth === 0) continue;
+        const oc = clipsById.get(otherId);
+        if (!oc) continue;
+        for (const track of tracks) {
+          if (track.clips.some((c) => c.id === otherId)) {
+            const tKey = `${oc.mediaId}::${track.id}`;
+            const tKey0 = `${oc.mediaId}::track:${track.id}::slot:0`;
+            const tKey1 = `${oc.mediaId}::track:${track.id}::slot:1`;
+            if (!_cachedTrackVideoEl.has(tKey)) _cachedTrackVideoEl.set(tKey, otherEl);
+            if (!_cachedTrackVideoEl.has(tKey0)) _cachedTrackVideoEl.set(tKey0, otherEl);
+            if (!_cachedTrackVideoEl.has(tKey1)) _cachedTrackVideoEl.set(tKey1, otherEl);
+            break;
+          }
+        }
+        // Guard: do not use an element as a generic fallback if it is actively rendering for another clip at this exact moment
+        const isOcActive = currentTime >= oc.startTime && currentTime < oc.startTime + oc.duration + 0.001;
+        if (isOcActive) continue;
+        if (oc.splitGroupId && !_cachedSplitSiblingEl.has(oc.splitGroupId)) {
+          _cachedSplitSiblingEl.set(oc.splitGroupId, otherEl);
+        }
+        if (oc.mediaId && !_cachedMediaVideoEl.has(oc.mediaId)) {
+          _cachedMediaVideoEl.set(oc.mediaId, otherEl);
         }
       }
-      // Guard: do not use an element as a generic fallback if it is actively rendering for another clip at this exact moment
-      const isOcActive = currentTime >= oc.startTime && currentTime < oc.startTime + oc.duration + 0.001;
-      if (isOcActive) continue;
-      if (oc.splitGroupId && !splitSiblingEl.has(oc.splitGroupId)) {
-        splitSiblingEl.set(oc.splitGroupId, otherEl);
-      }
-      if (oc.mediaId && !mediaVideoEl.has(oc.mediaId)) {
-        mediaVideoEl.set(oc.mediaId, otherEl);
-      }
+      _cachedVideoElMapRef = activeVideoEls;
+      _cachedVideoElTracksRef = tracks;
     }
+    splitSiblingEl = _cachedSplitSiblingEl;
+    mediaVideoEl = _cachedMediaVideoEl;
+    trackVideoEl = _cachedTrackVideoEl;
   }
 
   const now = performance.now();
@@ -1593,12 +1660,39 @@ export async function renderCanvasEngine({
         videoEl = videoElements?.get(clip.id) || getGlobalVideoMap().get(clip.id) || null;
         if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
         if (!videoEl || videoEl.readyState < 1 || videoEl.videoWidth === 0) {
-          videoEl =
-            (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null) ||
-            (!clip.__isTransitionLayer && clip.mediaId && clip.trackId ? trackVideoEl.get(`${clip.mediaId}::${clip.trackId}`) : null) ||
-            (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null) ||
-            null;
-          if (videoEl && !(videoEl instanceof HTMLVideoElement)) videoEl = null;
+          // BUG FIX (split-then-delete): When two non-contiguous clips of the
+          // same media exist on the same track, the fallback maps (trackVideoEl,
+          // mediaVideoEl) may return the WRONG element — one that's seeked to
+          // the other clip's source time. Validate the fallback element's
+          // currentTime is close to what THIS clip needs before accepting it.
+          // A tolerance of 2s avoids rejecting elements that are being seeked.
+          const candidateEls = [
+            (!clip.__isTransitionLayer && clip.splitGroupId ? splitSiblingEl.get(clip.splitGroupId) : null),
+            (!clip.__isTransitionLayer && clip.mediaId && clip.trackId ? trackVideoEl.get(`${clip.mediaId}::${clip.trackId}`) : null),
+            (!clip.__isTransitionLayer && clip.mediaId ? mediaVideoEl.get(clip.mediaId) : null),
+          ];
+          videoEl = null;
+          for (const candidate of candidateEls) {
+            if (!candidate || !(candidate instanceof HTMLVideoElement)) continue;
+            if (candidate.readyState < 1 || candidate.videoWidth === 0) continue;
+            // Accept the candidate if its currentTime is within 2s of what this
+            // clip needs. This prevents using an element seeked to source time 0
+            // for a clip that starts at source time 7.
+            const drift = Math.abs(candidate.currentTime - mediaTime);
+            if (drift < 2.0) {
+              videoEl = candidate;
+              break;
+            }
+          }
+          // Last resort: accept ANY candidate even if drifted (better than black)
+          if (!videoEl) {
+            for (const candidate of candidateEls) {
+              if (candidate && candidate instanceof HTMLVideoElement && candidate.readyState >= 1 && candidate.videoWidth > 0) {
+                videoEl = candidate;
+                break;
+              }
+            }
+          }
         }
         if (videoEl && videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
           vw = videoEl.videoWidth;
@@ -2834,11 +2928,14 @@ export async function renderCanvasEngine({
   // never composited here, which is why they had no visible effect. A track can
   // have at most one active transition per frame (findActiveTransition enforces
   // that), so overlapping windows can't double-composite and flicker.
-  const activeTransitions = new Map<string, ActiveTransition>();
+  // PERF: Reuse module-level Map+Set instead of allocating new ones each frame.
+  _reusableActiveTransitions.clear();
+  _reusableTransitionClipIds.clear();
+  const activeTransitions = _reusableActiveTransitions;
   // Clips that are being handled by a transition; they must NOT also be drawn by
   // the normal draw queue or they'd be painted twice (once opaque), which would
   // completely hide the blend.
-  const transitionClipIds = new Set<string>();
+  const transitionClipIds = _reusableTransitionClipIds;
 
   for (const track of visualTracks) {
     const active = findActiveTransition(track.clips, currentTime);
@@ -2849,10 +2946,21 @@ export async function renderCanvasEngine({
     }
   }
 
+  // PERF: Build track-index map once per tracks ref change — O(1) lookups below.
+  // Previously tracks.findIndex() was called per-track in the draw queue = O(T²).
+  if (tracks !== _cachedTrackIndexMapRef) {
+    _cachedTrackIndexMap.clear();
+    for (let i = 0; i < tracks.length; i++) {
+      _cachedTrackIndexMap.set(tracks[i].id, i);
+    }
+    _cachedTrackIndexMapRef = tracks;
+  }
+  const trackIndexMap = _cachedTrackIndexMap;
+
   const totalTracks = tracks.length;
   const drawQueue: { clip: any; layer: number }[] = [];
   for (const track of visualTracks) {
-    const trackIdx = tracks.findIndex((t) => t.id === track.id);
+    const trackIdx = trackIndexMap.get(track.id) ?? -1;
     const trackVisualPriority = trackIdx >= 0 ? (totalTracks - trackIdx) * 10 : 0;
     const isText = track.type === 'text' || track.id.startsWith('text');
 
@@ -2871,9 +2979,9 @@ export async function renderCanvasEngine({
   // Queue the transition pass at the owning track's layer so z-ordering against
   // text/PiP layers is preserved.
   for (const [trackId, active] of activeTransitions) {
-    const trackIdx = tracks.findIndex((t) => t.id === trackId);
+    const trackIdx = trackIndexMap.get(trackId) ?? -1;
     const trackVisualPriority = trackIdx >= 0 ? (totalTracks - trackIdx) * 10 : 0;
-    const ownerTrack = tracks[trackIdx];
+    const ownerTrack = trackIdx >= 0 ? tracks[trackIdx] : null;
     const isText = ownerTrack ? (ownerTrack.type === 'text' || ownerTrack.id.startsWith('text')) : trackId.startsWith('text');
     drawQueue.push({
       clip: { __transition: active, id: `__transition_${trackId}` },
@@ -2883,8 +2991,12 @@ export async function renderCanvasEngine({
 
   // Also collect active clips inside PiP Windows attached to active timeline clips
   // PERF: read pipWindows from the snapshot captured at frame start.
+  // PERF: Use for-in instead of Object.keys().length — avoids allocating a new array
+  // every frame just to check emptiness.
   const activePipWindows = storeState.pipWindows || {};
-  if (activePipWindows && Object.keys(activePipWindows).length > 0) {
+  let hasPipWindows = false;
+  for (const _k in activePipWindows) { hasPipWindows = true; break; }
+  if (hasPipWindows) {
     for (const pip of Object.values(activePipWindows) as any[]) {
       if (!pip || !pip.tracks) continue;
       let parentClip: any = null;

@@ -1374,6 +1374,15 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
     // and received a splitGroupId, or a gap was created and it became dedicated),
     // migrate its video element in mediaVideoEls and update its stored shareKey
     // BEFORE allocating new elements. Also ensure videoMap is populated.
+    //
+    // BUG FIX (split-then-delete): When two clips were sharing ONE <video>
+    // element (contiguous splits) and the middle clip is deleted, they get
+    // different shareKeys (slot:0 vs slot:1). The reconcile MUST detect that
+    // another pool entry still owns the same physical element under the OLD key
+    // and DETACH this clip — forcing fresh element allocation below.
+    // Without this, both clips fight over one element's currentTime and the
+    // canvas shows wrong frames for one of them.
+    const needsFreshElement = new Set<string>();
     for (const [clipId, info] of neededClips) {
       const existing = pool.get(clipId);
       if (existing && existing.type === 'video') {
@@ -1381,6 +1390,17 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
         const newKey = info.shareKey;
         if (oldKey && oldKey !== newKey) {
           const el = existing.el as HTMLVideoElement;
+          // Check if another pool entry still holds the SAME physical element
+          // under a DIFFERENT shareKey. If so, this clip must get a NEW element.
+          let anotherClipOwnsElement = false;
+          for (const [otherId, otherEntry] of pool) {
+            if (otherId === clipId) continue;
+            if (otherEntry.type === 'video' && otherEntry.el === el && neededClips.has(otherId)) {
+              anotherClipOwnsElement = true;
+              break;
+            }
+          }
+
           const oldCount = mediaVideoRefCount.get(oldKey) ?? 1;
           if (oldCount <= 1) {
             mediaVideoRefCount.delete(oldKey);
@@ -1388,15 +1408,28 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           } else {
             mediaVideoRefCount.set(oldKey, oldCount - 1);
           }
-          if (!mediaVideoEls.has(newKey)) {
-            mediaVideoEls.set(newKey, el);
+
+          if (anotherClipOwnsElement) {
+            // DETACH: another clip owns this element — remove this clip from pool
+            // so the creation code below allocates a fresh dedicated element.
+            // The element itself stays alive for the other clip's pool entry.
+            if (existing._handleSeeked) el.removeEventListener('seeked', existing._handleSeeked);
+            pool.delete(clipId);
+            videoMap.delete(clipId);
+            needsFreshElement.add(clipId);
+          } else {
+            if (!mediaVideoEls.has(newKey)) {
+              mediaVideoEls.set(newKey, el);
+            }
+            mediaVideoRefCount.set(newKey, (mediaVideoRefCount.get(newKey) ?? 0) + 1);
+            existing._shareKey = newKey;
           }
-          mediaVideoRefCount.set(newKey, (mediaVideoRefCount.get(newKey) ?? 0) + 1);
-          existing._shareKey = newKey;
         }
-        existing._shareStart = info.start;
-        existing._shareEnd = info.end;
-        videoMap.set(clipId, existing.el as HTMLVideoElement);
+        if (pool.has(clipId)) {
+          existing._shareStart = info.start;
+          existing._shareEnd = info.end;
+          videoMap.set(clipId, existing.el as HTMLVideoElement);
+        }
       }
     }
 
@@ -2131,10 +2164,24 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const tKeyDirect = `${clip.mediaId}::track:${clip.trackId}`;
           const existingEl = mediaVideoEls.get(tKey0) || mediaVideoEls.get(tKey1) || mediaVideoEls.get(tKeyDirect);
           if (existingEl) {
-            entry = { el: existingEl, clipId: clip.clipId, mediaId: clip.mediaId, type: clip.trackType };
-            pool.set(clip.clipId, entry);
-            if (clip.trackType === 'video') {
-              videoMapRef.current.set(clip.clipId, existingEl as HTMLVideoElement);
+            // BUG FIX: Do NOT reuse this element if another ACTIVE clip in the
+            // pool already owns it. This prevents two non-contiguous split clips
+            // from fighting over one element's currentTime.
+            let elementOwnedByAnother = false;
+            for (const activeClip of clips) {
+              if (activeClip.clipId === clip.clipId) continue;
+              const otherEntry = pool.get(activeClip.clipId);
+              if (otherEntry && otherEntry.el === existingEl) {
+                elementOwnedByAnother = true;
+                break;
+              }
+            }
+            if (!elementOwnedByAnother) {
+              entry = { el: existingEl, clipId: clip.clipId, mediaId: clip.mediaId, type: clip.trackType };
+              pool.set(clip.clipId, entry);
+              if (clip.trackType === 'video') {
+                videoMapRef.current.set(clip.clipId, existingEl as HTMLVideoElement);
+              }
             }
           }
         }
