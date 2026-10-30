@@ -1197,7 +1197,7 @@ export type EditorTool =
   | 'trackSelectBackward' // select all clips on track to the left
   | 'split'             // razor / split at playhead
   | 'slide';            // slide clip within gap
-export type MediaTab = 'project' | 'stock' | 'ai' | 'audio' | 'text' | 'fx' | 'transitions' | 'effects' | 'elements' | 'templates' | 'lut';
+export type MediaTab = 'project' | 'stock' | 'ai' | 'audio' | 'text' | 'fx' | 'transitions' | 'effects' | 'elements' | 'templates' | 'lut' | 'bgm';
 export type PropertiesTab = 'transform' | 'mask' | 'color' | 'speed' | 'audio' | 'text' | 'effects' | 'ai' | 'thumbnail' | 'pip' | 'element';
 
 // ─── Editor Settings ──────────────────────────────────────────────────────

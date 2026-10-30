@@ -60,6 +60,7 @@ import {
   Shapes,
   Award,
   LayoutTemplate,
+  Headphones,
 } from 'lucide-react';
 import { TemplatesTab } from './tabs/TemplatesTab';
 import React, { useState, useRef, useCallback, useEffect, Fragment, useMemo } from 'react';
@@ -85,6 +86,7 @@ import { generateCombinedSfx } from '@/utils/elevenLabsClient';
 const AiSoundDesigner = React.lazy(() => import('../AiSoundDesigner').then(m => ({ default: m.AiSoundDesigner })));
 const AIGeneratorModal = React.lazy(() => import('../AIGeneratorModal').then(m => ({ default: m.AIGeneratorModal })));
 const AutoVideoModal = React.lazy(() => import('../AutoVideoModal').then(m => ({ default: m.AutoVideoModal })));
+const BGMDesignerTab = React.lazy(() => import('./tabs/BGMDesignerTab').then(m => ({ default: m.BGMDesignerTab })));
 // Timeline FX — dragged to FX tracks. type field maps to PreviewCanvas fxType.
 // Color Correction — dragged to a video/image clip to apply that preset
 // Particle Effects — dragged to a video/image/FX clip
@@ -1029,6 +1031,7 @@ export function MediaPanel() {
     { id: 'transitions', label: 'Transitions', icon: Sparkles },
     { id: 'templates', label: 'Templates', icon: LayoutTemplate },
     { id: 'elements', label: 'Elements', icon: Shapes },
+    { id: 'bgm', label: 'BGM', icon: Headphones },
   ];
 
   const filteredMedia = useMemo(() => mediaLibrary.filter((m) => {
@@ -1480,6 +1483,8 @@ export function MediaPanel() {
                 ? 'Elements'
                 : (activeMediaTab === 'fx' || activeMediaTab === 'effects')
                 ? 'FX Effects'
+                : activeMediaTab === 'bgm'
+                ? 'BGM Designer'
                 : activeMediaTab}
             </h2>
             {activeMediaTab === 'project' && (
@@ -3677,6 +3682,12 @@ export function MediaPanel() {
             </div>
           );
         })()}
+
+        {activeMediaTab === 'bgm' && (
+          <React.Suspense fallback={<div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-violet-400" /></div>}>
+            <BGMDesignerTab />
+          </React.Suspense>
+        )}
 
       </div>
 
