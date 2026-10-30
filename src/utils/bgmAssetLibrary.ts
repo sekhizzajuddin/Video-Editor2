@@ -714,7 +714,7 @@ export const BGM_ASSET_LIBRARY: BGMAsset[] = [
         const osc = ctx.createOscillator(); const g = ctx.createGain();
         osc.type = 'sawtooth'; osc.frequency.value = f;
         const now = ctx.currentTime;
-        const dist = ctx.createWaveShaperNode();
+        const dist = ctx.createWaveShaper();
         const k = 50; const n = 44100;
         const curve = new Float32Array(n);
         for (let i = 0; i < n; i++) { const x = i * 2 / n - 1; curve[i] = (3 + k) * x * 20 * (Math.PI / 180) / (Math.PI + k * Math.abs(x)); }
