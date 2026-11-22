@@ -2397,6 +2397,11 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
                 warmthFilter: entry.warmthFilter,
                 delayNode: entry.delayNode,
                 delayGain: entry.delayGain,
+                reverbDryGain: entry.reverbDryGain,
+                reverbWetGain: entry.reverbWetGain,
+                convolverNode: entry.convolverNode,
+                reverbPreFilter: entry.reverbPreFilter,
+                _lastReverbKey: entry._lastReverbKey,
               };
             }
           }
@@ -2996,13 +3001,28 @@ export function useMediaPlayback(isController: boolean = true): MediaPlaybackRes
           const roomSize = reverb?.roomSize ?? 50;
           const qKey = `${Math.round(decay * 10)}_${Math.round(damping / 5)}_${Math.round(preDelay / 5)}_${Math.round(roomSize / 10)}`;
 
-          if (entry._lastReverbKey !== qKey) {
-            entry._lastReverbKey = qKey;
+          if (entry._lastReverbKey !== qKey || !entry.convolverNode.buffer) {
             try {
               const impulseBuf = generateReverbImpulse(entry.audioCtx, decay, damping, preDelay, roomSize);
               entry.convolverNode.buffer = impulseBuf;
+              entry._lastReverbKey = qKey;
             } catch (err) {
-              console.warn('[useMediaPlayback] Failed to set reverb buffer:', err);
+              try {
+                // If browser rejects buffer reassignment on existing ConvolverNode, recreate and rewire it
+                entry.convolverNode.disconnect();
+                if (entry.reverbPreFilter) {
+                  try { entry.reverbPreFilter.disconnect(entry.convolverNode); } catch {}
+                }
+                const newConv = entry.audioCtx.createConvolver();
+                const impulseBuf = generateReverbImpulse(entry.audioCtx, decay, damping, preDelay, roomSize);
+                newConv.buffer = impulseBuf;
+                if (entry.reverbPreFilter) entry.reverbPreFilter.connect(newConv);
+                newConv.connect(entry.reverbWetGain);
+                entry.convolverNode = newConv;
+                entry._lastReverbKey = qKey;
+              } catch (recreateErr) {
+                console.warn('[useMediaPlayback] Failed to set reverb buffer:', err, recreateErr);
+              }
             }
           }
         }

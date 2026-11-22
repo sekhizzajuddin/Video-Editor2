@@ -5,6 +5,7 @@ import { timeStretchAudioBuffer } from '@/utils/audio/wsola';
 import { normalizeTransition, getTransitionWindow, type TransitionAlignment } from '@/utils/transitionEngine';
 import { synthesizeTransitionSoundWav } from '@/timeline/sfxSynth';
 import { getFileFromDB } from '@/utils/projectPersistence';
+import { generateReverbImpulse } from '@/utils/reverbDsp';
 
 export class AudioMixer {
   private sampleRate = 48000;
@@ -24,19 +25,22 @@ export class AudioMixer {
       if (timeline.media) {
         for (const m of timeline.media) {
           mediaMap.set(m.id, m);
+          if (m.url) mediaMap.set(m.url, m);
         }
       }
 
       // Iterate through all clips to find ones with audio
       const audioClips: any[] = [];
       const addClipWithAudio = (clip: any, track: any, trackVolume: number, absStartTime: number) => {
-        const media = mediaMap.get(clip.mediaId);
-        if ((media?.url || media?._fileBlob) && !clip.audioSettings?.muted) {
+        const media = mediaMap.get(clip.mediaId) || (clip.mediaId ? mediaMap.get(clip.mediaId) : null);
+        const resolvedUrl = media?.url || (clip as any).url || (clip as any).src || (clip as any)._url;
+        const resolvedBlob = media?._audioBlob || media?._fileBlob || (clip as any)._blob;
+        if ((resolvedUrl || resolvedBlob) && !clip.audioSettings?.muted && !clip.disabled) {
           audioClips.push({
             ...clip,
             startTime: absStartTime,
-            _url: media.url,
-            _blob: media._audioBlob || media._fileBlob,
+            _url: resolvedUrl,
+            _blob: resolvedBlob,
             _trackVolume: trackVolume,
           });
         }
@@ -177,9 +181,24 @@ export class AudioMixer {
           const cacheKey = clip.mediaId || clip._url || (clip._blob ? (clip as any).id : null);
           let audioBuffer: AudioBuffer | undefined = cacheKey ? decodedAudioCache.get(cacheKey) : undefined;
           if (!audioBuffer) {
-            const arrayBuffer = clip._blob instanceof Blob
-              ? await clip._blob.arrayBuffer()
-              : await (await fetch(clip._url)).arrayBuffer();
+            let arrayBuffer: ArrayBuffer | null = null;
+            if (clip._blob instanceof Blob) {
+              arrayBuffer = await clip._blob.arrayBuffer();
+            } else if (clip._url) {
+              try {
+                const res = await fetch(clip._url);
+                arrayBuffer = await res.arrayBuffer();
+              } catch {
+                if (clip.mediaId) {
+                  const dbBlob = await getFileFromDB(clip.mediaId);
+                  if (dbBlob) arrayBuffer = await dbBlob.arrayBuffer();
+                }
+              }
+            } else if (clip.mediaId) {
+              const dbBlob = await getFileFromDB(clip.mediaId);
+              if (dbBlob) arrayBuffer = await dbBlob.arrayBuffer();
+            }
+            if (!arrayBuffer) continue;
             audioBuffer = await ctx.decodeAudioData(arrayBuffer);
             if (cacheKey && audioBuffer) {
               decodedAudioCache.set(cacheKey, audioBuffer);
@@ -258,15 +277,25 @@ export class AudioMixer {
             }
           }
 
-          // Preserve clip pan and basic bass/treble edits in the final mix.
+          // Preserve clip pan, full EQ (bass/mid/treble), vocal tone, and Reverb DSP in the final mix.
           const bass = ctx.createBiquadFilter();
           bass.type = 'lowshelf';
           bass.frequency.value = 200;
-          bass.gain.value = clip.audioSettings?.bass || 0;
+          const baseBass = (clip.audioSettings?.bass || 0) + (clip.audioSettings?.humanize ? 1.5 : 0);
+          bass.gain.value = Math.max(-15, Math.min(15, baseBass));
+
+          const mid = ctx.createBiquadFilter();
+          mid.type = 'peaking';
+          mid.frequency.value = 1000;
+          mid.Q.value = 1.0;
+          mid.gain.value = Math.max(-15, Math.min(15, clip.audioSettings?.mid ?? 0));
+
           const treble = ctx.createBiquadFilter();
           treble.type = 'highshelf';
           treble.frequency.value = 3000;
-          treble.gain.value = clip.audioSettings?.treble || 0;
+          const baseTreble = (clip.audioSettings?.treble || 0) + (clip.audioSettings?.humanize ? 1.0 : 0);
+          treble.gain.value = Math.max(-15, Math.min(15, baseTreble));
+
           const formantVal = effectiveVocalFormant(clip.audioSettings);
           const vocalF1 = ctx.createBiquadFilter();
           vocalF1.type = 'peaking';
@@ -289,13 +318,52 @@ export class AudioMixer {
           vocalF1.connect(vocal);
           vocal.connect(vocalF3);
           vocalF3.connect(bass);
-          bass.connect(treble);
+          bass.connect(mid);
+          mid.connect(treble);
           treble.connect(gainNode);
+
+          let outputNode: AudioNode = gainNode;
           if (panner) {
             gainNode.connect(panner);
-            panner.connect(ctx.destination);
+            outputNode = panner;
+          }
+
+          // Reverb & Acoustic Environment DSP Path in final exported mix
+          const reverb = clip.audioSettings?.reverb;
+          const isReverbActive = Boolean(reverb?.enabled && (reverb.mix ?? 0) > 0);
+
+          if (isReverbActive) {
+            const wetFrac = Math.max(0, Math.min(1, (reverb?.mix ?? 0) / 100));
+            const dryGain = ctx.createGain();
+            const wetGain = ctx.createGain();
+            dryGain.gain.value = Math.cos(wetFrac * Math.PI * 0.5);
+            wetGain.gain.value = Math.sin(wetFrac * Math.PI * 0.5);
+
+            const convolver = ctx.createConvolver();
+            const decay = reverb?.decay ?? 1.5;
+            const damping = reverb?.damping ?? 40;
+            const preDelay = reverb?.preDelay ?? 20;
+            const roomSize = reverb?.roomSize ?? 50;
+            convolver.buffer = generateReverbImpulse(ctx, decay, damping, preDelay, roomSize);
+
+            const preFilter = ctx.createBiquadFilter();
+            if (reverb?.preset === 'telephone') {
+              preFilter.type = 'bandpass';
+              preFilter.frequency.value = 1500;
+              preFilter.Q.value = 1.0;
+            } else {
+              preFilter.type = 'allpass';
+            }
+
+            outputNode.connect(dryGain);
+            outputNode.connect(preFilter);
+            preFilter.connect(convolver);
+            convolver.connect(wetGain);
+
+            dryGain.connect(ctx.destination);
+            wetGain.connect(ctx.destination);
           } else {
-            gainNode.connect(ctx.destination);
+            outputNode.connect(ctx.destination);
           }
 
           if (speedSegments && speedSegments.length > 0) {

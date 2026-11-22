@@ -168,7 +168,11 @@ export function MobilePropertiesSheet({ category, onClose }: MobilePropertiesShe
     onBassChange: (v: number) => updateClip(clip.id, { audioSettings: { ...clip.audioSettings, bass: v } as any }),
     onMidChange: (v: number) => updateClip(clip.id, { audioSettings: { ...clip.audioSettings, mid: v } as any }),
     onTrebleChange: (v: number) => updateClip(clip.id, { audioSettings: { ...clip.audioSettings, treble: v } as any }),
-    handleAudioChange: (key: string, val: any) => updateClip(clip.id, { audioSettings: { ...clip.audioSettings, [key]: val } as any }),
+    handleAudioChange: (key: string, val: any) => {
+      const live = useEditorStore.getState().tracks.flatMap((t) => t.clips || []).find((c) => c.id === clip.id);
+      const cur = live?.audioSettings || clip.audioSettings || {};
+      updateClip(clip.id, { audioSettings: { ...cur, [key]: val } as any });
+    },
   };
 
   return (

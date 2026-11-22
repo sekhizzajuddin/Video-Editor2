@@ -56,9 +56,43 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
         // Clamp just like in preview player to prevent clipping
         gainNode.gain.value = Math.max(0, Math.min(1, linearGain * storeLinearGain));
 
+        // Equalizer DSP Filter Chain (Bass Low-shelf, Mid Peaking, Treble High-shelf)
+        const bassFilter = offlineCtx.createBiquadFilter();
+        bassFilter.type = 'lowshelf';
+        bassFilter.frequency.value = 200;
+        const baseBass = (clip.audioSettings?.bass || 0) + (clip.audioSettings?.humanize ? 1.5 : 0);
+        bassFilter.gain.value = Math.max(-15, Math.min(15, baseBass));
+
+        const midFilter = offlineCtx.createBiquadFilter();
+        midFilter.type = 'peaking';
+        midFilter.frequency.value = 1000;
+        midFilter.Q.value = 1.0;
+        midFilter.gain.value = Math.max(-15, Math.min(15, clip.audioSettings?.mid ?? 0));
+
+        const trebleFilter = offlineCtx.createBiquadFilter();
+        trebleFilter.type = 'highshelf';
+        trebleFilter.frequency.value = 3000;
+        const baseTreble = (clip.audioSettings?.treble || 0) + (clip.audioSettings?.humanize ? 1.0 : 0);
+        trebleFilter.gain.value = Math.max(-15, Math.min(15, baseTreble));
+
+        bassFilter.connect(midFilter);
+        midFilter.connect(trebleFilter);
+        trebleFilter.connect(gainNode);
+
         const reverb = clip.audioSettings?.reverb;
-        if (reverb?.enabled && (reverb.mix ?? 0) > 0) {
-          const wetFrac = Math.max(0, Math.min(1, reverb.mix / 100));
+        const isReverbActive = Boolean(reverb?.enabled && (reverb.mix ?? 0) > 0);
+
+        const panner = typeof offlineCtx.createStereoPanner === 'function' ? offlineCtx.createStereoPanner() : null;
+        if (panner) panner.pan.value = Math.max(-1, Math.min(1, (clip.audioSettings?.pan || 0) / 100));
+
+        let outputNode: AudioNode = gainNode;
+        if (panner) {
+          gainNode.connect(panner);
+          outputNode = panner;
+        }
+
+        if (isReverbActive) {
+          const wetFrac = Math.max(0, Math.min(1, (reverb?.mix ?? 0) / 100));
           const dryGain = offlineCtx.createGain();
           const wetGain = offlineCtx.createGain();
           dryGain.gain.value = Math.cos(wetFrac * Math.PI * 0.5);
@@ -67,19 +101,29 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
           const convolver = offlineCtx.createConvolver();
           convolver.buffer = generateReverbImpulse(
             offlineCtx,
-            reverb.decay ?? 1.5,
-            reverb.damping ?? 40,
-            reverb.preDelay ?? 20,
-            reverb.roomSize ?? 50
+            reverb?.decay ?? 1.5,
+            reverb?.damping ?? 40,
+            reverb?.preDelay ?? 20,
+            reverb?.roomSize ?? 50
           );
 
-          gainNode.connect(dryGain);
-          gainNode.connect(convolver);
+          const preFilter = offlineCtx.createBiquadFilter();
+          if (reverb?.preset === 'telephone') {
+            preFilter.type = 'bandpass';
+            preFilter.frequency.value = 1500;
+            preFilter.Q.value = 1.0;
+          } else {
+            preFilter.type = 'allpass';
+          }
+
+          outputNode.connect(dryGain);
+          outputNode.connect(preFilter);
+          preFilter.connect(convolver);
           convolver.connect(wetGain);
           dryGain.connect(offlineCtx.destination);
           wetGain.connect(offlineCtx.destination);
         } else {
-          gainNode.connect(offlineCtx.destination);
+          outputNode.connect(offlineCtx.destination);
         }
         
         const speedSegments = (clip.speedFrames && clip.speedFrames.length > 0)
@@ -110,7 +154,7 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
                 const segSource = offlineCtx.createBufferSource();
                 segSource.buffer = decodedBuffer;
                 segSource.playbackRate.value = segSpeed;
-                segSource.connect(gainNode);
+                segSource.connect(bassFilter);
                 segSource.start(segScheduleTime, segSourceOffset, segBufferDuration);
                 hasActiveAudio = true;
               } catch (segErr) {
@@ -122,7 +166,7 @@ export async function* streamAudioChunks(opts: AudioExportOptions): AsyncGenerat
           const source = offlineCtx.createBufferSource();
           source.buffer = decodedBuffer;
           source.playbackRate.value = clip.speed || 1;
-          source.connect(gainNode);
+          source.connect(bassFilter);
 
           // Calculate precise trim and timeline placement
           const scheduleTime = Math.max(0, clip.startTime - opts.startAt);

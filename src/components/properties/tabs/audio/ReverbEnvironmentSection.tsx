@@ -61,6 +61,9 @@ export function ReverbEnvironmentSection({
       enabled: partial.enabled !== undefined ? partial.enabled : true,
     };
     handleAudioChange('reverb', updated);
+    if (updated.preset) {
+      handleAudioChange('environment', { preset: updated.preset, intensity: updated.mix });
+    }
     scheduleSaveSnapshot();
   };
 
@@ -69,12 +72,15 @@ export function ReverbEnvironmentSection({
     if (!preset) return;
 
     if (preset.id === 'none') {
-      updateReverb({
+      const drySettings: ClipReverbSettings = {
+        ...DEFAULT_REVERB_SETTINGS,
         enabled: false,
         preset: 'none',
         mix: 0,
-      });
+      };
+      handleAudioChange('reverb', drySettings);
       handleAudioChange('environment', { preset: 'none', intensity: 0 });
+      scheduleSaveSnapshot();
       toast.info('Audio Reverb / Environment Bypassed (Dry)');
       return;
     }
